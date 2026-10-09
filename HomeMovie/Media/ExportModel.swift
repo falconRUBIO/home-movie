@@ -1,0 +1,97 @@
+import SwiftUI
+import AVFoundation
+import Photos
+import UIKit
+
+@MainActor final class ExportModel: ObservableObject {
+    @Published var running = false
+    @Published var progress = 0.0
+    @Published var exportedURL: URL?
+    @Published var error: String?
+    @Published var notice: String?
+    private var session: AVAssetExportSession?
+    private var job: Task<Void, Never>?
+    private var backgroundObserver: NSObjectProtocol?
+    private var committedRevision: Int?
+    private var committedMovieID: UUID?
+    init() {
+        backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.running else { return }
+                self.notice = "Export paused by leaving the app. Keep Home Movie open and export again."
+                self.cancel()
+            }
+        }
+    }
+    deinit { if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) } }
+    func start(movie: Movie, app: AppModel) {
+        guard !running else { return }
+        if committedMovieID == movie.id, committedRevision == movie.revision,
+           let exportedURL, FileManager.default.fileExists(atPath: exportedURL.path) { return }
+        exportedURL = nil; running = true; progress = 0; error = nil; notice = nil
+        job = Task {
+            var output: URL?
+            do {
+                guard movie.duration.isNumeric, movie.duration.seconds.isFinite, movie.duration.seconds > 0 else {
+                    throw HomeMovieError.message("The movie has no valid playable duration.")
+                }
+                let seconds = movie.duration.seconds
+                let directory = URL.cachesDirectory.appendingPathComponent("Exports", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let prefix = "\(movie.id)-r\(movie.revision)-"
+                let candidates = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                for candidate in candidates where candidate.lastPathComponent.hasPrefix(prefix) && candidate.pathExtension == "mp4" {
+                    try Task.checkCancellation()
+                    if let info = try? await MediaInspector.inspect(candidate), abs(info.duration.seconds - seconds) < 0.15,
+                       abs(info.size.width - movie.format.canvas.width) < 1, abs(info.size.height - movie.format.canvas.height) < 1 {
+                        try Task.checkCancellation()
+                        exportedURL = candidate; committedRevision = movie.revision; committedMovieID = movie.id
+                        progress = 1; running = false; job = nil; return
+                    }
+                }
+                try await app.store.requireSpace(bytes: Int64(min(seconds * 2_000_000, Double(Int64.max / 2))) + 300_000_000)
+                let bundle = try await app.assembler.build(movie: movie, root: app.store.root)
+                try Task.checkCancellation()
+                guard let export = AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality), export.supportedFileTypes.contains(.mp4) else {
+                    throw HomeMovieError.message("MP4 export is not supported for this movie.")
+                }
+                session = export; export.videoComposition = bundle.videoComposition
+                export.shouldOptimizeForNetworkUse = true
+                let destination = directory.appendingPathComponent("\(movie.id)-r\(movie.revision)-\(UUID()).mp4")
+                output = destination
+                let progressTask = Task { [weak self] in
+                    for await state in export.states(updateInterval: 0.2) {
+                        if Task.isCancelled { break }
+                        if case .exporting(let progress) = state { self?.progress = progress.fractionCompleted }
+                    }
+                }
+                defer { progressTask.cancel() }
+                try await export.export(to: destination, as: .mp4)
+                try Task.checkCancellation()
+                let info = try await MediaInspector.inspect(destination)
+                guard abs(info.duration.seconds - bundle.duration.seconds) < 0.15,
+                      abs(info.size.width - movie.format.canvas.width) < 1,
+                      abs(info.size.height - movie.format.canvas.height) < 1 else {
+                    throw HomeMovieError.message("The exported duration or frame size did not match your movie. Please try again.")
+                }
+                exportedURL = destination; committedRevision = movie.revision; committedMovieID = movie.id; progress = 1
+            } catch {
+                if let output { try? FileManager.default.removeItem(at: output) }
+                if !(error is CancellationError) && notice == nil { self.error = error.localizedDescription }
+            }
+            session = nil; running = false; job = nil
+        }
+    }
+    func cancel() { if running && notice == nil { notice = "Export canceled. Your original scenes are safe." }; job?.cancel() }
+    func saveToPhotos() async {
+        guard let exportedURL else { return }
+        let authorization = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard authorization == .authorized || authorization == .limited else { error = "Allow Home Movie to add videos to Photos in Settings, or save to Files instead."; return }
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: exportedURL)
+            }
+            notice = "Saved to Photos. You can keep adding to your movie."
+        } catch { self.error = error.localizedDescription }
+    }
+}

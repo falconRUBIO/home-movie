@@ -1,0 +1,58 @@
+# Template: set your registered bundle ID in both locations below.
+# Add an App Store Connect integration named home-movie in Codemagic.
+workflows:
+  validate-ios:
+    name: Compile and test Home Movie
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      xcode: latest
+    scripts:
+      - name: Generate project
+        script: python3 scripts/generate_project.py
+      - name: Run simulator tests
+        script: bash scripts/test_simulator.sh
+    artifacts:
+      - build/TestResults.xcresult
+      - /tmp/xcodebuild_logs/*.log
+  testflight-internal:
+    name: Home Movie internal TestFlight beta
+    instance_type: mac_mini_m2
+    max_build_duration: 90
+    integrations:
+      app_store_connect: home-movie
+    environment:
+      xcode: latest
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.example.HomeMovie
+      vars:
+        BUNDLE_ID: com.example.HomeMovie
+        BUILD_NUMBER_OFFSET: "0"
+    scripts:
+      - name: Configure project
+        script: |
+          set -euo pipefail
+          if [[ "$BUNDLE_ID" == com.example.* ]]; then
+            echo "Set your registered bundle identifier in both YAML locations first."
+            exit 1
+          fi
+          export BUILD_NUMBER=$((CM_BUILD_NUMBER + BUILD_NUMBER_OFFSET + 1))
+          python3 scripts/generate_project.py
+      - name: Require passing tests
+        script: bash scripts/test_simulator.sh
+      - name: Apply signing profiles
+        script: |
+          xcode-project use-profiles --custom-export-options='{"testFlightInternalTestingOnly": true}'
+      - name: Build signed IPA
+        script: |
+          xcode-project build-ipa --project HomeMovie.xcodeproj --scheme HomeMovie
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - build/TestResults.xcresult
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+        submit_to_app_store: false

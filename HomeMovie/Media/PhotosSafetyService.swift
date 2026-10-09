@@ -1,0 +1,30 @@
+import Foundation
+import Photos
+
+private final class PhotoReceipt: @unchecked Sendable {
+    private let lock = NSLock()
+    private var identifier: String?
+    func set(_ value: String?) { lock.lock(); defer { lock.unlock() }; identifier = value }
+    func get() -> String? { lock.lock(); defer { lock.unlock() }; return identifier }
+}
+actor PhotosSafetyService {
+    private var copying: Set<UUID> = []
+    func authorize() async -> Bool {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        return status == .authorized || status == .limited
+    }
+    func copy(scene: Scene, store: ProjectStore) async throws {
+        guard scene.photosAssetID == nil, !copying.contains(scene.id) else { return }
+        let current = await store.snapshot().flatMap(\.scenes).first { $0.id == scene.id }
+        guard let current, current.photosAssetID == nil, !copying.contains(scene.id) else { return }
+        copying.insert(scene.id); defer { copying.remove(scene.id) }
+        guard await authorize() else { throw HomeMovieError.message("Photos copy is not enabled by permission. The scene remains saved in Home Movie.") }
+        let source = try await store.url(scene.source), receipt = PhotoReceipt()
+        try await PHPhotoLibrary.shared().performChanges {
+            let request = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: source)
+            receipt.set(request?.placeholderForCreatedAsset?.localIdentifier)
+        }
+        guard let identifier = receipt.get() else { throw HomeMovieError.message("Photos did not return a saved-copy receipt. Your original scene is still saved on this iPhone.") }
+        try await store.markPhotosCopy(sceneID: scene.id, assetID: identifier)
+    }
+}

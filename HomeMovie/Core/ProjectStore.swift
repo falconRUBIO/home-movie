@@ -1,0 +1,308 @@
+import Foundation
+import AVFoundation
+
+actor ProjectStore {
+    let root: URL
+    private var catalog = Catalog()
+    private var loaded = false
+    private var maintenance = false
+    private var cleanedTransfers = false
+    private let fm = FileManager.default
+    private var encoder: JSONEncoder { let e = JSONEncoder(); e.outputFormatting = [.sortedKeys]; return e }
+
+    init(root: URL? = nil) {
+        self.root = root ?? URL.applicationSupportDirectory.appendingPathComponent("HomeMovie", isDirectory: true)
+    }
+    func url(_ relative: String) throws -> URL {
+        guard !relative.hasPrefix("/"), !relative.split(separator: "/").contains("..") else {
+            throw HomeMovieError.message("Invalid project file path.")
+        }
+        return root.appendingPathComponent(relative)
+    }
+    private func ensureDirectories() throws {
+        for folder in ["", "Staging", "Originals", "Journal", "Recovery"] {
+            let directory = root.appendingPathComponent(folder)
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+            try fm.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: directory.path)
+        }
+    }
+    private func validate(_ value: Catalog) throws {
+        let scenes = value.movies.flatMap(\.scenes)
+        guard Set(value.movies.map(\.id)).count == value.movies.count,
+              Set(scenes.map(\.id)).count == scenes.count else { throw HomeMovieError.message("The catalog contains duplicate identifiers. Its file has been preserved.") }
+        for movie in value.movies {
+            guard !movie.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  movie.revision >= 0 && movie.revision < Int.max,
+                  Set(movie.scenes.map(\.sequence)).count == movie.scenes.count else {
+                throw HomeMovieError.message("The movie catalog is inconsistent. Its file has been preserved.")
+            }
+            for scene in movie.scenes {
+                guard scene.validTrim, scene.sequence >= 0 && scene.sequence < 1_000_000_000,
+                      scene.source == "Originals/\(scene.id.uuidString).mov",
+                      scene.width.isFinite && scene.height.isFinite && scene.width > 0 && scene.height > 0 && scene.bytes >= 0 else {
+                    throw HomeMovieError.message("A scene has invalid metadata. The catalog has been preserved.")
+                }
+            }
+        }
+    }
+    private func write(_ value: Catalog) throws {
+        try validate(value)
+        let current = root.appendingPathComponent("catalog.json")
+        if loaded {
+            try encoder.encode(catalog).write(to: root.appendingPathComponent("catalog.previous.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
+        try encoder.encode(value).write(to: current, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        catalog = value
+    }
+    private func index(_ id: UUID) throws -> Int {
+        guard let i = catalog.movies.firstIndex(where: { $0.id == id }) else { throw HomeMovieError.message("This movie is no longer available.") }
+        return i
+    }
+    func load() async throws -> [String] {
+        guard !loaded else { return [] }
+        try ensureDirectories()
+        if !cleanedTransfers {
+            // These are app-owned temporary copies, never the source recordings.
+            for folder in ["RestoreStaging", "OutgoingBackups"] {
+                let directory = root.appendingPathComponent(folder)
+                if let items = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey]) {
+                    for item in items {
+                        let complete = fm.fileExists(atPath: item.appendingPathComponent("manifest.json").path)
+                        let created = (try? item.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+                        if folder == "RestoreStaging" || !complete || created < Date().addingTimeInterval(-7 * 24 * 60 * 60) {
+                            try? fm.removeItem(at: item)
+                        }
+                    }
+                }
+            }
+            cleanedTransfers = true
+        }
+        let path = root.appendingPathComponent("catalog.json")
+        if fm.fileExists(atPath: path.path) {
+            // A damaged or newer manifest must never be overwritten by an empty catalog.
+            catalog = try JSONDecoder().decode(Catalog.self, from: Data(contentsOf: path))
+            guard catalog.schemaVersion == 1 else { throw HomeMovieError.message("This project uses a newer version of Home Movie.") }
+            try validate(catalog)
+        } else { try write(catalog) }
+        var notices: [String] = []
+        let journalFiles = try fm.contentsOfDirectory(at: root.appendingPathComponent("Journal"), includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" }
+        var pending: [(URL, CaptureTicket)] = []
+        for file in journalFiles {
+            do { pending.append((file, try JSONDecoder().decode(CaptureTicket.self, from: Data(contentsOf: file)))) }
+            catch { notices.append("A damaged recovery journal was preserved for inspection.") }
+        }
+        for (file, ticket) in pending.sorted(by: { $0.1.capturedAt == $1.1.capturedAt ? $0.1.sequence < $1.1.sequence : $0.1.capturedAt < $1.1.capturedAt }) {
+            do {
+                if catalog.movies.flatMap(\.scenes).contains(where: { $0.id == ticket.sceneID }) {
+                    try fm.removeItem(at: file); continue
+                }
+                let source = try url(ticket.source), staging = try url(ticket.staging)
+                if fm.fileExists(atPath: source.path) || fm.fileExists(atPath: staging.path) {
+                    try await commit(ticket)
+                    notices.append("Recovered a recording saved before the app closed.")
+                } else { notices.append("An interrupted recording has no recoverable file.") }
+            } catch { notices.append("An interrupted recording was preserved for recovery: \(error.localizedDescription)") }
+        }
+        let known = Set(catalog.movies.flatMap(\.scenes).map(\.source))
+        let originals = try fm.contentsOfDirectory(at: root.appendingPathComponent("Originals"), includingPropertiesForKeys: nil)
+        let staging = try fm.contentsOfDirectory(at: root.appendingPathComponent("Staging"), includingPropertiesForKeys: nil)
+        for file in originals + staging where file.pathExtension.lowercased() == "mov" {
+            let relative = "\(file.deletingLastPathComponent().lastPathComponent)/\(file.lastPathComponent)"
+            guard !known.contains(relative) else { continue }
+            let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent)
+            if let id, fm.fileExists(atPath: root.appendingPathComponent("Journal/\(id.uuidString).json").path) { continue }
+            do {
+                _ = try await MediaInspector.inspect(file)
+                var recovered = catalog.movies.first(where: { $0.name == "Recovered Recordings" && $0.deletedAt == nil })
+                if recovered == nil { recovered = try create(name: "Recovered Recordings", format: .landscape) }
+                let ticket = CaptureTicket(sceneID: id ?? UUID(), movieID: recovered!.id, sequence: recovered!.nextSequence)
+                let destination = try url(ticket.staging)
+                let durable = try url(ticket.source)
+                if file != destination && file != durable { try fm.copyItem(at: file, to: destination) }
+                try encoder.encode(ticket).write(to: try url(ticket.journal), options: .atomic)
+                try await commit(ticket)
+                notices.append("Found additional footage in Recovered Recordings.")
+            } catch { notices.append("Unrecognized footage was preserved; it could not be validated.") }
+        }
+        var updated = catalog
+        for m in updated.movies.indices {
+            for c in updated.movies[m].scenes.indices {
+                let exists = fm.fileExists(atPath: try url(updated.movies[m].scenes[c].source).path)
+                updated.movies[m].scenes[c].missing = !exists
+            }
+        }
+        try write(updated)
+        // Only disposable exports are eligible for age-based cleanup, never original footage.
+        let exports = URL.cachesDirectory.appendingPathComponent("Exports", isDirectory: true)
+        if let files = try? fm.contentsOfDirectory(at: exports, includingPropertiesForKeys: [.creationDateKey]) {
+            for file in files where file.pathExtension == "mp4" {
+                if let created = try? file.resourceValues(forKeys: [.creationDateKey]).creationDate,
+                   created < Date().addingTimeInterval(-7 * 24 * 60 * 60) { try? fm.removeItem(at: file) }
+            }
+        }
+        loaded = true
+        return Array(Set(notices)).sorted()
+    }
+    func snapshot() -> [Movie] { catalog.movies.sorted { ($0.lastRecordedAt ?? $0.createdAt) > ($1.lastRecordedAt ?? $1.createdAt) } }
+    @discardableResult func create(name: String, format: MovieFormat) throws -> Movie {
+        try requireIdle()
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean.count <= 80 else { throw HomeMovieError.message("Give your movie a name of up to 80 characters.") }
+        let movie = Movie(name: clean, format: format)
+        var next = catalog; next.movies.append(movie); try write(next); return movie
+    }
+    func rename(_ id: UUID, name: String) throws {
+        try requireIdle()
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean.count <= 80 else { throw HomeMovieError.message("Enter a name of up to 80 characters.") }
+        let i = try index(id); var next = catalog; next.movies[i].name = clean; next.movies[i].revision += 1; try write(next)
+    }
+    func begin(movieID: UUID) throws -> CaptureTicket {
+        try requireIdle()
+        let i = try index(movieID)
+        guard catalog.movies[i].deletedAt == nil else { throw HomeMovieError.message("Restore this movie before recording.") }
+        try requireSpace(bytes: 300_000_000)
+        let ticket = CaptureTicket(movieID: movieID, sequence: catalog.movies[i].nextSequence)
+        try encoder.encode(ticket).write(to: try url(ticket.journal), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        return ticket
+    }
+    func commit(_ ticket: CaptureTicket) async throws {
+        if catalog.movies.flatMap(\.scenes).contains(where: { $0.id == ticket.sceneID }) { return }
+        let staging = try url(ticket.staging), source = try url(ticket.source)
+        let input = fm.fileExists(atPath: source.path) ? source : staging
+        let info = try await MediaInspector.inspect(input)
+        guard !catalog.movies.flatMap(\.scenes).contains(where: { $0.id == ticket.sceneID }) else { return }
+        let i = try index(ticket.movieID)
+        if input != source { try fm.moveItem(at: input, to: source) }
+        var next = catalog
+        // Preserve uniqueness even if startup recovery finds competing journal positions.
+        let position = max(ticket.sequence, next.movies[i].nextSequence)
+        next.movies[i].scenes.append(Scene(id: ticket.sceneID, sequence: position, source: ticket.source,
+            capturedAt: ticket.capturedAt, timeZone: ticket.timeZone, sourceDuration: MediaTime(info.duration),
+            trimStart: MediaTime(.zero), trimEnd: MediaTime(info.duration), width: info.size.width,
+            height: info.size.height, hasAudio: info.hasAudio, bytes: info.bytes))
+        next.movies[i].lastRecordedAt = ticket.capturedAt; next.movies[i].revision += 1
+        try write(next)
+        try? fm.removeItem(at: url(ticket.journal))
+    }
+    func trim(movieID: UUID, sceneID: UUID, start: CMTime, end: CMTime) throws {
+        try requireIdle()
+        let m = try index(movieID)
+        guard let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID }) else { throw HomeMovieError.message("Scene not found.") }
+        var next = catalog
+        next.movies[m].scenes[c].trimStart = MediaTime(start); next.movies[m].scenes[c].trimEnd = MediaTime(end)
+        guard next.movies[m].scenes[c].validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
+        next.movies[m].revision += 1; try write(next)
+    }
+    func setSceneDeleted(movieID: UUID, sceneID: UUID, deleted: Bool) throws {
+        try requireIdle()
+        let m = try index(movieID)
+        guard let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID }) else { throw HomeMovieError.message("Scene not found.") }
+        var next = catalog; next.movies[m].scenes[c].deletedAt = deleted ? Date() : nil
+        next.movies[m].revision += 1; try write(next)
+    }
+    func setMovieDeleted(_ id: UUID, deleted: Bool) throws {
+        try requireIdle()
+        let m = try index(id); var next = catalog; next.movies[m].deletedAt = deleted ? Date() : nil; next.movies[m].revision += 1; try write(next)
+    }
+    func storageBytes() -> Int64 { catalog.movies.flatMap(\.scenes).reduce(0) { $0 + $1.bytes } }
+    func availableBytes() throws -> Int64 {
+        let values = try root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
+        guard let capacity = values.volumeAvailableCapacityForImportantUsage ?? values.volumeAvailableCapacity.map(Int64.init) else {
+            throw HomeMovieError.message("Free storage could not be checked. Please try again.")
+        }
+        return capacity
+    }
+    func requireSpace(bytes: Int64) throws {
+        guard try availableBytes() > bytes else { throw HomeMovieError.message("Not enough free storage. Free space on your iPhone and try again. Your saved scenes are safe.") }
+    }
+    private func requireIdle() throws {
+        guard !maintenance else { throw HomeMovieError.message("Wait for backup or restore to finish before changing movies.") }
+    }
+    func beginMaintenance(requireLoaded: Bool = true) throws {
+        try requireIdle()
+        if requireLoaded && !loaded { throw HomeMovieError.message("Open the movie library before making a backup.") }
+        try ensureDirectories(); maintenance = true
+    }
+    func endMaintenance() { maintenance = false }
+    func catalogSnapshot() -> Catalog { catalog }
+    func validateBackupCatalog(_ value: Catalog) throws {
+        guard value.schemaVersion == 1 else { throw HomeMovieError.message("This backup requires a newer version of Home Movie.") }
+        try validate(value)
+    }
+    private func preserveCatalog() throws {
+        let original = root.appendingPathComponent("catalog.json")
+        if fm.fileExists(atPath: original.path) {
+            try fm.copyItem(at: original, to: root.appendingPathComponent("Recovery/catalog-preserved-\(UUID()).json"))
+        }
+    }
+    func repairFromPreviousCatalog() async throws -> [String] {
+        try requireIdle(); try ensureDirectories()
+        let previous = try JSONDecoder().decode(Catalog.self, from: Data(contentsOf: root.appendingPathComponent("catalog.previous.json")))
+        try validateBackupCatalog(previous)
+        try preserveCatalog()
+        catalog = previous; loaded = false
+        try write(previous)
+        return try await load()
+    }
+    func installImportedMovies(_ movies: [Movie]) throws {
+        guard maintenance else { throw HomeMovieError.message("Restore is not active.") }
+        if !loaded {
+            try preserveCatalog()
+            catalog = Catalog()
+        }
+        var next = catalog; next.movies.append(contentsOf: movies)
+        try write(next); loaded = false
+    }
+    func markFilesBackup(_ snapshot: Catalog) throws {
+        var next = catalog
+        for movie in snapshot.movies {
+            if let index = next.movies.firstIndex(where: { $0.id == movie.id }) {
+                next.movies[index].lastFilesBackupRevision = movie.revision
+                next.movies[index].lastFilesBackupAt = Date()
+            }
+        }
+        try write(next)
+    }
+    func markPhotosCopy(sceneID: UUID, assetID: String) throws {
+        var next = catalog
+        for m in next.movies.indices {
+            if let c = next.movies[m].scenes.firstIndex(where: { $0.id == sceneID }) {
+                next.movies[m].scenes[c].photosAssetID = assetID
+                next.movies[m].scenes[c].photosCopiedAt = Date()
+                try write(next); return
+            }
+        }
+        throw HomeMovieError.message("The scene was copied to Photos but its receipt could not be attached.")
+    }
+    func recoveryFiles() throws -> [RecoveryFile] {
+        try ensureDirectories()
+        let known = Set(catalog.movies.flatMap(\.scenes).map(\.source))
+        var files: [RecoveryFile] = []
+        for directory in ["Staging", "Originals", "Recovery"] {
+            for file in try fm.contentsOfDirectory(at: root.appendingPathComponent(directory), includingPropertiesForKeys: [.fileSizeKey]) {
+                let path = "\(directory)/\(file.lastPathComponent)"
+                guard !known.contains(path) else { continue }
+                let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                files.append(RecoveryFile(id: path, url: file, bytes: Int64(size)))
+            }
+        }
+        return files.sorted { $0.id < $1.id }
+    }
+    func recoverFile(_ file: RecoveryFile, movieID: UUID) async throws {
+        try requireIdle()
+        // Files must come from the app's own enumerated recovery list, never arbitrary URLs.
+        guard try recoveryFiles().contains(where: { $0.id == file.id && $0.url == file.url }), file.url.pathExtension == "mov" else {
+            throw HomeMovieError.message("This recovery item cannot be imported as a recording.")
+        }
+        _ = try await MediaInspector.inspect(file.url)
+        let m = try index(movieID)
+        let ticket = CaptureTicket(movieID: movieID, sequence: catalog.movies[m].nextSequence)
+        try requireSpace(bytes: file.bytes + 300_000_000)
+        try fm.copyItem(at: file.url, to: url(ticket.staging))
+        try encoder.encode(ticket).write(to: url(ticket.journal), options: .atomic)
+        try await commit(ticket)
+        // Keep the recovery source until the user has safely exported it; no automatic deletion.
+    }
+
+}

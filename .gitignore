@@ -1,0 +1,19 @@
+# Local Xcode state and generated builds
+.DS_Store
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.ipa
+*.dSYM/
+*.xcarchive/
+__pycache__/
+
+# Credentials belong in the build service's secure settings
+.env
+.env.*
+*.p8
+*.p12
+*.pem
+*.key
+*.mobileprovision
