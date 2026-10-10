@@ -14,6 +14,7 @@ workflows:
         script: bash scripts/test_simulator.sh
     artifacts:
       - build/TestResults.xcresult
+      - build/xcodebuild.log
       - /tmp/xcodebuild_logs/*.log
   testflight-internal:
     name: Home Movie internal TestFlight beta
@@ -50,6 +51,7 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - build/TestResults.xcresult
+      - build/xcodebuild.log
       - /tmp/xcodebuild_logs/*.log
     publishing:
       app_store_connect:

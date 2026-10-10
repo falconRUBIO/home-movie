@@ -11,24 +11,24 @@
     "Build file references resolve",
     "Shared scheme includes unit test target",
     "App icon asset references resolve",
+    "Swift grammar: HomeMovie/HomeMovieApp.swift",
     "Swift grammar: HomeMovieTests/PipelineTests.swift",
     "Swift grammar: HomeMovieTests/BackupTests.swift",
-    "Swift grammar: HomeMovie/HomeMovieApp.swift",
-    "Swift grammar: HomeMovie/UI/Components.swift",
-    "Swift grammar: HomeMovie/UI/BackupView.swift",
-    "Swift grammar: HomeMovie/UI/CameraView.swift",
-    "Swift grammar: HomeMovie/UI/ExportView.swift",
-    "Swift grammar: HomeMovie/UI/LibraryView.swift",
-    "Swift grammar: HomeMovie/UI/WatchMovieView.swift",
-    "Swift grammar: HomeMovie/Media/ExportModel.swift",
+    "Swift grammar: HomeMovie/Core/ProjectStore.swift",
+    "Swift grammar: HomeMovie/Core/BackupService.swift",
+    "Swift grammar: HomeMovie/Core/Models.swift",
+    "Swift grammar: HomeMovie/Core/AppModel.swift",
     "Swift grammar: HomeMovie/Media/MediaAssembler.swift",
     "Swift grammar: HomeMovie/Media/CaptureService.swift",
     "Swift grammar: HomeMovie/Media/PhotosSafetyService.swift",
+    "Swift grammar: HomeMovie/Media/ExportModel.swift",
     "Swift grammar: HomeMovie/Media/CameraModel.swift",
-    "Swift grammar: HomeMovie/Core/AppModel.swift",
-    "Swift grammar: HomeMovie/Core/Models.swift",
-    "Swift grammar: HomeMovie/Core/BackupService.swift",
-    "Swift grammar: HomeMovie/Core/ProjectStore.swift"
+    "Swift grammar: HomeMovie/UI/ExportView.swift",
+    "Swift grammar: HomeMovie/UI/CameraView.swift",
+    "Swift grammar: HomeMovie/UI/Components.swift",
+    "Swift grammar: HomeMovie/UI/BackupView.swift",
+    "Swift grammar: HomeMovie/UI/WatchMovieView.swift",
+    "Swift grammar: HomeMovie/UI/LibraryView.swift"
   ],
   "swift_files": 18,
   "not_performed": [
@@ -36,13 +36,14 @@
     "XCTest execution",
     "real device tests"
   ],
-  "date": "2026-10-09",
-  "openstep_project_parse": "PASS",
-  "yaml_parse": "PASS",
-  "shell_syntax": "PASS",
-  "deterministic_generator": "PASS",
+  "date": "2026-10-10",
   "native_tests_supplied": 13,
   "native_tests_run": 0,
-  "testflight_uploaded": false,
-  "cloud_workflow_executed": false
+  "native_build_status": "Rebuild pending after correcting three reported compiler errors",
+  "previous_cloud_build": {
+    "commit": "2c369981b632a13866cb7e8a5e97e17e22ebb490",
+    "status": "Compilation failed; tests cancelled",
+    "distinct_compiler_errors": 3
+  },
+  "testflight_uploaded": false
 }

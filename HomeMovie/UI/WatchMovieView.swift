@@ -144,10 +144,10 @@ struct SceneReviewView: View {
                 let item = AVPlayerItem(asset: asset)
                 item.forwardPlaybackEndTime = CMTimeAdd(originalStart, scene.trimEnd.cmTime)
                 player = AVPlayer(playerItem: item)
-                player?.seek(to: CMTimeAdd(originalStart, scene.trimStart.cmTime), toleranceBefore: .zero, toleranceAfter: .zero)
+                _ = await player?.seek(to: CMTimeAdd(originalStart, scene.trimStart.cmTime), toleranceBefore: .zero, toleranceAfter: .zero)
             }
-            .onChange(of: start) { _, value in player?.pause(); player?.seek(to: CMTimeAdd(originalStart, CMTime(seconds: value, preferredTimescale: 600)), toleranceBefore: .zero, toleranceAfter: .zero) }
-            .onChange(of: end) { _, value in player?.pause(); player?.currentItem?.forwardPlaybackEndTime = CMTimeAdd(originalStart, CMTime(seconds: value, preferredTimescale: 600)); player?.seek(to: CMTimeAdd(originalStart, CMTime(seconds: max(start, value - 1 / 30), preferredTimescale: 600)), toleranceBefore: .zero, toleranceAfter: .zero) }
+            .onChange(of: start) { _, value in player?.pause(); player?.seek(to: CMTimeAdd(originalStart, CMTime(seconds: value, preferredTimescale: 600)), toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: { _ in }) }
+            .onChange(of: end) { _, value in player?.pause(); player?.currentItem?.forwardPlaybackEndTime = CMTimeAdd(originalStart, CMTime(seconds: value, preferredTimescale: 600)); player?.seek(to: CMTimeAdd(originalStart, CMTime(seconds: max(start, value - 1 / 30), preferredTimescale: 600)), toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: { _ in }) }
         }.interactiveDismissDisabled(saving).onDisappear { player?.pause() }
     }
 }
@@ -167,9 +167,7 @@ struct TrimRangeControl: View {
             ZStack(alignment: .leading) {
                 HStack(spacing: 1) {
                     ForEach(0..<6) { i in
-                        var sample = scene
-                        sample.trimStart = MediaTime(seconds: Double(i) / 6 * duration)
-                        SceneThumbnail(scene: sample, root: root)
+                        SceneThumbnail(scene: thumbnailScene(at: i), root: root)
                     }
                 }.clipShape(RoundedRectangle(cornerRadius: 8)).padding(.horizontal, 14)
                 Color.black.opacity(0.55).frame(width: max(0, x1 - 14)).padding(.leading, 14).allowsHitTesting(false)
@@ -180,6 +178,11 @@ struct TrimRangeControl: View {
                 handle("Trim end", x: x2, width: width, isStart: false)
             }.coordinateSpace(name: "trim")
         }
+    }
+    private func thumbnailScene(at index: Int) -> Scene {
+        var sample = scene
+        sample.trimStart = MediaTime(seconds: Double(index) / 6 * duration)
+        return sample
     }
     private func handle(_ label: String, x: CGFloat, width: CGFloat, isStart: Bool) -> some View {
         RoundedRectangle(cornerRadius: 7).fill(.yellow).frame(width: 15)

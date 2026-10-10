@@ -59,7 +59,7 @@ actor MediaAssembler {
             try videoTrack.insertTimeRange(selected, of: sourceVideo, at: cursor)
             if let sourceAudio = try await asset.loadTracks(withMediaType: .audio).first {
                 let audioRange = try await sourceAudio.load(.timeRange)
-                let intersection = CMTimeRangeGetIntersection(selected, audioRange)
+                let intersection = CMTimeRangeGetIntersection(selected, otherRange: audioRange)
                 if intersection.isValid, intersection.duration.isNumeric, intersection.duration.seconds > 0 {
                     let audioPosition = CMTimeAdd(cursor, CMTimeSubtract(intersection.start, selected.start))
                     try audioTrack.insertTimeRange(intersection, of: sourceAudio, at: audioPosition)

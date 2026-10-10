@@ -6,6 +6,7 @@ if [ -z "$simulator_id" ]; then
   echo "No available iPhone simulator. Install an iOS 18+ simulator runtime."
   exit 1
 fi
+mkdir -p build
 xcodebuild -project HomeMovie.xcodeproj -scheme HomeMovie \
   -destination "platform=iOS Simulator,id=$simulator_id" \
-  -resultBundlePath build/TestResults.xcresult CODE_SIGNING_ALLOWED=NO test
+  -resultBundlePath build/TestResults.xcresult CODE_SIGNING_ALLOWED=NO test 2>&1 | tee build/xcodebuild.log

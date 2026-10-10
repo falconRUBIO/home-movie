@@ -85,3 +85,16 @@ The fixture generator itself and all native tests still require compilation and 
 - No permanent-delete UI; recoverable deletions continue using space. Settings reports committed source bytes, not all app disk usage.
 - Full editable-project backup/restore is implemented in source, but not runtime-tested. External-copy durability and a fresh-device restore are acceptance gates before archive claims.
 - App Store signing, privacy review, real-device accessibility checks and final icon refinement remain outside the checks completed here.
+
+
+## First cloud build — 2026-10-10 correction
+
+The supplied Codemagic result bundle for commit `2c369981b632a13866cb7e8a5e97e17e22ebb490` shows that the app failed Swift compilation. XCTest was cancelled before execution. The bundle reports three distinct compiler errors; this revision corrects all three:
+
+- `MediaAssembler.swift`: added the required `otherRange:` label to the audio-range intersection call.
+- `WatchMovieView.swift`: awaited the initial asynchronous AVPlayer seek; synchronous trim callbacks explicitly use the completion-handler overload.
+- `WatchMovieView.swift`: moved thumbnail sample mutation into an ordinary helper function, outside SwiftUI's view builder.
+
+The simulator script now captures a plain-text `build/xcodebuild.log` using `tee` and retains `pipefail`, so logging does not hide a failed build. Both Codemagic workflows publish the log as an artifact.
+
+Portable grammar/configuration checks pass after these changes. Compilation and XCTest for the corrected revision are **pending the next cloud build**. This is a targeted correction of reported compiler errors, not a claim of a passing native build or device test.
