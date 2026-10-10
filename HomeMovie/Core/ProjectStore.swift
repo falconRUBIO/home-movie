@@ -2,7 +2,8 @@ import Foundation
 import AVFoundation
 
 actor ProjectStore {
-    let root: URL
+    // Immutable, Sendable configuration can be read without entering the storage actor.
+    nonisolated let root: URL
     private var catalog = Catalog()
     private var loaded = false
     private var maintenance = false

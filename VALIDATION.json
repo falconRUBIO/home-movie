@@ -39,11 +39,12 @@
   "date": "2026-10-10",
   "native_tests_supplied": 13,
   "native_tests_run": 0,
-  "native_build_status": "Rebuild pending after correcting three reported compiler errors",
+  "native_build_status": "Rebuild pending after exposing immutable storage root across actor boundary",
   "previous_cloud_build": {
-    "commit": "2c369981b632a13866cb7e8a5e97e17e22ebb490",
-    "status": "Compilation failed; tests cancelled",
-    "distinct_compiler_errors": 3
+    "commit": "94f6cace6e0c7e887e95c16cc4f183367f2fc015",
+    "status": "App target compiled; test-target compilation failed; tests cancelled",
+    "compiler_error_sites": 12,
+    "distinct_compiler_error_causes": 1
   },
   "testflight_uploaded": false
 }

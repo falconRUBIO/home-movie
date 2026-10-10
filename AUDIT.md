@@ -98,3 +98,11 @@ The supplied Codemagic result bundle for commit `2c369981b632a13866cb7e8a5e97e17
 The simulator script now captures a plain-text `build/xcodebuild.log` using `tee` and retains `pipefail`, so logging does not hide a failed build. Both Codemagic workflows publish the log as an artifact.
 
 Portable grammar/configuration checks pass after these changes. Compilation and XCTest for the corrected revision are **pending the next cloud build**. This is a targeted correction of reported compiler errors, not a claim of a passing native build or device test.
+
+## Second cloud build — 2026-10-10 correction
+
+The supplied plain-text log for commit `94f6cace6e0c7e887e95c16cc4f183367f2fc015` reports 12 test-target compiler errors with one cause: tests in a separate module cannot synchronously read the actor-isolated `ProjectStore.root`, including inside XCTest assertion autoclosures. The app target compiled, but test compilation failed and XCTest did not execute.
+
+`root` is now explicitly `nonisolated let`: an immutable, Sendable URL set during initialization. Mutable storage state remains actor-isolated. This allows both test modules to read the configured directory without disabling concurrency checks or introducing unsafe isolation overrides.
+
+Portable source checks pass. Native test compilation and all 13 supplied tests remain pending a new cloud build.
