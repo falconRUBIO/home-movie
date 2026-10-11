@@ -77,7 +77,10 @@ struct ColorCube: Codable, Sendable {
         guard let url = Bundle.main.url(forResource: "AppleLogToRec709", withExtension: "lut") else {
             throw HomeMovieError.message("The standard Log look is unavailable.")
         }
-        let packed = try (Data(contentsOf: url) as NSData).decompressed(using: .zlib) as Data
+        let compressed = try Data(contentsOf: url)
+        guard compressed.count > 6, compressed.first == 0x78 else { throw HomeMovieError.message("Invalid standard Log look header.") }
+        // Compression.framework ZLIB consumes RFC 1951 raw DEFLATE, not RFC 1950 headers/checksums.
+        let packed = try (Data(compressed.dropFirst(2).dropLast(4)) as NSData).decompressed(using: .zlib) as Data
         guard packed.count == 65 * 65 * 65 * 6 else { throw HomeMovieError.message("Invalid standard Log look.") }
         var samples: [Float] = []; samples.reserveCapacity(65 * 65 * 65 * 4)
         packed.withUnsafeBytes { bytes in

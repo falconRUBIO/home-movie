@@ -18,6 +18,7 @@ struct WatchMovieView: View {
     @State private var importingLook = false
     @State private var changingLook = false
     @State private var showOriginalLog = false
+    @State private var playbackRequestID = UUID()
     private var movie: Movie? { app.movie(movieID) }
     var body: some View {
         NavigationStack {
@@ -91,10 +92,11 @@ struct WatchMovieView: View {
                 }
                 .task { looks = await app.store.availableLooks() }
                 .task(id: "\(movie.revision)-\(showOriginalLog)") {
+                    let requestID = UUID(); playbackRequestID = requestID
                     let position = player?.currentTime() ?? .zero
                     let wasPlaying = player?.rate != 0 && player != nil
                     player?.pause(); loading = true; problem = nil
-                    defer { loading = false }
+                    defer { if playbackRequestID == requestID { loading = false } }
                     do {
                         try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
                         try AVAudioSession.sharedInstance().setActive(true)

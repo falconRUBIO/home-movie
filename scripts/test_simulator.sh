@@ -9,4 +9,6 @@ fi
 mkdir -p build
 xcodebuild -project HomeMovie.xcodeproj -scheme HomeMovie \
   -destination "platform=iOS Simulator,id=$simulator_id" \
+  -test-timeouts-enabled YES -default-test-execution-time-allowance 60 \
+  -maximum-test-execution-time-allowance 120 \
   -resultBundlePath build/TestResults.xcresult CODE_SIGNING_ALLOWED=NO test 2>&1 | tee build/xcodebuild.log
