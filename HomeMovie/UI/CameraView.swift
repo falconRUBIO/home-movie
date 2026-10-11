@@ -8,7 +8,6 @@ struct CameraView: View {
     @State private var picking = false
     @State private var watching = false
     @State private var initialReviewID: UUID?
-    @State private var layoutLandscape = false
     @State private var pinchBase: CGFloat?
     @State private var lastZoomAt = Date.distantPast
     @Environment(\.dismiss) private var dismiss
@@ -19,7 +18,10 @@ struct CameraView: View {
         _camera = StateObject(wrappedValue: CameraModel(app: app))
     }
     private var movie: Movie? { app.movie(movieID) }
-    private var correctOrientation: Bool { movie?.format == (layoutLandscape ? .landscape : .portrait) }
+    private var correctOrientation: Bool {
+        guard let locked = movie?.recordingFormat else { return true }
+        return camera.options.flatMap { MovieFormat.captureFormat(angle: $0.angle) } == locked
+    }
     var body: some View {
         GeometryReader { geometry in
             let landscape = geometry.size.width > geometry.size.height
@@ -55,8 +57,6 @@ struct CameraView: View {
                     }
                     .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 10)
                 }
-                .onAppear { layoutLandscape = landscape }
-                .onChange(of: landscape) { _, value in layoutLandscape = value }
             } else { ContentUnavailableView("Movie unavailable", systemImage: "film") }
         }
         .background(.black).foregroundStyle(.white)

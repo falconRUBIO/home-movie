@@ -165,12 +165,15 @@ actor ProjectStore {
         guard !clean.isEmpty, clean.count <= 80 else { throw HomeMovieError.message("Enter a name of up to 80 characters.") }
         let i = try index(id); var next = catalog; next.movies[i].name = clean; next.movies[i].revision += 1; try write(next)
     }
-    func begin(movieID: UUID) throws -> CaptureTicket {
+    func begin(movieID: UUID, format: MovieFormat? = nil) throws -> CaptureTicket {
         try requireIdle()
         let i = try index(movieID)
         guard catalog.movies[i].deletedAt == nil else { throw HomeMovieError.message("Restore this movie before recording.") }
+        if let format, let locked = catalog.movies[i].recordingFormat, format != locked {
+            throw HomeMovieError.message("Rotate your iPhone to record in \(locked.label).")
+        }
         try requireSpace(bytes: 300_000_000)
-        let ticket = CaptureTicket(movieID: movieID, sequence: catalog.movies[i].nextSequence)
+        let ticket = CaptureTicket(movieID: movieID, sequence: catalog.movies[i].nextSequence, format: format)
         try encoder.encode(ticket).write(to: try url(ticket.journal), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         return ticket
     }
@@ -194,6 +197,9 @@ actor ProjectStore {
         let i = try index(ticket.movieID)
         if input != source { try fm.moveItem(at: input, to: source) }
         var next = catalog
+        if next.movies[i].recordingFormat == nil {
+            next.movies[i].format = ticket.format ?? (info.size.width > info.size.height ? .landscape : .portrait)
+        }
         // Preserve uniqueness even if startup recovery finds competing journal positions.
         let position = max(ticket.sequence, next.movies[i].nextSequence)
         next.movies[i].scenes.append(Scene(id: ticket.sceneID, sequence: position, source: ticket.source,

@@ -40,12 +40,15 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
     }
     func record(movieID: UUID) {
         guard state == .ready, active, let app else { return }
+        guard let angle = options?.angle, let format = MovieFormat.captureFormat(angle: angle),
+              let movie = app.movie(movieID) else { return }
+        guard movie.recordingFormat == nil || movie.recordingFormat == format else { return }
         state = .starting; savedScene = false; message = nil; startCancelled = false
         operation = Task {
             var pendingTicket: CaptureTicket?
             defer { operation = nil }
             do {
-                let ticket = try await app.store.begin(movieID: movieID)
+                let ticket = try await app.store.begin(movieID: movieID, format: format)
                 pendingTicket = ticket
                 let path = try await app.store.url(ticket.staging)
                 guard active, !startCancelled, state == .starting, interruption == nil else {
@@ -56,7 +59,7 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
                 }
                 // No await between the final cancellation check and handing off ownership.
                 activeSceneID = ticket.sceneID
-                service.record(ticket: ticket, url: path)
+                service.record(ticket: ticket, url: path, angle: angle)
                 pendingTicket = nil
             } catch {
                 if let pendingTicket { try? await app.store.abandonUnstarted(pendingTicket) }

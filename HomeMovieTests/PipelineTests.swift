@@ -3,6 +3,65 @@ import AVFoundation
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    func testCaptureFormatUsesCameraAngleInBothDirections() {
+        for angle in [CGFloat(0), 180, 360, -180] {
+            XCTAssertEqual(MovieFormat.captureFormat(angle: angle), .landscape)
+        }
+        for angle in [CGFloat(90), 270, -90, 450] {
+            XCTAssertEqual(MovieFormat.captureFormat(angle: angle), .portrait)
+        }
+        XCTAssertNil(MovieFormat.captureFormat(angle: .nan))
+        XCTAssertNil(MovieFormat.captureFormat(angle: .infinity))
+    }
+    func testFirstSceneLocksOrientationAcrossRelaunchAndSceneDeletion() async throws {
+        for format in MovieFormat.allCases {
+            let store = try await makeStore()
+            let movie = try await store.create(name: "Automatic", format: format == .portrait ? .landscape : .portrait)
+            XCTAssertNil(movie.recordingFormat)
+            let ticket = try await store.begin(movieID: movie.id, format: format)
+            try await footage(store.root.appendingPathComponent(ticket.staging), rotated: format == .portrait)
+            try await store.commit(ticket)
+            try await store.setSceneDeleted(movieID: movie.id, sceneID: ticket.sceneID, deleted: true)
+            let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+            let snapshot = await reopened.snapshot()
+            let saved = try XCTUnwrap(snapshot.first)
+            XCTAssertEqual(saved.format, format)
+            XCTAssertEqual(saved.recordingFormat, format)
+            XCTAssertTrue(saved.activeScenes.isEmpty)
+            do {
+                _ = try await reopened.begin(movieID: movie.id, format: format == .portrait ? .landscape : .portrait)
+                XCTFail("A later scene must use the original movie orientation")
+            } catch {}
+            let next = try await reopened.begin(movieID: movie.id, format: format)
+            try await reopened.abandonUnstarted(next)
+        }
+    }
+    func testCancelledFirstCaptureLeavesOrientationAutomatic() async throws {
+        let store = try await makeStore(), movie = try await store.create(name: "Draft", format: .portrait)
+        let canceled = try await store.begin(movieID: movie.id, format: .portrait)
+        try await store.abandonUnstarted(canceled)
+        let snapshot = await store.snapshot()
+        XCTAssertNil(snapshot.first?.recordingFormat)
+        let ticket = try await store.begin(movieID: movie.id, format: .landscape)
+        try await footage(store.root.appendingPathComponent(ticket.staging))
+        try await store.commit(ticket)
+        let saved = await store.snapshot()
+        XCTAssertEqual(saved.first?.recordingFormat, .landscape)
+    }
+    func testFirstSceneRecoveryRetainsOrientationAndLegacyTicketsDecode() async throws {
+        let store = try await makeStore(), movie = try await store.create(name: "Recovered", format: .landscape)
+        let ticket = try await store.begin(movieID: movie.id, format: .portrait)
+        try await footage(store.root.appendingPathComponent(ticket.staging), rotated: true)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let saved = await reopened.snapshot()
+        XCTAssertEqual(saved.first?.recordingFormat, .portrait)
+        XCTAssertEqual(saved.first?.scenes.first?.id, ticket.sceneID)
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(ticket)) as? [String: Any])
+        legacy.removeValue(forKey: "format")
+        let decoded = try JSONDecoder().decode(CaptureTicket.self, from: JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertNil(decoded.format)
+        XCTAssertEqual(decoded.sceneID, ticket.sceneID)
+    }
     func testNativeResolutionZoomChoicesIncludeSupportedEightTimes() {
         let choices = LensChoice.available(minimum: 1, maximum: 20, multiplier: 0.5,
             switchFactors: [2, 8], secondaryFactors: [4, 16, 16])

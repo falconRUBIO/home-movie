@@ -198,3 +198,9 @@ GitHub run 38176920518 for 448f36b011dbcdf64c75b58c7d42bde18b63aa15 compiled the
 ## Library export entry point — 2026-10-11
 
 Each movie card now offers Export at the top of its three-dot menu. The item presents the same ExportView used by Watch Movie, retaining MP4 preparation, Save to Photos, Save to Files, Share Video, progress and cancellation. Export is disabled for movies with no active playable scenes. The item sheet captures the selected movie snapshot and receives the existing AppModel. Portable source checks pass; device menu/presentation acceptance remains pending.
+
+## Automatic recording orientation — 2026-10-11
+
+Removed the New Movie format picker. Empty movies follow camera rotation automatically. Record snapshots the camera coordinator capture angle and format before asynchronous journal preparation, applies that angle once to the movie-file output, and retains it for the take. A separate coordinator tied to the actual preview layer applies horizon-level preview angles as the phone rotates, including during recording. The edge-to-edge preview remains aspect-fill in portrait and landscape. Apple reference: https://developer.apple.com/documentation/avfoundation/supporting-device-rotation-in-your-camera-app
+
+The first playable saved scene persists its format atomically with scene metadata. Capture journals carry an optional format so startup recovery preserves the first take’s choice; legacy journals infer it from inspected media. Subsequent scenes are gated by camera rotation in UI/model/storage. Deleted scenes and lastRecordedAt retain the existing lock, preserving existing movie canvases. Canceled or failed first attempts do not lock an empty draft. Four regressions cover both landscape directions, portrait capture, first-scene locking/relaunch/deletion, canceled first attempts, recovery and old journal decoding. Twenty-five tests are now supplied. Native and physical-device rotation checks are pending.

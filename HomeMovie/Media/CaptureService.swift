@@ -53,7 +53,6 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private var videoInput: AVCaptureDeviceInput?
     private var coordinator: AVCaptureDevice.RotationCoordinator?
     private var ticket: CaptureTicket?
-    private var captureAngle: CGFloat?
     private var recordingURL: URL?
     private var stopRequested = false
     private var observers: [NSObjectProtocol] = []
@@ -169,7 +168,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         coordinator = AVCaptureDevice.RotationCoordinator(device: camera, previewLayer: nil)
         rotationObservation = coordinator?.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.new]) { [weak self] _, _ in
             self?.queue.async {
-                guard let self, self.ticket == nil else { return }
+                guard let self else { return }
                 if let options = try? self.options() { self.onEvent?(.ready(options)) }
             }
         }
@@ -189,7 +188,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             multiplier: multiplier, switchFactors: switches, secondaryFactors: secondary)
         return CameraOptions(lenses: lenses,
             zoom: camera.videoZoomFactor, minimum: camera.minAvailableVideoZoomFactor, maximum: camera.maxAvailableVideoZoomFactor,
-            multiplier: multiplier, isFront: isFront, angle: captureAngle ?? coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90,
+            multiplier: multiplier, isFront: isFront, angle: coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90,
             canMeter: (camera.isFocusPointOfInterestSupported && camera.isFocusModeSupported(.continuousAutoFocus)) ||
                 (camera.isExposurePointOfInterestSupported && camera.isExposureModeSupported(.continuousAutoExposure)),
             canLock: camera.isExposurePointOfInterestSupported && camera.isExposureModeSupported(.autoExpose) &&
@@ -325,20 +324,18 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             }
         }
     }
-    func record(ticket: CaptureTicket, url: URL) {
+    func record(ticket: CaptureTicket, url: URL, angle: CGFloat) {
         queue.async {
             guard self.ticket == nil, self.session.isRunning, !self.session.isInterrupted else {
                 self.onEvent?(.finished(ticket, HomeMovieError.message("The camera is not ready."))); return
             }
-            guard let connection = self.output.connection(with: .video), let coordinator = self.coordinator else {
+            guard let connection = self.output.connection(with: .video) else {
                 self.onEvent?(.finished(ticket, HomeMovieError.message("The camera connection is unavailable."))); return
             }
-            let angle = coordinator.videoRotationAngleForHorizonLevelCapture
             guard connection.isVideoRotationAngleSupported(angle) else {
                 self.onEvent?(.finished(ticket, HomeMovieError.message("This camera rotation is unsupported."))); return
             }
             connection.videoRotationAngle = angle
-            self.captureAngle = angle
             self.ticket = ticket; self.recordingURL = url.standardizedFileURL; self.stopRequested = false
             self.output.startRecording(to: url, recordingDelegate: self)
         }
@@ -367,7 +364,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo fileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
         queue.async {
             guard let ticket = self.ticket, self.recordingURL == fileURL.standardizedFileURL else { return }
-            self.ticket = nil; self.recordingURL = nil; self.captureAngle = nil; self.stopRequested = false
+            self.ticket = nil; self.recordingURL = nil; self.stopRequested = false
             let success = error == nil || ((error as NSError?)?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool == true)
             self.onEvent?(.finished(ticket, success ? nil : error))
             if self.session.isRunning, let options = try? self.options() { self.onEvent?(.ready(options)) }

@@ -70,6 +70,27 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     private var hideIndicator: DispatchWorkItem?
     private var focusDevicePoint: CGPoint?
     private var showingFront = false
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var rotationObservation: NSKeyValueObservation?
+    func updatePreviewRotation(fallback: CGFloat) {
+        let device = previewLayer.session?.inputs.compactMap { $0 as? AVCaptureDeviceInput }
+            .first { $0.device.hasMediaType(.video) }?.device
+        if let device, rotationCoordinator?.device?.uniqueID != device.uniqueID {
+            rotationObservation = nil
+            let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
+            rotationCoordinator = coordinator
+            rotationObservation = coordinator.observe(\.videoRotationAngleForHorizonLevelPreview, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor in self?.applyPreviewRotation() }
+            }
+        }
+        applyPreviewRotation(fallback: fallback)
+    }
+    private func applyPreviewRotation(fallback: CGFloat = 90) {
+        guard let connection = previewLayer.connection else { return }
+        let angle = rotationCoordinator?.videoRotationAngleForHorizonLevelPreview ?? fallback
+        if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        repositionIndicator()
+    }
     override init(frame: CGRect) {
         super.init(frame: frame)
         focusIndicator.bounds = CGRect(x: 0, y: 0, width: 68, height: 68)
@@ -200,7 +221,7 @@ struct CameraPreview: UIViewRepresentable {
         view.setFront(front)
         if let options { view.updateMetering(options) }
         guard let connection = view.previewLayer.connection else { return }
-        if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        view.updatePreviewRotation(fallback: angle)
         connection.automaticallyAdjustsVideoMirroring = false
         if connection.isVideoMirroringSupported { connection.isVideoMirrored = front }
         view.repositionIndicator()

@@ -17,6 +17,11 @@ enum MovieFormat: String, Codable, CaseIterable, Identifiable, Sendable {
     var label: String { rawValue.capitalized }
     var aspect: CGFloat { self == .landscape ? 16 / 9 : 9 / 16 }
     var canvas: CGSize { self == .landscape ? CGSize(width: 1920, height: 1080) : CGSize(width: 1080, height: 1920) }
+    static func captureFormat(angle: CGFloat) -> MovieFormat? {
+        guard angle.isFinite else { return nil }
+        let quarterTurns = (angle.truncatingRemainder(dividingBy: 360) / 90).rounded()
+        return abs(quarterTurns.truncatingRemainder(dividingBy: 2)) == 1 ? .portrait : .landscape
+    }
 }
 
 struct Scene: Codable, Identifiable, Equatable, Sendable {
@@ -55,6 +60,8 @@ struct Movie: Codable, Identifiable, Equatable, Sendable {
     var lastFilesBackupRevision: Int?
     var lastFilesBackupAt: Date?
     var scenes: [Scene] = []
+    // Deleted scenes still lock the movie; removing a scene never changes its canvas.
+    var recordingFormat: MovieFormat? { scenes.isEmpty && lastRecordedAt == nil ? nil : format }
     var activeScenes: [Scene] { scenes.filter { $0.deletedAt == nil }.sorted { $0.sequence < $1.sequence } }
     var duration: CMTime { activeScenes.reduce(.zero) { CMTimeAdd($0, $1.playableDuration) } }
     var nextSequence: Int { (scenes.map(\.sequence).max() ?? -1) + 1 }
@@ -71,6 +78,7 @@ struct CaptureTicket: Codable, Sendable {
     var sequence: Int
     var capturedAt = Date()
     var timeZone = TimeZone.current.identifier
+    var format: MovieFormat? = nil
     var staging: String { "Staging/\(sceneID.uuidString).mov" }
     var source: String { "Originals/\(sceneID.uuidString).mov" }
     var journal: String { "Journal/\(sceneID.uuidString).json" }

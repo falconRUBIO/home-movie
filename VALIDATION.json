@@ -36,17 +36,18 @@
   ],
   "swift_files": 18,
   "not_performed": [
-    "Native compilation of latest Watch Movie timeline layout",
+    "Native compilation and 25-test suite for automatic orientation revision",
     "Physical-device full-screen layout, 8x zoom, tap focus, AE/AF lock, exposure drag, torch and accessibility verification",
     "complete real device acceptance tests",
     "Physical-device rapid-start/stop, background/interruption, camera-switch rollback and runtime-error acceptance tests",
     "Complete full-app device acceptance: microphone audio exports, long operations, Photos opt-out, Files providers, low storage, thermal behavior and accessibility",
-    "Physical-device Watch Movie timeline visibility, rotation and larger-text acceptance"
+    "Physical-device Watch Movie timeline visibility, rotation and larger-text acceptance",
+    "Physical-device automatic first-scene orientation, locked later scenes and independent preview rotation"
   ],
   "date": "2026-10-11",
-  "native_tests_supplied": 21,
+  "native_tests_supplied": 25,
   "native_tests_run": 21,
-  "native_build_status": "Full-app audit revision 448f36b compiled and passed 21 tests. Watch Movie layout revision awaits its own native run.",
+  "native_build_status": "Full-app audit revision 448f36b passed 21 tests. Library export, Watch Movie layout and automatic orientation revision await native compilation and 25-test validation.",
   "previous_cloud_build": {
     "commit": "448f36b011dbcdf64c75b58c7d42bde18b63aa15",
     "provider": "GitHub Actions",

@@ -114,7 +114,6 @@ struct NewMovieView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
-    @State private var format = MovieFormat.landscape
     @State private var saving = false
     @State private var problem: String?
     let created: (UUID) -> Void
@@ -123,8 +122,7 @@ struct NewMovieView: View {
             Form {
                 Section {
                     TextField("Movie name", text: $name).textInputAutocapitalization(.sentences).submitLabel(.done)
-                    Picker("Format", selection: $format) { ForEach(MovieFormat.allCases) { Text($0.label).tag($0) } }
-                } footer: { Text("Each recording becomes the next scene. Keep adding whenever you like.") }
+                } footer: { Text("Hold your iPhone upright or sideways. Your first recording sets the movie’s orientation. Each recording becomes the next scene.") }
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
             }.navigationTitle("New Movie").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -133,7 +131,7 @@ struct NewMovieView: View {
                         Button("Create") {
                             saving = true
                             Task {
-                                do { let movie = try await app.store.create(name: name, format: format); await app.refresh(); created(movie.id) }
+                                do { let movie = try await app.store.create(name: name, format: .portrait); await app.refresh(); created(movie.id) }
                                 catch { problem = error.localizedDescription; saving = false }
                             }
                         }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).count > 80 || saving)
