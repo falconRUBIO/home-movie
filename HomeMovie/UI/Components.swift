@@ -53,11 +53,19 @@ struct SceneThumbnail: View {
     }
 }
 
-final class PreviewUIView: UIView {
+final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
-    var onFocus: ((CGPoint) -> Bool)?
+    var onFocus: ((CGPoint, Bool) -> Bool)?
+    var onExposure: ((Float) -> Void)?
+    var exposureBias: Float = 0
+    var exposureRange: ClosedRange<Float> = -2...2
+    var locked = false
     private let focusIndicator = UIView()
+    private let sun = UIImageView(image: UIImage(systemName: "sun.max.fill"))
+    private var dragBias: Float = 0
+    private var lastExposureAt = Date.distantPast
+    private var hideIndicator: DispatchWorkItem?
     override init(frame: CGRect) {
         super.init(frame: frame)
         focusIndicator.bounds = CGRect(x: 0, y: 0, width: 68, height: 68)
@@ -67,39 +75,107 @@ final class PreviewUIView: UIView {
         focusIndicator.isUserInteractionEnabled = false
         focusIndicator.alpha = 0
         addSubview(focusIndicator)
+        sun.tintColor = .systemYellow
+        sun.bounds = CGRect(x: 0, y: 0, width: 20, height: 20)
+        sun.isUserInteractionEnabled = false
+        sun.alpha = 0
+        addSubview(sun)
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(focusHeld(_:)))
+        hold.minimumPressDuration = 0.5
+        addGestureRecognizer(hold)
         let tap = UITapGestureRecognizer(target: self, action: #selector(focusTapped(_:)))
+        tap.require(toFail: hold)
         tap.cancelsTouchesInView = false
         addGestureRecognizer(tap)
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(exposureDragged(_:)))
+        pan.maximumNumberOfTouches = 1
+        pan.delegate = self
+        addGestureRecognizer(pan)
     }
     required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
     @objc private func focusTapped(_ gesture: UITapGestureRecognizer) {
-        let point = gesture.location(in: self)
+        requestFocus(at: gesture.location(in: self), locked: false)
+    }
+    @objc private func focusHeld(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        requestFocus(at: gesture.location(in: self), locked: true)
+    }
+    private func requestFocus(at point: CGPoint, locked: Bool) {
         let devicePoint = previewLayer.captureDevicePointConverted(fromLayerPoint: point)
-        guard onFocus?(devicePoint) == true else { return }
+        guard onFocus?(devicePoint, locked) == true else { return }
+        self.locked = locked
+        if !locked { exposureBias = 0 }
+        hideIndicator?.cancel()
         focusIndicator.layer.removeAllAnimations()
-        focusIndicator.center = point
-        focusIndicator.alpha = 1
+        sun.layer.removeAllAnimations()
+        focusIndicator.center = CGPoint(x: min(max(36, point.x), max(36, bounds.width - 36)),
+                                        y: min(max(36, point.y), max(36, bounds.height - 36)))
+        focusIndicator.alpha = 1; sun.alpha = 1
         focusIndicator.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
+        positionSun()
         UIView.animate(withDuration: 0.18) { self.focusIndicator.transform = .identity }
-        UIView.animate(withDuration: 0.3, delay: 1.2, options: [.beginFromCurrentState]) {
-            self.focusIndicator.alpha = 0
+        if locked { UISelectionFeedbackGenerator().selectionChanged() }
+        scheduleHide()
+    }
+    func updateMetering(_ options: CameraOptions) {
+        let wasLocked = locked
+        exposureBias = options.exposureBias
+        exposureRange = options.minimumExposureBias...options.maximumExposureBias
+        locked = options.focusLocked
+        positionSun()
+        if wasLocked && !locked { scheduleHide() }
+    }
+    private func positionSun() {
+        let right = focusIndicator.center.x + 50
+        sun.center = CGPoint(x: right < bounds.width - 14 ? right : focusIndicator.center.x - 50,
+                             y: focusIndicator.center.y - CGFloat(exposureBias) * 12)
+    }
+    private func scheduleHide() {
+        hideIndicator?.cancel()
+        guard !locked else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            UIView.animate(withDuration: 0.3) { self.focusIndicator.alpha = 0; self.sun.alpha = 0 }
         }
+        hideIndicator = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+    }
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+        let location = pan.location(in: self)
+        let velocity = pan.velocity(in: self)
+        return focusIndicator.alpha > 0.1 && abs(location.x - focusIndicator.center.x) < 90 &&
+            abs(location.y - focusIndicator.center.y) < 120 && abs(velocity.y) > abs(velocity.x)
+    }
+    @objc private func exposureDragged(_ gesture: UIPanGestureRecognizer) {
+        if gesture.state == .began { dragBias = exposureBias; hideIndicator?.cancel() }
+        let bias = min(exposureRange.upperBound, max(exposureRange.lowerBound,
+            dragBias - Float(gesture.translation(in: self).y / 90)))
+        exposureBias = bias; positionSun()
+        let finished = gesture.state == .ended || gesture.state == .cancelled
+        if Date().timeIntervalSince(lastExposureAt) > 0.05 || finished {
+            onExposure?(bias); lastExposureAt = Date()
+        }
+        if finished { scheduleHide() }
     }
 }
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     let angle: CGFloat
     let front: Bool
-    let onFocus: (CGPoint) -> Bool
+    let options: CameraOptions?
+    let onFocus: (CGPoint, Bool) -> Bool
+    let onExposure: (Float) -> Void
     func makeUIView(context: Context) -> PreviewUIView {
         let view = PreviewUIView(); view.backgroundColor = .black
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
-        view.onFocus = onFocus
+        view.onFocus = onFocus; view.onExposure = onExposure
         return view
     }
     func updateUIView(_ view: PreviewUIView, context: Context) {
-        view.onFocus = onFocus
+        view.onFocus = onFocus; view.onExposure = onExposure
+        if let options { view.updateMetering(options) }
         guard let connection = view.previewLayer.connection else { return }
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
         connection.automaticallyAdjustsVideoMirroring = false

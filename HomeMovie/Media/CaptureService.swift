@@ -28,6 +28,13 @@ struct CameraOptions: Sendable {
     var isFront: Bool
     var angle: CGFloat
     var canMeter: Bool
+    var canLock: Bool
+    var focusLocked: Bool
+    var exposureBias: Float
+    var minimumExposureBias: Float
+    var maximumExposureBias: Float
+    var hasTorch: Bool
+    var torchOn: Bool
 }
 enum CaptureEvent {
     case ready(CameraOptions)
@@ -51,6 +58,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private var rotationObservation: NSKeyValueObservation?
     private var configured = false
     private var isFront = false
+    private var focusLocked = false
     var onEvent: (@Sendable (CaptureEvent) -> Void)?
 
     override init() {
@@ -59,7 +67,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         observers.append(center.addObserver(forName: AVCaptureDevice.subjectAreaDidChangeNotification, object: nil, queue: nil) { [weak self] notification in
             let deviceID = (notification.object as? AVCaptureDevice)?.uniqueID
             self?.queue.async {
-                guard let self, let camera = self.videoInput?.device, camera.uniqueID == deviceID else { return }
+                guard let self, let camera = self.videoInput?.device, camera.uniqueID == deviceID, !self.focusLocked else { return }
                 try? self.applyFocus(at: CGPoint(x: 0.5, y: 0.5), camera: camera, monitor: false)
             }
         })
@@ -146,9 +154,13 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         camera.videoZoomFactor = min(camera.maxAvailableVideoZoomFactor, max(camera.minAvailableVideoZoomFactor, normal))
         camera.automaticallyAdjustsVideoHDREnabled = false
         if camera.activeFormat.isVideoHDRSupported { camera.isVideoHDREnabled = false }
+        if camera.isFocusPointOfInterestSupported { camera.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5) }
+        if camera.isExposurePointOfInterestSupported { camera.exposurePointOfInterest = CGPoint(x: 0.5, y: 0.5) }
         if camera.isFocusModeSupported(.continuousAutoFocus) { camera.focusMode = .continuousAutoFocus }
         if camera.isExposureModeSupported(.continuousAutoExposure) { camera.exposureMode = .continuousAutoExposure }
         camera.isSubjectAreaChangeMonitoringEnabled = false
+        camera.setExposureTargetBias(0, completionHandler: nil)
+        focusLocked = false
     }
     private func setCoordinator(_ camera: AVCaptureDevice) {
         coordinator = AVCaptureDevice.RotationCoordinator(device: camera, previewLayer: nil)
@@ -176,27 +188,73 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             zoom: camera.videoZoomFactor, minimum: camera.minAvailableVideoZoomFactor, maximum: camera.maxAvailableVideoZoomFactor,
             multiplier: multiplier, isFront: isFront, angle: captureAngle ?? coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90,
             canMeter: (camera.isFocusPointOfInterestSupported && camera.isFocusModeSupported(.continuousAutoFocus)) ||
-                (camera.isExposurePointOfInterestSupported && camera.isExposureModeSupported(.continuousAutoExposure)))
+                (camera.isExposurePointOfInterestSupported && camera.isExposureModeSupported(.continuousAutoExposure)),
+            canLock: camera.isExposurePointOfInterestSupported && camera.isExposureModeSupported(.autoExpose) &&
+                (!camera.isFocusPointOfInterestSupported || camera.isFocusModeSupported(.autoFocus)),
+            focusLocked: focusLocked, exposureBias: camera.exposureTargetBias,
+            minimumExposureBias: camera.minExposureTargetBias, maximumExposureBias: camera.maxExposureTargetBias,
+            hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on)
     }
-    func focus(at point: CGPoint) {
+    func focus(at point: CGPoint, locked: Bool = false) {
         guard point.x.isFinite, point.y.isFinite, (0...1).contains(point.x), (0...1).contains(point.y) else { return }
         queue.async {
             guard self.session.isRunning, let camera = self.videoInput?.device else { return }
-            do { try self.applyFocus(at: point, camera: camera, monitor: true) }
+            do {
+                try self.applyFocus(at: point, camera: camera, monitor: !locked, locked: locked)
+                self.onEvent?(.ready(try self.options()))
+            }
             catch { self.onEvent?(.notice("Focus could not be adjusted. Try tapping again.")) }
         }
     }
-    private func applyFocus(at point: CGPoint, camera: AVCaptureDevice, monitor: Bool) throws {
+    private func applyFocus(at point: CGPoint, camera: AVCaptureDevice, monitor: Bool, locked: Bool = false) throws {
         try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
-        if camera.isFocusPointOfInterestSupported, camera.isFocusModeSupported(.continuousAutoFocus) {
+        let focusMode: AVCaptureDevice.FocusMode = locked ? .autoFocus : .continuousAutoFocus
+        let exposureMode: AVCaptureDevice.ExposureMode = locked ? .autoExpose : .continuousAutoExposure
+        if camera.isFocusPointOfInterestSupported, camera.isFocusModeSupported(focusMode) {
             camera.focusPointOfInterest = point
-            camera.focusMode = .continuousAutoFocus
+            camera.focusMode = focusMode
         }
-        if camera.isExposurePointOfInterestSupported, camera.isExposureModeSupported(.continuousAutoExposure) {
+        if camera.isExposurePointOfInterestSupported, camera.isExposureModeSupported(exposureMode) {
             camera.exposurePointOfInterest = point
-            camera.exposureMode = .continuousAutoExposure
+            camera.exposureMode = exposureMode
         }
+        // One-shot autofocus/autoexposure settle and hold, unlike continuous metering.
+        focusLocked = locked
         camera.isSubjectAreaChangeMonitoringEnabled = monitor
+        if !locked { camera.setExposureTargetBias(0, completionHandler: nil) }
+    }
+    func exposure(_ bias: Float) {
+        guard bias.isFinite else { return }
+        queue.async {
+            guard self.session.isRunning, let camera = self.videoInput?.device else { return }
+            do {
+                try camera.lockForConfiguration()
+                camera.setExposureTargetBias(min(camera.maxExposureTargetBias, max(camera.minExposureTargetBias, bias)), completionHandler: nil)
+                camera.unlockForConfiguration()
+                self.onEvent?(.ready(try self.options()))
+            } catch { self.onEvent?(.notice("Brightness could not be adjusted.")) }
+        }
+    }
+    func toggleTorch() {
+        queue.async {
+            guard self.session.isRunning, let camera = self.videoInput?.device, camera.hasTorch else { return }
+            do {
+                try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
+                if camera.torchMode == .on { camera.torchMode = .off }
+                else {
+                    guard camera.isTorchAvailable else { throw HomeMovieError.message("The torch is temporarily unavailable.") }
+                    try camera.setTorchModeOn(level: AVCaptureDevice.maxAvailableTorchLevel)
+                }
+                self.onEvent?(.ready(try self.options()))
+            } catch { self.onEvent?(.notice(error.localizedDescription)) }
+        }
+    }
+    private func turnOffTorch() {
+        guard let camera = videoInput?.device, camera.hasTorch else { return }
+        do {
+            try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
+            camera.torchMode = .off
+        } catch { }
     }
     func zoom(_ factor: CGFloat) {
         queue.async {
@@ -218,6 +276,10 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 guard self.session.canAddInput(next) else {
                     self.session.addInput(old); self.session.commitConfiguration()
                     throw HomeMovieError.message("This camera is unavailable.")
+                }
+                // The old camera may still own an illuminated torch after removal.
+                if old.device.hasTorch, (try? old.device.lockForConfiguration()) != nil {
+                    old.device.torchMode = .off; old.device.unlockForConfiguration()
                 }
                 self.session.addInput(next); self.session.commitConfiguration()
                 self.videoInput = next; self.isFront.toggle()
@@ -253,6 +315,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     func suspend(completion: (@Sendable () -> Void)? = nil) {
         queue.async {
             if self.output.isRecording { self.output.stopRecording() }
+            self.turnOffTorch()
             if self.session.isRunning { self.session.stopRunning() }
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             completion?()

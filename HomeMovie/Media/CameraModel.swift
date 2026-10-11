@@ -61,11 +61,14 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
         }
     }
     func zoom(_ factor: CGFloat) { if [.ready, .recording].contains(state) { service.zoom(factor) } }
-    func focus(at point: CGPoint) -> Bool {
+    func focus(at point: CGPoint, locked: Bool = false) -> Bool {
         guard [.ready, .recording].contains(state), options?.canMeter == true else { return false }
-        service.focus(at: point)
+        guard !locked || options?.canLock == true else { return false }
+        service.focus(at: point, locked: locked)
         return true
     }
+    func exposure(_ bias: Float) { if [.ready, .recording].contains(state) { service.exposure(bias) } }
+    func toggleTorch() { if [.ready, .recording].contains(state) { service.toggleTorch() } }
     func flip() { guard state == .ready else { return }; state = .preparing; service.flip() }
     private func receive(_ event: CaptureEvent) async {
         switch event {

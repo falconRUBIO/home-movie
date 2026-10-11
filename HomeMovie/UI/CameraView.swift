@@ -97,13 +97,26 @@ struct CameraView: View {
                 }.padding(.horizontal, 15).frame(minHeight: 40).homeGlass()
             }.disabled(camera.busy).accessibilityLabel("Recording into \(movie.name). Change movie")
             Spacer(minLength: 8)
-            Color.clear.frame(width: 44, height: 44)
+            if let options = camera.options, options.hasTorch {
+                Button { camera.toggleTorch() } label: {
+                    Image(systemName: options.torchOn ? "bolt.fill" : "bolt.slash")
+                        .foregroundStyle(options.torchOn ? .yellow : .white)
+                        .frame(width: 44, height: 44).homeGlass()
+                }.accessibilityLabel(options.torchOn ? "Turn torch off" : "Turn torch on")
+                    .disabled(camera.state != .ready && camera.state != .recording)
+            } else { Color.clear.frame(width: 44, height: 44) }
         }
     }
     private func timer(movie: Movie) -> some View {
+        VStack(spacing: 6) {
+            if camera.options?.focusLocked == true {
+                Text("AE/AF LOCK").font(.caption2.weight(.semibold)).foregroundStyle(.black)
+                    .padding(.horizontal, 8).padding(.vertical, 4).background(.yellow, in: RoundedRectangle(cornerRadius: 3))
+            }
         Text(camera.state == .recording ? "● \(durationLabel(camera.elapsed))" : "\(durationLabel(movie.duration)) total")
             .font(.caption.monospacedDigit()).padding(.horizontal, 10).padding(.vertical, 5)
             .background(camera.state == .recording ? Color.red : Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 5))
+        }
     }
     @ViewBuilder private var lenses: some View {
         if let options = camera.options, options.lenses.count > 1 {
@@ -136,8 +149,14 @@ struct CameraView: View {
     private func preview() -> some View {
         ZStack {
             CameraPreview(session: camera.service.session, angle: camera.options?.angle ?? 90, front: camera.options?.isFront ?? false,
-                onFocus: { camera.focus(at: $0) })
+                options: camera.options,
+                onFocus: { camera.focus(at: $0, locked: $1) }, onExposure: { camera.exposure($0) })
                 .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+                .accessibilityLabel("Camera viewfinder")
+                .accessibilityAction(named: "Focus at center") { _ = camera.focus(at: CGPoint(x: 0.5, y: 0.5)) }
+                .accessibilityAction(named: "Lock focus and exposure at center") { _ = camera.focus(at: CGPoint(x: 0.5, y: 0.5), locked: true) }
+                .accessibilityAction(named: "Increase brightness") { camera.exposure((camera.options?.exposureBias ?? 0) + 0.5) }
+                .accessibilityAction(named: "Decrease brightness") { camera.exposure((camera.options?.exposureBias ?? 0) - 0.5) }
                 .gesture(MagnificationGesture().onChanged { value in
                     guard camera.state == .ready || camera.state == .recording, let options = camera.options else { return }
                     if pinchBase == nil { pinchBase = options.zoom }
