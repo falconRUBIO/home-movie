@@ -142,7 +142,7 @@ struct CameraView: View {
             }
             if let message = camera.message { Text(message) }
             if camera.state == .failed || camera.state == .interrupted {
-                Button("Resume Camera") { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }.buttonStyle(.bordered)
+                Button("Resume Camera") { Task { await camera.prepare(profile: movie.captureProfile) } }.buttonStyle(.bordered)
             }
         }.font(.footnote).multilineTextAlignment(.center)
             .shadow(color: .black.opacity(0.8), radius: 3)

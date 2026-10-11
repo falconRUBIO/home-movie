@@ -124,7 +124,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                     self.configured = false
                     if self.session.isRunning { self.session.stopRunning() }
                     self.configuredProfile = profile
-                    try self.configure(front: profile == .appleLog ? false : front)
+                    try self.configure(front: self.device(front: front) == nil ? false : front)
                 }
                 try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .videoRecording, options: [.defaultToSpeaker])
                 try AVAudioSession.sharedInstance().setActive(true)
