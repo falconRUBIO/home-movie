@@ -45,7 +45,7 @@
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>com.example.homemovie.backup</string>
+			<string>com.falconcraft.homemovie.backup</string>
 			<key>UTTypeDescription</key>
 			<string>Home Movie Project Backup</string>
 			<key>UTTypeConformsTo</key>
@@ -70,9 +70,11 @@
 			<string>Owner</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>com.example.homemovie.backup</string>
+				<string>com.falconcraft.homemovie.backup</string>
 			</array>
 		</dict>
 	</array>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<false/>
 </dict>
 </plist>

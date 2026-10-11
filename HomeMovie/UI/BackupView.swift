@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension UTType {
-    static let homeMovieBackup = UTType(exportedAs: "com.example.homemovie.backup", conformingTo: .package)
+    static let homeMovieBackup = UTType(exportedAs: "com.falconcraft.homemovie.backup", conformingTo: .package)
 }
 
 @MainActor final class BackupModel: ObservableObject {

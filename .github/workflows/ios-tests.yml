@@ -25,7 +25,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Generate Xcode project
-        run: python3 scripts/generate_project.py
+        run: |
+          python3 scripts/generate_project.py
+          python3 scripts/validate_source.py
       - name: Compile and run simulator tests
         run: bash scripts/test_simulator.sh
       - name: Package test results

@@ -120,3 +120,11 @@ The empty audio track is the suspected common cause; confirming the fix requires
 GitHub Actions run `38166745629` at commit `b684eb8a8256e1196439a9b70c21721019ff8323` compiled both targets and executed 13 tests with zero failures. Both previously failing landscape/portrait silent-export tests passed after the track setup correction. Logs report 79.322 seconds for all tests. This is a simulator result, not device-camera validation.
 
 The generator default now uses the user's registered `com.falconcraft.homemovie` identifier. A manual, main-only GitHub workflow runs tests before automatic Apple signing and internal-only upload. It uses standalone CLI tools, not Codemagic's hosted service. Signing requires an Admin API key and a persistent certificate private key in GitHub Secrets. Signing and upload are pending that setup; no native build of this configuration or TestFlight upload has yet run.
+
+## Signed archive validation — 2026-10-11 correction
+
+The user's retry passed tests, Apple authentication, signing, archive, and IPA export. Apple package validation rejected two occurrences of the reserved `com.example.homemovie.backup` type with error 90847 and warned about document opening mode (90737). Upload did not complete.
+
+The exported backup type, document-handler type, and Swift UTType now use `com.falconcraft.homemovie.backup`. The package extension and backup contents remain compatible. `LSSupportsOpeningDocumentsInPlace` is explicitly false because restore imports separate copies rather than editing an external project in place. Portable validation now checks the type declarations, runtime identifier agreement, and document configuration; both GitHub workflows run these checks before native tests.
+
+Local source checks pass. A new signed build and Apple package-validation run are required to confirm acceptance of this correction.
