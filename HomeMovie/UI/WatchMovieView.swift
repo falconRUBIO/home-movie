@@ -4,6 +4,7 @@ import AVKit
 struct WatchMovieView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     let movieID: UUID
     var initialSceneID: UUID? = nil
     @State private var presentedInitialReview = false
@@ -16,35 +17,26 @@ struct WatchMovieView: View {
     var body: some View {
         NavigationStack {
             if let movie {
-                ScrollView {
-                VStack(spacing: 16) {
-                    ZStack {
-                        Color.black
-                        if let player { VideoPlayer(player: player) }
-                        if loading { ProgressView().tint(.white) }
-                    }.aspectRatio(movie.format.aspect, contentMode: .fit)
-                    if let problem { Text(problem).font(.footnote).foregroundStyle(.secondary).padding(.horizontal) }
-                    HStack {
-                        Text("Scenes").font(.headline); Spacer()
-                        Text("\(movie.activeScenes.count) · \(durationLabel(movie.duration))").font(.caption).foregroundStyle(.secondary)
-                    }.padding(.horizontal, 20)
-                    ScrollView(.horizontal) {
-                        LazyHStack(spacing: 12) {
-                            ForEach(Array(movie.activeScenes.enumerated()), id: \.element.id) { item in
-                                Button { player?.pause(); review = item.element } label: {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        SceneThumbnail(scene: item.element, root: app.store.root)
-                                            .frame(width: 100, height: 67).clipShape(RoundedRectangle(cornerRadius: 10))
-                                        Text("Scene \(item.offset + 1)").font(.caption)
-                                        Text(durationLabel(item.element.playableDuration)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                                    }
-                                }.buttonStyle(.plain).accessibilityLabel("Review scene \(item.offset + 1)")
+                VStack(spacing: 0) {
+                    GeometryReader { geometry in
+                        // Fit the whole movie inside the space left above the timeline.
+                        // A portrait movie must not size the page beyond the screen.
+                        let width = min(geometry.size.width, geometry.size.height * movie.format.aspect)
+                        ZStack {
+                            Color.black
+                            if let player {
+                                VideoPlayer(player: player)
+                                    .frame(width: max(0, width), height: max(0, width / movie.format.aspect))
                             }
-                        }.padding(.horizontal, 20)
-                    }.frame(height: 120)
-                    Button { player?.pause(); dismiss() } label: { Label("Continue Recording", systemImage: "video").frame(minHeight: 44) }
-                        .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).padding(.bottom, 15)
-                }
+                            if loading { ProgressView().tint(.white) }
+                            if let problem {
+                                Text(problem).font(.footnote).foregroundStyle(.white)
+                                    .multilineTextAlignment(.center).padding()
+                            }
+                        }.frame(width: geometry.size.width, height: geometry.size.height)
+                    }.frame(minHeight: 0, maxHeight: .infinity).layoutPriority(-1)
+                    Divider()
+                    sceneTimeline(movie: movie)
                 }
                 .navigationTitle(movie.name).navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -75,6 +67,33 @@ struct WatchMovieView: View {
             } else { ContentUnavailableView("Movie unavailable", systemImage: "film") }
         }
         .onDisappear { player?.pause() }
+    }
+
+    private func sceneTimeline(movie: Movie) -> some View {
+        VStack(spacing: verticalSizeClass == .compact ? 8 : 12) {
+            HStack {
+                Text("Scenes").font(.headline); Spacer()
+                Text("\(movie.activeScenes.count) · \(durationLabel(movie.duration))").font(.caption).foregroundStyle(.secondary)
+            }.padding(.horizontal, 20).padding(.top, 12)
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(Array(movie.activeScenes.enumerated()), id: \.element.id) { item in
+                        Button { player?.pause(); review = item.element } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                SceneThumbnail(scene: item.element, root: app.store.root)
+                                    .frame(width: 100, height: verticalSizeClass == .compact ? 44 : 67)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                Text("Scene \(item.offset + 1)").font(.caption)
+                                Text(durationLabel(item.element.playableDuration)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                            }
+                        }.buttonStyle(.plain).accessibilityLabel("Review scene \(item.offset + 1)")
+                            .accessibilityHint("Opens playback and trimming controls")
+                    }
+                }.padding(.horizontal, 20)
+            }.scrollIndicators(.visible).fixedSize(horizontal: false, vertical: true)
+            Button { player?.pause(); dismiss() } label: { Label("Continue Recording", systemImage: "video").frame(minHeight: 44) }
+                .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).padding(.bottom, 8)
+        }.fixedSize(horizontal: false, vertical: true).background(.bar)
     }
 }
 

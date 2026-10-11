@@ -186,3 +186,11 @@ GitHub run 38176139953 for commit 14d68e8e079d1be282d67973c4f1002e22c66a78 compi
 ## Full-audit test compilation correction — 2026-10-11
 
 Run 38176808347 compiled the application but stopped in the new geometry regression test: CGSize's CGFloat/Double initializer overloads made .infinity ambiguous. The fixture now explicitly uses CGFloat.infinity. No tests ran in that failed revision; a new run is required.
+
+## Watch Movie timeline visibility — 2026-10-11
+
+Replaced the vertically scrolling, width-sized movie preview with a bounded player above an intrinsically sized scene timeline. The timeline and recording action receive space first; playback fits the complete movie frame within the remaining area. The scene strip uses shorter thumbnails in compact-height landscape, keeps horizontal scrolling, and exposes review/trimming hints to VoiceOver. No stored footage, composition or export dimensions change. Portable source/project checks pass; native compilation and physical-device layout acceptance are tracked separately.
+
+## Full-app audit native result — 2026-10-11
+
+GitHub run 38176920518 for 448f36b011dbcdf64c75b58c7d42bde18b63aa15 compiled the app and executed all 21 tests with zero failures (97.879 seconds). This validates the full-audit fixes and corrected geometry fixture. The following Watch Movie layout change requires its own native compilation; physical-device acceptance remains pending.

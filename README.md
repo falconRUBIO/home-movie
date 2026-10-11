@@ -4,7 +4,7 @@ A SwiftUI iPhone application for recording multiple ongoing movies, scene by sce
 
 ## Status — read this first
 
-The camera stability revision `14d68e8` compiled and passed all 17 native tests in GitHub Actions run `38176139953`. The broader audit now supplies 21 tests and awaits its own native run. A signed internal TestFlight build for `123e29e` uploaded successfully. See `AUDIT.md` and `VALIDATION.json` for evidence; complete physical-device acceptance remains pending.
+The full-app audit revision `448f36b` compiled and passed all 21 native tests in GitHub Actions run `38176920518`. The subsequent Watch Movie timeline layout awaits its own native compilation. A signed internal TestFlight build for `123e29e` uploaded successfully. See `AUDIT.md` and `VALIDATION.json` for evidence; complete physical-device acceptance remains pending.
 
 ## Automatic GitHub build tests
 
@@ -56,6 +56,7 @@ xcodebuild -project HomeMovie.xcodeproj -scheme HomeMovie -destination 'platform
 - Movie and scene deletion are recoverable tombstones, with restore from Settings. No permanent-delete feature in this foundation. Restoring retains sequence positions and trim metadata.
 - Shared composition builder for playback and export, video track transforms, frame-fitting, asynchronous loading, correctly offset audio ranges, and support for scenes without audio.
 - Native AVPlayer playback, scene strip, source scene review, accessible two-edge trim controls, original reset, and nondestructive trim metadata.
+- Watch Movie keeps the horizontally scrolling scene timeline and Continue Recording action below a bounded, full-frame player; portrait playback no longer pushes the scenes off-screen.
 - Export snapshot, real AVFoundation progress, cancellation, storage preflight, MP4 output validation, native Photos add-only save, Files picker, and system share sheet. Validated unchanged revision exports can be reused. Exports are kept alive for saving/sharing. Cache exports older than seven days may be discarded on launch.
 - Foreground export baseline. Leaving the app cancels an in-progress export and offers retry; it does not falsely claim to resume at the same frame.
 - Camera/microphone/Photos purpose strings, native Privacy screen, privacy manifest, and a provisional app icon. A hosted privacy policy and developer contact are required before a public store submission.
