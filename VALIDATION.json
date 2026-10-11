@@ -34,21 +34,22 @@
     "Swift grammar: HomeMovie/Core/AppModel.swift",
     "Swift grammar: HomeMovie/Core/Models.swift"
   ],
-  "swift_files": 19,
+  "swift_files": 21,
   "not_performed": [
-    "Native compilation and 31-test suite for latest Log revision",
+    "Native compilation and 34-test suite for live-look/automatic-interface revision",
     "Physical-device full-screen layout, 8x zoom, tap focus, AE/AF lock, exposure drag, torch and accessibility verification",
     "complete real device acceptance tests",
     "Physical-device rapid-start/stop, background/interruption, camera-switch rollback and runtime-error acceptance tests",
     "Complete full-app device acceptance: microphone audio exports, long operations, Photos opt-out, Files providers, low storage, thermal behavior and accessibility",
     "Physical-device Watch Movie timeline visibility, rotation and larger-text acceptance",
     "Physical-device automatic first-scene orientation, locked later scenes and independent preview rotation",
-    "Physical-device genuine Apple Log bit depth/codec/lenses; long LUT rendering; Filmica match against guide/Resolve reference"
+    "Physical-device genuine Apple Log bit depth/codec/lenses; long LUT rendering; Cinema match against guide/Resolve reference",
+    "Physical-device live Metal LUT preview, high-bit-depth simultaneous capture, established UIKit geometry and metering alignment"
   ],
   "date": "2026-10-11",
-  "native_tests_supplied": 31,
+  "native_tests_supplied": 34,
   "native_tests_run": 25,
-  "native_build_status": "Apple Log application compiled in 38181203567; test fixture compilation corrected. Awaiting 31-test run.",
+  "native_build_status": "Log compositor, selection, backup and asset decoder individually passed in prior runs. Latest live-look/automatic-interface revision awaits 34-test native validation.",
   "previous_cloud_build": {
     "commit": "d70fa524028219e806d7853c05ff4f8f9da60643",
     "provider": "GitHub Actions",

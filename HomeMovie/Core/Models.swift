@@ -16,6 +16,13 @@ enum MovieFormat: String, Codable, CaseIterable, Identifiable, Sendable {
     var id: Self { self }
     var label: String { rawValue.capitalized }
     var aspect: CGFloat { self == .landscape ? 16 / 9 : 9 / 16 }
+    func recordingAngle(observed: CGFloat) -> CGFloat {
+        guard observed.isFinite else { return self == .portrait ? 90 : 0 }
+        let normalized = (observed.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+        let candidates: [CGFloat] = self == .portrait ? [90, 270] : [0, 180]
+        func distance(_ value: CGFloat) -> CGFloat { min(abs(normalized - value), 360 - abs(normalized - value)) }
+        return candidates.min { distance($0) < distance($1) } ?? candidates[0]
+    }
     var canvas: CGSize { self == .landscape ? CGSize(width: 1920, height: 1080) : CGSize(width: 1080, height: 1920) }
     static func captureFormat(angle: CGFloat) -> MovieFormat? {
         guard angle.isFinite else { return nil }

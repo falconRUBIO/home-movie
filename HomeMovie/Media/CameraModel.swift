@@ -11,6 +11,7 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
     @Published var elapsed = CMTime.zero
     @Published var message: String?
     @Published var savedScene = false
+    @Published var takeFormat: MovieFormat?
     private var timer: Timer?
     private var beganAt: TimeInterval?
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -40,9 +41,11 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
     }
     func record(movieID: UUID) {
         guard state == .ready, active, let app else { return }
-        guard let angle = options?.angle, let format = MovieFormat.captureFormat(angle: angle),
-              let movie = app.movie(movieID) else { return }
-        guard movie.recordingFormat == nil || movie.recordingFormat == format, options?.profile == movie.captureProfile else { return }
+        guard let observed = options?.angle, let automatic = MovieFormat.captureFormat(angle: observed),
+              let movie = app.movie(movieID), options?.profile == movie.captureProfile else { return }
+        let format = movie.recordingFormat ?? automatic
+        let angle = movie.recordingFormat == nil ? format.recordingAngle(observed: observed) : OrientationPolicy.shared.captureAngle(format: format, observed: observed)
+        takeFormat = format
         state = .starting; savedScene = false; message = nil; startCancelled = false
         operation = Task {
             var pendingTicket: CaptureTicket?

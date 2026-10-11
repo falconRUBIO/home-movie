@@ -128,10 +128,49 @@ final class PipelineTests: XCTestCase {
         XCTAssertNotNil(app.loadFailure)
         XCTAssertEqual(try Data(contentsOf: file), damaged)
     }
+    func testEstablishedRecordingAnglesDoNotRequirePhysicalRotation() {
+        for format in MovieFormat.allCases {
+            for observed in [CGFloat(0), 90, 180, 270, 360, -90] {
+                XCTAssertEqual(MovieFormat.captureFormat(angle: format.recordingAngle(observed: observed)), format)
+            }
+        }
+        XCTAssertEqual(MovieFormat.portrait.recordingAngle(observed: .nan), 90)
+        XCTAssertEqual(MovieFormat.landscape.recordingAngle(observed: .infinity), 0)
+    }
+    func testLiveLookGeometryFillsBothOrientationsAndMirrorsFrontCamera() {
+        let source = CGSize(width: 320, height: 240)
+        for target in [CGSize(width: 393, height: 852), CGSize(width: 852, height: 393)] {
+            for angle in [CGFloat(0), 90, 180, 270] {
+                for front in [false, true] {
+                    let transform = LiveLookGeometry.transform(source: source, target: target, angle: angle, front: front)
+                    let bounds = CGRect(origin: .zero, size: source).applying(transform)
+                    XCTAssertLessThanOrEqual(bounds.minX, 0.001); XCTAssertLessThanOrEqual(bounds.minY, 0.001)
+                    XCTAssertGreaterThanOrEqual(bounds.maxX, target.width - 0.001)
+                    XCTAssertGreaterThanOrEqual(bounds.maxY, target.height - 0.001)
+                }
+            }
+        }
+        let target = source
+        let normal = LiveLookGeometry.transform(source: source, target: target, angle: 0, front: false)
+        let mirror = LiveLookGeometry.transform(source: source, target: target, angle: 0, front: true)
+        XCTAssertEqual(CGPoint(x: 20, y: 30).applying(normal).x, 20, accuracy: 0.001)
+        XCTAssertEqual(CGPoint(x: 20, y: 30).applying(mirror).x, 300, accuracy: 0.001)
+    }
+    func testLiveMailboxReplacesFramesAndClearsWithoutQueuing() throws {
+        func frame(width: Int) throws -> CVPixelBuffer {
+            var buffer: CVPixelBuffer?
+            XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, width, 16, kCVPixelFormatType_32BGRA, nil, &buffer), kCVReturnSuccess)
+            return try XCTUnwrap(buffer)
+        }
+        let mailbox = LiveFrames()
+        mailbox.push(try frame(width: 16)); XCTAssertEqual(CVPixelBufferGetWidth(try XCTUnwrap(mailbox.latest())), 16)
+        mailbox.push(try frame(width: 32)); XCTAssertEqual(CVPixelBufferGetWidth(try XCTUnwrap(mailbox.latest())), 32)
+        mailbox.clear(); XCTAssertNil(mailbox.latest())
+    }
     private var testCube: String { "TITLE \"Test\"\nLUT_3D_SIZE 2\n" + Array(repeating: "0.9 0.1 0.2", count: 8).joined(separator: "\n") }
     func testCubeParserBoundsDomainsAndRejectsMalformedFiles() throws {
-        let cube = try ColorCube.parse(testCube, name: "Filmica LUT")
-        XCTAssertEqual(cube.name, "Filmica")
+        let cube = try ColorCube.parse(testCube, name: "Cinema LUT")
+        XCTAssertEqual(cube.name, "Cinema")
         XCTAssertEqual(cube.dimension, 2)
         XCTAssertEqual(cube.rgba.count, 128)
         for text in ["LUT_1D_SIZE 4096", "LUT_3D_SIZE 128", "LUT_3D_SIZE 2\n0 0 0", testCube + "\n0 0 0",
@@ -152,7 +191,7 @@ final class PipelineTests: XCTestCase {
     func testLookSelectionPersistsAndInvalidatesExportRevision() async throws {
         let store = try await makeStore(), movie = try await store.create(name: "Log", format: .landscape, profile: .appleLog)
         do { _ = try await store.begin(movieID: movie.id, profile: .standard); XCTFail("A Log movie must not silently record Standard") } catch {}
-        let file = store.root.appendingPathComponent("Filmica LUT.cube"); try testCube.write(to: file, atomically: true, encoding: .utf8)
+        let file = store.root.appendingPathComponent("Cinema.cube"); try testCube.write(to: file, atomically: true, encoding: .utf8)
         let look = try await store.importLook(from: file)
         try await store.setLook(movieID: movie.id, look: look)
         let revision = await store.snapshot().first!.revision
@@ -188,7 +227,7 @@ final class PipelineTests: XCTestCase {
         let store = try await makeStore(), movie = try await store.create(name: "Look Backup", format: .landscape, profile: .appleLog)
         let ticket = try await record(movie, into: store)
         let original = try Data(contentsOf: store.root.appendingPathComponent(ticket.source))
-        let file = store.root.appendingPathComponent("Filmica LUT.cube"); try testCube.write(to: file, atomically: true, encoding: .utf8)
+        let file = store.root.appendingPathComponent("Cinema.cube"); try testCube.write(to: file, atomically: true, encoding: .utf8)
         let look = try await store.importLook(from: file); try await store.setLook(movieID: movie.id, look: look)
         let backup = BackupService(), prepared = try await backup.create(store: store) { _ in }
         let destination = try await makeStore()

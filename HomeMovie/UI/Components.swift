@@ -2,6 +2,7 @@ import SwiftUI
 import AVFoundation
 import UIKit
 import UniformTypeIdentifiers
+import MetalKit
 
 extension View {
     @ViewBuilder func homeGlass(interactive: Bool = true) -> some View {
@@ -69,7 +70,38 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     private var lastExposureAt = Date.distantPast
     private var hideIndicator: DispatchWorkItem?
     private var focusDevicePoint: CGPoint?
+    var fixedFormat: MovieFormat?
     private var showingFront = false
+    private var lookView: MTKView?
+    private var lookRenderer: LiveLookRenderer?
+    func configureLiveLook(frames: LiveFrames?, cube: ColorCube?, active: Bool) {
+        if lookView == nil, active, cube != nil, let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) {
+            let view = MTKView(frame: bounds, device: device)
+            view.isUserInteractionEnabled = false; view.framebufferOnly = false
+            view.colorPixelFormat = .bgra8Unorm; view.colorspace = CGColorSpace(name: CGColorSpace.itur_709)
+            view.autoResizeDrawable = false; view.isPaused = true; view.enableSetNeedsDisplay = false; view.alpha = 0
+            view.delegate = renderer; insertSubview(view, at: 0)
+            lookView = view; lookRenderer = renderer
+        }
+        let monitoredFrames = active && cube != nil ? frames : nil
+        if lookRenderer?.frames !== monitoredFrames {
+            lookRenderer?.frames?.setListener(nil)
+            lookRenderer?.frames = monitoredFrames
+            if let frames = monitoredFrames, let view = lookView {
+                frames.setListener { [weak frames, weak view] in
+                    DispatchQueue.main.async { frames?.notificationHandled(); view?.draw() }
+                }
+            }
+        }
+        lookRenderer?.cube = cube; lookRenderer?.front = showingFront
+        if cube == nil || !active { lookView?.alpha = 0 }
+        resizeLookView()
+    }
+    private func resizeLookView() {
+        lookView?.frame = bounds
+        let scale = min(window?.screen.scale ?? 2, 1920 / max(1, max(bounds.width, bounds.height)))
+        lookView?.drawableSize = CGSize(width: max(1, bounds.width * scale), height: max(1, bounds.height * scale))
+    }
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var rotationObservation: NSKeyValueObservation?
     func updatePreviewRotation(fallback: CGFloat) {
@@ -87,8 +119,10 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     }
     private func applyPreviewRotation(fallback: CGFloat = 90) {
         guard let connection = previewLayer.connection else { return }
-        let angle = rotationCoordinator?.videoRotationAngleForHorizonLevelPreview ?? fallback
+        let angle = fixedFormat.map { OrientationPolicy.shared.captureAngle(format: $0, observed: fallback) }
+            ?? rotationCoordinator?.videoRotationAngleForHorizonLevelPreview ?? fallback
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        lookRenderer?.angle = angle
         repositionIndicator()
     }
     override init(frame: CGRect) {
@@ -143,12 +177,14 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         scheduleHide()
     }
     override func layoutSubviews() {
-        super.layoutSubviews()
+        super.layoutSubviews(); resizeLookView()
+        applyPreviewRotation()
         repositionIndicator()
     }
     func setFront(_ front: Bool) {
         guard showingFront != front else { return }
-        showingFront = front; focusDevicePoint = nil; hideIndicator?.cancel()
+        showingFront = front
+        lookRenderer?.front = front; focusDevicePoint = nil; hideIndicator?.cancel()
         focusIndicator.layer.removeAllAnimations(); sun.layer.removeAllAnimations()
         focusIndicator.alpha = 0; sun.alpha = 0
     }
@@ -207,6 +243,10 @@ struct CameraPreview: UIViewRepresentable {
     let angle: CGFloat
     let front: Bool
     let options: CameraOptions?
+    var liveFrames: LiveFrames? = nil
+    var liveCube: ColorCube? = nil
+    var liveActive = false
+    var fixedFormat: MovieFormat? = nil
     let onFocus: (CGPoint, Bool) -> Bool
     let onExposure: (Float) -> Void
     func makeUIView(context: Context) -> PreviewUIView {
@@ -216,9 +256,14 @@ struct CameraPreview: UIViewRepresentable {
         view.onFocus = onFocus; view.onExposure = onExposure
         return view
     }
+    static func dismantleUIView(_ view: PreviewUIView, coordinator: ()) {
+        view.configureLiveLook(frames: nil, cube: nil, active: false)
+    }
     func updateUIView(_ view: PreviewUIView, context: Context) {
         view.onFocus = onFocus; view.onExposure = onExposure
+        view.fixedFormat = fixedFormat
         view.setFront(front)
+        view.configureLiveLook(frames: liveFrames, cube: liveCube, active: liveActive)
         if let options { view.updateMetering(options) }
         guard let connection = view.previewLayer.connection else { return }
         view.updatePreviewRotation(fallback: angle)

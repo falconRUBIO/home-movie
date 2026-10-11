@@ -4,7 +4,7 @@ A SwiftUI iPhone application for recording multiple ongoing movies, scene by sce
 
 ## Status — read this first
 
-The orientation, timeline and library-export revision `d70fa524` compiled and passed all 25 native tests in GitHub Actions run `38177797042`. Optional Apple Log capture/looks now supplies 31 tests and awaits its native run. A signed internal TestFlight build for `123e29e` uploaded successfully. See `AUDIT.md` and `VALIDATION.json` for evidence; complete physical-device acceptance remains pending.
+The orientation, timeline and library-export revision `d70fa524` compiled and passed all 25 native tests in GitHub Actions run `38177797042`. Optional Apple Log capture/looks now supplies 34 tests and awaits its native run. A signed internal TestFlight build for `123e29e` uploaded successfully. See `AUDIT.md` and `VALIDATION.json` for evidence; complete physical-device acceptance remains pending.
 
 ## Automatic GitHub build tests
 
@@ -49,7 +49,7 @@ xcodebuild -project HomeMovie.xcodeproj -scheme HomeMovie -destination 'platform
 - Edge-to-edge `.resizeAspectFill` preview; display edges can be trimmed to fit the screen, while saved recordings retain their full source frame. Landscape movies require a landscape interface; portrait movies require portrait. Capture rotation is frozen for a take; composed playback/export letterbox differing source geometry rather than crop it. Front preview is mirrored; recorded footage is unmirrored. Verify on device.
 - 1080p, target 30 fps, SDR capture. Video stabilization is initially disabled to avoid a stabilization crop changing the preview/export field of view. This must be assessed on device before offering stabilization.
 - Explicit preparing, ready, starting, recording, finalizing, denied, interrupted and failed states. Movie and camera switching disabled throughout an active take and finalization.
-- New movies choose portrait or landscape automatically from camera rotation at the first recording. The saved movie retains that format for later scenes. Preview rotation uses a separate layer-aware coordinator; recording rotation is fixed at Record.
+- New movies choose portrait or landscape automatically from camera rotation at the first recording. The saved movie opens directly in its established format for later scenes without a rotation prompt. Preview rotation uses a separate layer-aware coordinator; recording rotation is fixed at Record.
 - Tap focus/exposure, long-press AE/AF lock, vertical brightness adjustment beside the yellow sun, and a hardware torch toggle. Controls use available device capabilities; native gesture and torch behavior need physical-device verification.
 - Serial capture configuration off the main thread. Recording destination frozen into a durable journal before starting. Short background allowance for finalization; no promise of background camera recording.
 - Local versioned JSON catalog under Application Support, relative source paths, atomic catalog replacement, rational media times, retained originals and startup reconciliation. Damaged manifests fail closed instead of becoming an empty library.
@@ -106,6 +106,8 @@ Composition uses the older mutable instruction API because it supports the iOS 1
 
 ### Optional Apple Log and looks
 
-Standard is the default. Supported phones expose Apple Log under Recording in New Movie. Log movies have an optional Look row and a small playback Look menu. Apple Standard is included. Use Add Apple Log Look to import Filmica LUT.cube or another original-Apple-Log-input / SDR-output 3D cube through Files. Imported assets stay in the app container, and the selected look is included in project backups. Filmica’s purchased LUT/PowerGrade files are not published in this repository. A cube provides color, not Resolve grain/glow/blur effects.
+Standard is the default. Supported phones expose Apple Log under Recording in New Movie. Log movies have an optional Look row and a small playback Look menu. Apple Standard is included. Use Add Apple Log Look to import Cinema.cube or another original-Apple-Log-input / SDR-output 3D cube through Files. Imported assets stay in the app container, and the selected look is included in project backups. Cinema’s purchased LUT/PowerGrade files are not published in this repository. A cube provides color, not Resolve grain/glow/blur effects.
 
-Show Original temporarily compares ungraded playback; export uses the movie’s selected look. Originals stay untouched. Color-managed playback/export use one compositor and selected-look revisions invalidate export caches. Actual Log capture and color accuracy require the physical-device acceptance tests; Filmica’s exact setup awaits its guide/reference. Apple Log 2 and LUTs expecting other input spaces are not interchangeable with this initial mode.
+Show Original temporarily compares ungraded playback; export uses the movie’s selected look. Originals stay untouched. Color-managed playback/export use one compositor and selected-look revisions invalidate export caches. Actual Log capture and color accuracy require the physical-device acceptance tests; Cinema’s exact setup awaits its guide/reference. Apple Log 2 and LUTs expecting other input spaces are not interchangeable with this initial mode.
+
+Log recording also has a small Live Look menu for the selected grade or original comparison. The GPU preview retains only the latest high-bit-depth frame, coalesces UI notifications and allows one GPU render in flight. Original movie-file capture stays separate. Standard recordings use the native preview layer without the additional render view. Camera and Watch Movie request the established interface format through UIKit; new movies remain automatic until the first take. Import Cinema.cube once through Files.

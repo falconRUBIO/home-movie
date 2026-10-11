@@ -52,6 +52,9 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     let session = AVCaptureSession()
     private let queue = DispatchQueue(label: "HomeMovie.Capture", qos: .userInitiated)
     private let output = AVCaptureMovieFileOutput()
+    let liveFrames = LiveFrames()
+    private let liveOutput = AVCaptureVideoDataOutput()
+    private let liveQueue = DispatchQueue(label: "HomeMovie.live-look", qos: .userInteractive)
     private var videoInput: AVCaptureDeviceInput?
     private var coordinator: AVCaptureDevice.RotationCoordinator?
     private var ticket: CaptureTicket?
@@ -143,6 +146,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         } }.first
     }
     private func configure(front: Bool) throws {
+        liveFrames.clear()
         session.beginConfiguration(); defer { session.commitConfiguration() }
         guard session.canSetSessionPreset(.hd1920x1080) else { throw HomeMovieError.message("1080p recording is not available on this device.") }
         session.inputs.forEach { session.removeInput($0) }; session.outputs.forEach { session.removeOutput($0) }
@@ -158,6 +162,18 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         guard session.canAddInput(audio), session.canAddOutput(output) else { throw HomeMovieError.message("Recording could not be configured.") }
         session.addInput(audio); session.addOutput(output)
         try configureFormat(camera)
+        if configuredProfile == .appleLog {
+            guard session.canAddOutput(liveOutput) else { throw HomeMovieError.message("Live Log preview is unavailable on this camera.") }
+            session.addOutput(liveOutput)
+            liveOutput.alwaysDiscardsLateVideoFrames = true
+            let available = liveOutput.availableVideoCVPixelFormatTypes
+            guard let pixelFormat = [kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange, kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange].first(where: { available.contains($0) }) else {
+                throw HomeMovieError.message("A high-quality live Log preview is unavailable on this camera.")
+            }
+            liveOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat]
+            liveOutput.setSampleBufferDelegate(liveFrames, queue: liveQueue)
+            try configureFormat(camera)
+        }
         setCoordinator(camera)
         configureVideoConnection()
         output.minFreeDiskSpaceLimit = 200_000_000
@@ -318,6 +334,12 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         connection.automaticallyAdjustsVideoMirroring = false
         if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
         if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
+        if let live = liveOutput.connection(with: .video) {
+            if live.isVideoRotationAngleSupported(0) { live.videoRotationAngle = 0 }
+            live.automaticallyAdjustsVideoMirroring = false
+            if live.isVideoMirroringSupported { live.isVideoMirrored = false }
+            if live.isVideoStabilizationSupported { live.preferredVideoStabilizationMode = .off }
+        }
         if configuredProfile == .standard && output.availableVideoCodecTypes.contains(.h264) {
             output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.h264], for: connection)
         }
@@ -325,6 +347,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     func flip() {
         queue.async {
             guard self.ticket == nil, let old = self.videoInput else { return }
+            self.liveFrames.clear()
             let oldFront = self.isFront
             do {
                 guard let camera = self.device(front: !oldFront) else { throw HomeMovieError.message("No other camera is available.") }
@@ -385,6 +408,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     func suspend(completion: (@Sendable () -> Void)? = nil) {
         queue.async {
             self.requestStop()
+            self.liveFrames.clear()
             self.turnOffTorch()
             if self.session.isRunning { self.session.stopRunning() }
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)

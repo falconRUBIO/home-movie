@@ -119,6 +119,7 @@ struct WatchMovieView: View {
                 .sheet(isPresented: $exporting) { ExportView(movie: movie).environmentObject(app) }
             } else { ContentUnavailableView("Movie unavailable", systemImage: "film") }
         }
+        .background(MovieOrientation(format: movie?.recordingFormat).frame(width: 0, height: 0))
         .onDisappear { player?.pause() }
         .alert("Look unavailable", isPresented: Binding(get: { app.error != nil }, set: { if !$0 { app.error = nil } })) {
             Button("OK") { app.error = nil }

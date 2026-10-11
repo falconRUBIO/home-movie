@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import UniformTypeIdentifiers
 
 struct CameraView: View {
     @ObservedObject var app: AppModel
@@ -10,6 +11,11 @@ struct CameraView: View {
     @State private var initialReviewID: UUID?
     @State private var pinchBase: CGFloat?
     @State private var lastZoomAt = Date.distantPast
+    @State private var liveCube: ColorCube?
+    @State private var liveOriginal = false
+    @State private var looks: [LUTReference] = []
+    @State private var addingLook = false
+    @State private var changingLook = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("lastMovieID") private var lastMovieID = ""
@@ -18,10 +24,7 @@ struct CameraView: View {
         _camera = StateObject(wrappedValue: CameraModel(app: app))
     }
     private var movie: Movie? { app.movie(movieID) }
-    private var correctOrientation: Bool {
-        guard let locked = movie?.recordingFormat else { return true }
-        return camera.options.flatMap { MovieFormat.captureFormat(angle: $0.angle) } == locked
-    }
+    private var establishedFormat: MovieFormat? { movie?.recordingFormat ?? (camera.busy ? camera.takeFormat : nil) }
     var body: some View {
         GeometryReader { geometry in
             let landscape = geometry.size.width > geometry.size.height
@@ -59,10 +62,41 @@ struct CameraView: View {
                 }
             } else { ContentUnavailableView("Movie unavailable", systemImage: "film") }
         }
+        .background(MovieOrientation(format: establishedFormat).frame(width: 0, height: 0))
         .background(.black).foregroundStyle(.white)
         .toolbar(.hidden, for: .navigationBar).navigationBarBackButtonHidden()
         .preferredColorScheme(.dark)
-        .task(id: movieID) { await camera.prepare(profile: movie?.captureProfile ?? .standard) }
+        .task(id: movieID) {
+            liveOriginal = false
+            await camera.prepare(profile: movie?.captureProfile ?? .standard)
+            looks = await app.store.availableLooks()
+        }
+        .task(id: "\(movieID)-\(movie?.look?.id.uuidString ?? "standard")") {
+            guard movie?.captureProfile == .appleLog else { liveCube = nil; return }
+            let reference = movie?.look, root = app.store.root
+            do {
+                let loaded = try await Task.detached(priority: .userInitiated) {
+                    if let reference { return try ColorCube.load(reference, root: root) }
+                    return try ColorCube.appleStandard.get()
+                }.value
+                guard !Task.isCancelled else { return }; liveCube = loaded
+            } catch { if !Task.isCancelled { liveCube = nil; camera.message = "This look could not be loaded. Choose Apple Standard." } }
+        }
+        .fileImporter(isPresented: $addingLook, allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data], allowsMultipleSelection: false) { result in
+            changingLook = true
+            Task {
+                defer { changingLook = false }
+                do {
+                    let urls = try result.get()
+                    if let url = urls.first {
+                        let look = try await app.store.importLook(from: url)
+                        try await app.store.setLook(movieID: movieID, look: look)
+                        liveOriginal = false; looks = await app.store.availableLooks(); await app.refresh()
+                    }
+                } catch { camera.message = error.localizedDescription }
+                await camera.prepare(profile: movie?.captureProfile ?? .standard)
+            }
+        }
         .onDisappear { camera.suspend() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { camera.suspend() }
@@ -97,6 +131,20 @@ struct CameraView: View {
                 }.padding(.horizontal, 15).frame(minHeight: 40).homeGlass()
             }.disabled(camera.busy).accessibilityLabel("Recording into \(movie.name). Change movie")
             Spacer(minLength: 8)
+            if movie.captureProfile == .appleLog {
+                Menu {
+                    Button { liveOriginal.toggle() } label: { Label("Show Original", systemImage: liveOriginal ? "checkmark" : "circle") }
+                    Divider()
+                    Button { changeLiveLook(nil) } label: { Label("Apple Standard", systemImage: movie.look == nil ? "checkmark" : "circle") }
+                    ForEach(looks, id: \.id) { look in
+                        Button { changeLiveLook(look) } label: { Label(look.name, systemImage: movie.look?.id == look.id ? "checkmark" : "circle") }
+                    }
+                    Divider()
+                    Button("Add Apple Log Look…", systemImage: "plus") { addingLook = true }.disabled(camera.busy)
+                } label: { Image(systemName: "slider.horizontal.3").frame(width: 44, height: 44).homeGlass() }
+                    .accessibilityLabel("Live look: \(liveOriginal ? "Original Log" : movie.lookName)")
+                    .disabled(changingLook)
+            }
             if let options = camera.options, options.hasTorch {
                 Button { camera.toggleTorch() } label: {
                     Image(systemName: options.torchOn ? "bolt.fill" : "bolt.slash")
@@ -137,9 +185,6 @@ struct CameraView: View {
     }
     @ViewBuilder private func status(movie: Movie) -> some View {
         VStack(spacing: 8) {
-            if !correctOrientation && !camera.busy {
-                Text("Rotate your iPhone to record in \(movie.format.label).")
-            }
             if let message = camera.message { Text(message) }
             if camera.state == .failed || camera.state == .interrupted {
                 Button("Resume Camera") { Task { await camera.prepare(profile: movie.captureProfile) } }.buttonStyle(.bordered)
@@ -150,7 +195,10 @@ struct CameraView: View {
     private func preview() -> some View {
         ZStack {
             CameraPreview(session: camera.service.session, angle: camera.options?.angle ?? 90, front: camera.options?.isFront ?? false,
-                options: camera.options,
+                options: camera.options, liveFrames: camera.service.liveFrames,
+                liveCube: liveOriginal ? nil : liveCube,
+                liveActive: movie?.captureProfile == .appleLog && [.ready, .starting, .recording].contains(camera.state),
+                fixedFormat: establishedFormat,
                 onFocus: { camera.focus(at: $0, locked: $1) }, onExposure: { camera.exposure($0) })
                 .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
                 .accessibilityLabel("Camera viewfinder")
@@ -189,8 +237,8 @@ struct CameraView: View {
                     .fill(.red).frame(width: camera.state == .recording ? 29 : 62, height: camera.state == .recording ? 29 : 62)
             }
         }.buttonStyle(.plain)
-            .disabled(camera.state != .recording && (camera.state != .ready || !correctOrientation))
-            .opacity(camera.state != .recording && (camera.state != .ready || !correctOrientation) ? 0.4 : 1)
+            .disabled(camera.state != .recording && (camera.state != .ready))
+            .opacity(camera.state != .recording && (camera.state != .ready) ? 0.4 : 1)
             .accessibilityLabel(camera.state == .recording ? "Stop recording" : "Record next scene")
         let recent = Button { openWatch(sceneID: movie.activeScenes.last?.id) } label: {
             SceneThumbnail(scene: movie.activeScenes.last, root: app.store.root)
@@ -209,6 +257,14 @@ struct CameraView: View {
                     .font(.footnote).frame(minHeight: 44)
             }.disabled(camera.busy || movie.activeScenes.isEmpty)
                 .accessibilityLabel(camera.savedScene ? "Scene saved. Watch movie" : "Watch movie")
+        }
+    }
+    private func changeLiveLook(_ look: LUTReference?) {
+        guard !changingLook else { return }
+        changingLook = true; liveOriginal = false
+        Task {
+            defer { changingLook = false }
+            await app.run { try await app.store.setLook(movieID: movieID, look: look) }
         }
     }
     private func openWatch(sceneID: UUID? = nil) {

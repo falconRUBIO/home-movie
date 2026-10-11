@@ -221,7 +221,7 @@ actor ProjectStore {
         guard catalog.movies[i].deletedAt == nil else { throw HomeMovieError.message("Restore this movie before recording.") }
         if let profile, profile != catalog.movies[i].captureProfile { throw HomeMovieError.message("The camera’s recording profile does not match this movie.") }
         if let format, let locked = catalog.movies[i].recordingFormat, format != locked {
-            throw HomeMovieError.message("Rotate your iPhone to record in \(locked.label).")
+            throw HomeMovieError.message("This scene must use the movie’s saved format.")
         }
         try requireSpace(bytes: 300_000_000)
         let ticket = CaptureTicket(movieID: movieID, sequence: catalog.movies[i].nextSequence, format: format, profile: profile)

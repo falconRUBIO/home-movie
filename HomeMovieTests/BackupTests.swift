@@ -86,6 +86,7 @@ final class BackupTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: preserved.url), damaged)
     }
     func testLegacyMetadataWithoutSafetyFieldsStillDecodes() async throws {
+        executionTimeAllowance = 360 // The first simulator video encoder can cold-start slowly.
         let (store, _) = try await sourceMovie()
         let file = store.root.appendingPathComponent("catalog.json")
         var value = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
