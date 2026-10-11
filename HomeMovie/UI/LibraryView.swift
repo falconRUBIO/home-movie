@@ -10,6 +10,7 @@ struct LibraryView: View {
     @State private var renameMovie: Movie?
     @State private var renameText = ""
     @State private var deleteMovie: Movie?
+    @State private var exportMovie: Movie?
     @AppStorage("openLastMovie") private var openLastMovie = false
     @AppStorage("lastMovieID") private var lastMovieID = ""
     var body: some View {
@@ -52,6 +53,9 @@ struct LibraryView: View {
                                         }
                                         Spacer()
                                         Menu {
+                                            Button("Export", systemImage: "square.and.arrow.up") { exportMovie = movie }
+                                                .disabled(movie.activeScenes.isEmpty)
+                                            Divider()
                                             Button("Rename", systemImage: "pencil") { renameText = movie.name; renameMovie = movie }
                                             Button("Delete Movie", systemImage: "trash", role: .destructive) { deleteMovie = movie }
                                         } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
@@ -77,6 +81,7 @@ struct LibraryView: View {
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $backups) { BackupView() }
             .sheet(isPresented: $recovery) { RecordingRecoveryView() }
+            .sheet(item: $exportMovie) { movie in ExportView(movie: movie).environmentObject(app) }
             .alert("Rename Movie", isPresented: Binding(get: { renameMovie != nil }, set: { if !$0 { renameMovie = nil } })) {
                 TextField("Movie name", text: $renameText)
                 Button("Cancel", role: .cancel) { renameMovie = nil }

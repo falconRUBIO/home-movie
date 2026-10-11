@@ -194,3 +194,7 @@ Replaced the vertically scrolling, width-sized movie preview with a bounded play
 ## Full-app audit native result — 2026-10-11
 
 GitHub run 38176920518 for 448f36b011dbcdf64c75b58c7d42bde18b63aa15 compiled the app and executed all 21 tests with zero failures (97.879 seconds). This validates the full-audit fixes and corrected geometry fixture. The following Watch Movie layout change requires its own native compilation; physical-device acceptance remains pending.
+
+## Library export entry point — 2026-10-11
+
+Each movie card now offers Export at the top of its three-dot menu. The item presents the same ExportView used by Watch Movie, retaining MP4 preparation, Save to Photos, Save to Files, Share Video, progress and cancellation. Export is disabled for movies with no active playable scenes. The item sheet captures the selected movie snapshot and receives the existing AppModel. Portable source checks pass; device menu/presentation acceptance remains pending.
