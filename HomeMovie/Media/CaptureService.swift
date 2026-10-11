@@ -6,6 +6,18 @@ struct LensChoice: Identifiable, Equatable, Sendable {
     let factor: CGFloat
     let displayed: CGFloat
     var label: String { String(format: "%g×", Double(displayed)) }
+    static func available(minimum: CGFloat, maximum: CGFloat, multiplier: CGFloat,
+                          switchFactors: [CGFloat], secondaryFactors: [CGFloat]) -> [LensChoice] {
+        guard multiplier.isFinite, multiplier > 0 else { return [] }
+        let candidates = ([minimum, 1 / multiplier] + switchFactors + secondaryFactors)
+            .filter { $0.isFinite && $0 >= minimum && $0 <= maximum }.sorted()
+        var choices: [LensChoice] = []
+        for factor in candidates {
+            guard !choices.contains(where: { abs($0.factor - factor) < 0.001 }) else { continue }
+            choices.append(LensChoice(factor: factor, displayed: (factor * multiplier * 10).rounded() / 10))
+        }
+        return choices
+    }
 }
 struct CameraOptions: Sendable {
     var lenses: [LensChoice]
@@ -138,9 +150,17 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private func options() throws -> CameraOptions {
         guard let camera = videoInput?.device else { throw HomeMovieError.message("Camera not configured.") }
         let multiplier = camera.displayVideoZoomFactorMultiplier
-        let factors = [camera.minAvailableVideoZoomFactor] + camera.virtualDeviceSwitchOverVideoZoomFactors.map { CGFloat(truncating: $0) }
-        let unique = Array(Set(factors)).sorted().filter { $0 >= camera.minAvailableVideoZoomFactor && $0 <= camera.maxAvailableVideoZoomFactor }
-        return CameraOptions(lenses: unique.map { LensChoice(factor: $0, displayed: ($0 * multiplier * 10).rounded() / 10) },
+        let switches = camera.virtualDeviceSwitchOverVideoZoomFactors.map { CGFloat(truncating: $0) }
+        var secondary = camera.activeFormat.secondaryNativeResolutionZoomFactors
+        // Constituent formats report zoom relative to their own physical camera.
+        // Convert those factors into the virtual device's zoom coordinates.
+        for (index, constituent) in camera.constituentDevices.enumerated() {
+            let base = index == 0 ? CGFloat(1) : switches.indices.contains(index - 1) ? switches[index - 1] : CGFloat(1)
+            secondary += constituent.activeFormat.secondaryNativeResolutionZoomFactors.map { $0 * base }
+        }
+        let lenses = LensChoice.available(minimum: camera.minAvailableVideoZoomFactor, maximum: camera.maxAvailableVideoZoomFactor,
+            multiplier: multiplier, switchFactors: switches, secondaryFactors: secondary)
+        return CameraOptions(lenses: lenses,
             zoom: camera.videoZoomFactor, minimum: camera.minAvailableVideoZoomFactor, maximum: camera.maxAvailableVideoZoomFactor,
             multiplier: multiplier, isFront: isFront, angle: captureAngle ?? coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90)
     }

@@ -3,6 +3,20 @@ import AVFoundation
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    func testNativeResolutionZoomChoicesIncludeSupportedEightTimes() {
+        let choices = LensChoice.available(minimum: 1, maximum: 20, multiplier: 0.5,
+            switchFactors: [2, 8], secondaryFactors: [4, 16, 16])
+        XCTAssertEqual(choices.map(\.displayed), [0.5, 1, 2, 4, 8])
+        XCTAssertEqual(choices.last?.factor, 16)
+    }
+    func testZoomChoicesRespectDeviceRangeAndDoNotInventEightTimes() {
+        let olderPhone = LensChoice.available(minimum: 1, maximum: 12, multiplier: 0.5,
+            switchFactors: [2, 6], secondaryFactors: [])
+        XCTAssertEqual(olderPhone.map(\.displayed), [0.5, 1, 3])
+        let restricted = LensChoice.available(minimum: 1, maximum: 8, multiplier: 0.5,
+            switchFactors: [2, 8], secondaryFactors: [4, 16])
+        XCTAssertEqual(restricted.map(\.displayed), [0.5, 1, 2, 4])
+    }
     private func makeStore() async throws -> ProjectStore {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let store = ProjectStore(root: root); _ = try await store.load()

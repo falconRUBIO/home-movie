@@ -78,3 +78,5 @@ The app must not be represented as device-tested until this gate passes.
 - Memory/thermal measurements:
 
 Use copies and test movies for destructive developer-container scenarios, never irreplaceable footage.
+
+Zoom-option acceptance: compare buttons with the phone's available recording modes. On the reported phone, verify 0.5×, 1×, secondary 2×, 4× and 8× when supported by the active format. Record at 8×, stop, review and export; confirm the selected zoom persists. Repeat with an older phone and front camera to confirm unsupported options do not appear.

@@ -36,14 +36,14 @@
   ],
   "swift_files": 18,
   "not_performed": [
-    "Native compilation/tests of edge-to-edge camera revision",
-    "Physical-device layout verification of edge-to-edge camera",
+    "Native compilation and 15-test suite for current camera revision",
+    "Physical-device layout and 8x zoom verification",
     "complete real device acceptance tests"
   ],
   "date": "2026-10-11",
-  "native_tests_supplied": 13,
+  "native_tests_supplied": 15,
   "native_tests_run": 13,
-  "native_build_status": "Previous signed revision passed tests and upload. Edge-to-edge camera revision awaits native compilation and device verification.",
+  "native_build_status": "Edge-to-edge camera and native-resolution zoom discovery await native build. Prior uploaded revision passed 13 tests.",
   "previous_cloud_build": {
     "commit": "b684eb8a8256e1196439a9b70c21721019ff8323",
     "provider": "GitHub Actions",
