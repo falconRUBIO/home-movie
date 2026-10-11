@@ -182,3 +182,7 @@ Reviewed existing protections without changing them: atomic catalog/previous-cat
 ## Camera stability native result — 2026-10-11
 
 GitHub run 38176139953 for commit 14d68e8e079d1be282d67973c4f1002e22c66a78 compiled the app/tests and executed all 17 tests with zero failures (148.639 seconds of test execution). This confirms the missing-override correction and supplied cancellation tests, as well as existing zoom, storage/recovery, backup and silent export coverage. It does not exercise physical camera controls. The broader audit adds four tests and awaits its own 21-test run. Deprecated session notification spellings are updated to the SDK's recommended names without changing notification behavior.
+
+## Full-audit test compilation correction — 2026-10-11
+
+Run 38176808347 compiled the application but stopped in the new geometry regression test: CGSize's CGFloat/Double initializer overloads made .infinity ambiguous. The fixture now explicitly uses CGFloat.infinity. No tests ran in that failed revision; a new run is required.

@@ -63,10 +63,10 @@
   "uploaded_commit": "123e29e7de0dedaf4ae8ecb42bd539018203825d",
   "successful_upload_run": 38173470003,
   "latest_failed_native_run": {
-    "run_id": 38175522102,
-    "commit": "514de18fca8fdcaf4a4147df88152d9d968bd1c2",
-    "phase": "app compilation",
+    "run_id": 38176808347,
+    "commit": "5df614de3b36621653d54dfcdc6291124e8b883a",
+    "phase": "test compilation",
     "tests_run": 0,
-    "issue": "Missing override on gestureRecognizerShouldBegin; corrected in source"
+    "issue": "Ambiguous infinity in geometry fixture; corrected to CGFloat.infinity"
   }
 }

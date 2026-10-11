@@ -21,7 +21,7 @@ final class PipelineTests: XCTestCase {
         let valid = CGSize(width: 1920, height: 1080)
         XCTAssertTrue(MediaAssembler.hasValidGeometry(size: valid, preferred: CGAffineTransform(rotationAngle: .pi / 2)))
         XCTAssertFalse(MediaAssembler.hasValidGeometry(size: .zero, preferred: .identity))
-        XCTAssertFalse(MediaAssembler.hasValidGeometry(size: CGSize(width: .infinity, height: 1080), preferred: .identity))
+        XCTAssertFalse(MediaAssembler.hasValidGeometry(size: CGSize(width: CGFloat.infinity, height: 1080), preferred: .identity))
         XCTAssertFalse(MediaAssembler.hasValidGeometry(size: valid, preferred: CGAffineTransform(a: .nan, b: 0, c: 0, d: 1, tx: 0, ty: 0)))
     }
     func testDurationLabelsHandleExtremeAndInvalidTimes() {
