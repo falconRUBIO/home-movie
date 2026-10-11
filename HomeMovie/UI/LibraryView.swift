@@ -154,14 +154,14 @@ struct NewMovieView: View {
                         Button("Create") {
                             saving = true
                             Task {
-                                do { let movie = try await app.store.create(name: name, format: .portrait, profile: profile); if profile == .appleLog, let selectedLook { try await app.store.setLook(movieID: movie.id, look: selectedLook) }; await app.refresh(); created(movie.id) }
+                                do { let movie = try await app.store.create(name: name, format: .portrait, profile: profile, look: profile == .appleLog ? selectedLook : nil); await app.refresh(); created(movie.id) }
                                 catch { problem = error.localizedDescription; saving = false }
                             }
                         }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).count > 80 || saving || loadingLook)
                     }
                 }
         }.presentationDetents([.medium]).interactiveDismissDisabled(saving)
-                        .fileImporter(isPresented: $importingLook, allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data], allowsMultipleSelection: false) { result in
+            .fileImporter(isPresented: $importingLook, allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data], allowsMultipleSelection: false) { result in
                 switch result {
                 case .success(let urls):
                     guard let url = urls.first else { return }; loadingLook = true

@@ -36,7 +36,7 @@
   ],
   "swift_files": 19,
   "not_performed": [
-    "Native compilation and 30-test suite for Apple Log/looks revision",
+    "Native compilation and 31-test suite for latest Log revision",
     "Physical-device full-screen layout, 8x zoom, tap focus, AE/AF lock, exposure drag, torch and accessibility verification",
     "complete real device acceptance tests",
     "Physical-device rapid-start/stop, background/interruption, camera-switch rollback and runtime-error acceptance tests",
@@ -46,9 +46,9 @@
     "Physical-device genuine Apple Log bit depth/codec/lenses; long LUT rendering; Filmica match against guide/Resolve reference"
   ],
   "date": "2026-10-11",
-  "native_tests_supplied": 30,
+  "native_tests_supplied": 31,
   "native_tests_run": 25,
-  "native_build_status": "Orientation/timeline/library-export revision d70fa524 passed 25 native tests. Apple Log and LUT rendering revision awaits its 30-test native run.",
+  "native_build_status": "Apple Log application compiled in 38181203567; test fixture compilation corrected. Awaiting 31-test run.",
   "previous_cloud_build": {
     "commit": "d70fa524028219e806d7853c05ff4f8f9da60643",
     "provider": "GitHub Actions",

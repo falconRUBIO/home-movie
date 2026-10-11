@@ -17,11 +17,14 @@ struct ColorCube: Codable, Sendable {
     func validate() throws {
         guard (2...65).contains(dimension), rgba.count == dimension * dimension * dimension * 16,
               !name.isEmpty, name.count <= 80, minimum.count == 3, maximum.count == 3,
-              zip(minimum, maximum).allSatisfy({ $0.isFinite && $1.isFinite && $1 > $0 }) else {
+              zip(minimum, maximum).allSatisfy({ $0.isFinite && $1.isFinite && $1 > $0 && ($1 - $0).isFinite && (1 / ($1 - $0)).isFinite }) else {
             throw HomeMovieError.message("This look has invalid color data.")
         }
         let valid = rgba.withUnsafeBytes { bytes in
-            (0..<(rgba.count / 4)).allSatisfy { bytes.loadUnaligned(fromByteOffset: $0 * 4, as: Float.self).isFinite }
+            (0..<(rgba.count / 4)).allSatisfy {
+                let value = bytes.loadUnaligned(fromByteOffset: $0 * 4, as: Float.self)
+                return value.isFinite && abs(value) <= 64 && ($0 % 4 != 3 || value == 1)
+            }
         }
         guard valid else { throw HomeMovieError.message("This look contains invalid color values.") }
     }

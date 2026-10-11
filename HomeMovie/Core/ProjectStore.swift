@@ -157,12 +157,17 @@ actor ProjectStore {
         return Array(Set(notices)).sorted()
     }
     func snapshot() -> [Movie] { catalog.movies.sorted { ($0.lastRecordedAt ?? $0.createdAt) > ($1.lastRecordedAt ?? $1.createdAt) } }
-    @discardableResult func create(name: String, format: MovieFormat, profile: CaptureProfile = .standard) throws -> Movie {
+    @discardableResult func create(name: String, format: MovieFormat, profile: CaptureProfile = .standard, look: LUTReference? = nil) throws -> Movie {
         try requireIdle()
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= 80 else { throw HomeMovieError.message("Give your movie a name of up to 80 characters.") }
+        if let look {
+            guard profile == .appleLog else { throw HomeMovieError.message("Choose Apple Log to use this look.") }
+            _ = try ColorCube.load(look, root: root)
+        }
         var movie = Movie(name: clean, format: format)
         movie.profile = profile == .standard ? nil : profile
+        movie.look = look
         var next = catalog; next.movies.append(movie); try write(next); return movie
     }
     func availableLooks() -> [LUTReference] {

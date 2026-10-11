@@ -170,6 +170,20 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(standard.first?.revision, revision + 1)
         XCTAssertNil(standard.first?.look)
     }
+    func testInitialLookCreationIsAtomicWhenLookIsMissing() async throws {
+        let store = try await makeStore()
+        do {
+            _ = try await store.create(name: "Missing", format: .portrait, profile: .appleLog, look: LUTReference(id: UUID(), name: "Missing"))
+            XCTFail("Missing looks must fail before creating a movie")
+        } catch {}
+        let empty = await store.snapshot(); XCTAssertTrue(empty.isEmpty)
+        let file = store.root.appendingPathComponent("Initial.cube"); try testCube.write(to: file, atomically: true, encoding: .utf8)
+        let look = try await store.importLook(from: file)
+        let movie = try await store.create(name: "Initial", format: .portrait, profile: .appleLog, look: look)
+        XCTAssertEqual(movie.look, look); XCTAssertEqual(movie.revision, 0)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let saved = await reopened.snapshot(); XCTAssertEqual(saved.first?.look, look)
+    }
     func testBackupCarriesSelectedLookWithoutChangingExistingFiles() async throws {
         let store = try await makeStore(), movie = try await store.create(name: "Look Backup", format: .landscape, profile: .appleLog)
         let ticket = try await record(movie, into: store)
@@ -182,7 +196,8 @@ final class PipelineTests: XCTestCase {
         let restored = await destination.snapshot()
         let imported = try XCTUnwrap(restored.first?.look)
         XCTAssertNotEqual(imported.id, look.id)
-        XCTAssertEqual(try ColorCube.load(imported, root: destination.root).rgba, ColorCube.load(look, root: store.root).rgba)
+        let a = try ColorCube.load(imported, root: destination.root), b = try ColorCube.load(look, root: store.root)
+        XCTAssertEqual(a.rgba, b.rgba)
         XCTAssertEqual(try Data(contentsOf: store.root.appendingPathComponent(ticket.source)), original)
         try await backup.discard(prepared.url)
     }
@@ -193,7 +208,7 @@ final class PipelineTests: XCTestCase {
         let look = try await store.importLook(from: file); try await store.setLook(movieID: movie.id, look: look)
         let snapshot = await store.snapshot().first!, assembler = MediaAssembler()
         let bundle = try await assembler.build(movie: snapshot, root: store.root)
-        XCTAssertTrue(bundle.videoComposition.customVideoCompositorClass === LogVideoCompositor.self)
+        XCTAssertEqual(bundle.videoComposition.customVideoCompositorClass.map { ObjectIdentifier($0) }, ObjectIdentifier(LogVideoCompositor.self))
         let original = try await assembler.build(movie: snapshot, root: store.root, showOriginalLog: true)
         XCTAssertNil((original.videoComposition.instructions.first as? ColorInstruction)?.cube)
         let preview = AVAssetImageGenerator(asset: bundle.asset); preview.videoComposition = bundle.videoComposition
