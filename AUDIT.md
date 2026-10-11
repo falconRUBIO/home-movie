@@ -164,3 +164,7 @@ The capture queue retains a stop request through the interval before AVFoundatio
 Camera switching restores the prior input if the new configuration fails, or marks the session for reconnection if recovery fails. Recording connection settings are reapplied after switches. Runtime errors request stop, extinguish the torch and require fresh configuration on resume. Camera/audio interruptions also request stop and extinguish the torch. Preview indicators retain device coordinates across rotation and clear when switching front/back cameras.
 
 Portable Swift grammar, project, permissions, privacy and document checks pass. Native build/test execution for this revision is pending GitHub's Mac runner; the preceding automatic revision was still pending at audit time. No native tests or physical-device race/gesture/thermal tests were executed locally. This audit does not establish that the app is crash-free or release-ready. Existing original-media, atomic catalog, journal recovery and backup protection are retained.
+
+## Native gesture compilation correction — 2026-10-11
+
+GitHub run 38175522102 for commit 514de18f compiled far enough to report that UIView already declares gestureRecognizerShouldBegin(_:); the preview's implementation requires override. Added the missing keyword. That build failed before test execution. Portable grammar checks pass; a new native run is required to validate the correction and stability revision.

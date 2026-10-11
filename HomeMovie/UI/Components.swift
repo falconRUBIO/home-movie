@@ -160,7 +160,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         hideIndicator = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
     }
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
         let location = pan.location(in: self)
         let velocity = pan.velocity(in: self)

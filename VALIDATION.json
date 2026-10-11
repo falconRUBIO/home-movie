@@ -44,7 +44,7 @@
   "date": "2026-10-11",
   "native_tests_supplied": 17,
   "native_tests_run": 13,
-  "native_build_status": "Current stability fixes, camera interactions and 17-test suite await native build. Prior uploaded revision passed 13 tests.",
+  "native_build_status": "Previous camera build failed before tests: missing override on UIView.gestureRecognizerShouldBegin. Corrected; current stability revision and 17-test suite await a new native run.",
   "previous_cloud_build": {
     "commit": "b684eb8a8256e1196439a9b70c21721019ff8323",
     "provider": "GitHub Actions",
@@ -60,5 +60,12 @@
   "signed_archive_created": true,
   "apple_package_validation_status": "PASS for 123e29e; upload succeeded",
   "uploaded_commit": "123e29e7de0dedaf4ae8ecb42bd539018203825d",
-  "successful_upload_run": 38173470003
+  "successful_upload_run": 38173470003,
+  "latest_failed_native_run": {
+    "run_id": 38175522102,
+    "commit": "514de18fca8fdcaf4a4147df88152d9d968bd1c2",
+    "phase": "app compilation",
+    "tests_run": 0,
+    "issue": "Missing override on gestureRecognizerShouldBegin; corrected in source"
+  }
 }
