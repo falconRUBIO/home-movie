@@ -4,7 +4,7 @@ A SwiftUI iPhone application for recording multiple ongoing movies, scene by sce
 
 ## Status — read this first
 
-The orientation, timeline and library-export revision `d70fa524` compiled and passed all 25 native tests in GitHub Actions run `38177797042`. Optional Apple Log capture/looks now supplies 34 tests and awaits its native run. A signed internal TestFlight build for `123e29e` uploaded successfully. See `AUDIT.md` and `VALIDATION.json` for evidence; complete physical-device acceptance remains pending.
+The latest source revision `468bb983` compiled and passed all 34 native simulator tests in GitHub Actions run `38183715011`, covering optional Apple Log/looks, renderer/export consistency, backup restoration and the existing recording/storage regressions. Live camera presentation and automatic interface orientation still require physical-device acceptance. The earlier signed internal TestFlight build for `123e29e` uploaded successfully; current source awaits its next upload. See `AUDIT.md` and `VALIDATION.json` for evidence.
 
 ## Automatic GitHub build tests
 
