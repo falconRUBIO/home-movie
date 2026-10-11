@@ -27,6 +27,7 @@ struct CameraOptions: Sendable {
     var multiplier: CGFloat
     var isFront: Bool
     var angle: CGFloat
+    var canMeter: Bool
 }
 enum CaptureEvent {
     case ready(CameraOptions)
@@ -34,6 +35,7 @@ enum CaptureEvent {
     case finished(CaptureTicket, Error?)
     case interrupted(String)
     case failed(String)
+    case notice(String)
 }
 
 // All capture mutation is confined to one serial queue. The preview observes the session only.
@@ -54,6 +56,13 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     override init() {
         super.init()
         let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: AVCaptureDevice.subjectAreaDidChangeNotification, object: nil, queue: nil) { [weak self] notification in
+            let deviceID = (notification.object as? AVCaptureDevice)?.uniqueID
+            self?.queue.async {
+                guard let self, let camera = self.videoInput?.device, camera.uniqueID == deviceID else { return }
+                try? self.applyFocus(at: CGPoint(x: 0.5, y: 0.5), camera: camera, monitor: false)
+            }
+        })
         observers.append(center.addObserver(forName: .AVCaptureSessionWasInterrupted, object: session, queue: nil) { [weak self] _ in
             guard let self else { return }
             self.queue.async {
@@ -137,6 +146,9 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         camera.videoZoomFactor = min(camera.maxAvailableVideoZoomFactor, max(camera.minAvailableVideoZoomFactor, normal))
         camera.automaticallyAdjustsVideoHDREnabled = false
         if camera.activeFormat.isVideoHDRSupported { camera.isVideoHDREnabled = false }
+        if camera.isFocusModeSupported(.continuousAutoFocus) { camera.focusMode = .continuousAutoFocus }
+        if camera.isExposureModeSupported(.continuousAutoExposure) { camera.exposureMode = .continuousAutoExposure }
+        camera.isSubjectAreaChangeMonitoringEnabled = false
     }
     private func setCoordinator(_ camera: AVCaptureDevice) {
         coordinator = AVCaptureDevice.RotationCoordinator(device: camera, previewLayer: nil)
@@ -162,7 +174,29 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             multiplier: multiplier, switchFactors: switches, secondaryFactors: secondary)
         return CameraOptions(lenses: lenses,
             zoom: camera.videoZoomFactor, minimum: camera.minAvailableVideoZoomFactor, maximum: camera.maxAvailableVideoZoomFactor,
-            multiplier: multiplier, isFront: isFront, angle: captureAngle ?? coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90)
+            multiplier: multiplier, isFront: isFront, angle: captureAngle ?? coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90,
+            canMeter: (camera.isFocusPointOfInterestSupported && camera.isFocusModeSupported(.continuousAutoFocus)) ||
+                (camera.isExposurePointOfInterestSupported && camera.isExposureModeSupported(.continuousAutoExposure)))
+    }
+    func focus(at point: CGPoint) {
+        guard point.x.isFinite, point.y.isFinite, (0...1).contains(point.x), (0...1).contains(point.y) else { return }
+        queue.async {
+            guard self.session.isRunning, let camera = self.videoInput?.device else { return }
+            do { try self.applyFocus(at: point, camera: camera, monitor: true) }
+            catch { self.onEvent?(.notice("Focus could not be adjusted. Try tapping again.")) }
+        }
+    }
+    private func applyFocus(at point: CGPoint, camera: AVCaptureDevice, monitor: Bool) throws {
+        try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
+        if camera.isFocusPointOfInterestSupported, camera.isFocusModeSupported(.continuousAutoFocus) {
+            camera.focusPointOfInterest = point
+            camera.focusMode = .continuousAutoFocus
+        }
+        if camera.isExposurePointOfInterestSupported, camera.isExposureModeSupported(.continuousAutoExposure) {
+            camera.exposurePointOfInterest = point
+            camera.exposureMode = .continuousAutoExposure
+        }
+        camera.isSubjectAreaChangeMonitoringEnabled = monitor
     }
     func zoom(_ factor: CGFloat) {
         queue.async {

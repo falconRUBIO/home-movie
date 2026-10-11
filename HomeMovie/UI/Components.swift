@@ -56,18 +56,50 @@ struct SceneThumbnail: View {
 final class PreviewUIView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+    var onFocus: ((CGPoint) -> Bool)?
+    private let focusIndicator = UIView()
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        focusIndicator.bounds = CGRect(x: 0, y: 0, width: 68, height: 68)
+        focusIndicator.layer.borderColor = UIColor.systemYellow.cgColor
+        focusIndicator.layer.borderWidth = 1.5
+        focusIndicator.layer.cornerRadius = 3
+        focusIndicator.isUserInteractionEnabled = false
+        focusIndicator.alpha = 0
+        addSubview(focusIndicator)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(focusTapped(_:)))
+        tap.cancelsTouchesInView = false
+        addGestureRecognizer(tap)
+    }
+    required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
+    @objc private func focusTapped(_ gesture: UITapGestureRecognizer) {
+        let point = gesture.location(in: self)
+        let devicePoint = previewLayer.captureDevicePointConverted(fromLayerPoint: point)
+        guard onFocus?(devicePoint) == true else { return }
+        focusIndicator.layer.removeAllAnimations()
+        focusIndicator.center = point
+        focusIndicator.alpha = 1
+        focusIndicator.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
+        UIView.animate(withDuration: 0.18) { self.focusIndicator.transform = .identity }
+        UIView.animate(withDuration: 0.3, delay: 1.2, options: [.beginFromCurrentState]) {
+            self.focusIndicator.alpha = 0
+        }
+    }
 }
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     let angle: CGFloat
     let front: Bool
+    let onFocus: (CGPoint) -> Bool
     func makeUIView(context: Context) -> PreviewUIView {
         let view = PreviewUIView(); view.backgroundColor = .black
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
+        view.onFocus = onFocus
         return view
     }
     func updateUIView(_ view: PreviewUIView, context: Context) {
+        view.onFocus = onFocus
         guard let connection = view.previewLayer.connection else { return }
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
         connection.automaticallyAdjustsVideoMirroring = false

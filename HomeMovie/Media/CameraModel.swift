@@ -61,6 +61,11 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
         }
     }
     func zoom(_ factor: CGFloat) { if [.ready, .recording].contains(state) { service.zoom(factor) } }
+    func focus(at point: CGPoint) -> Bool {
+        guard [.ready, .recording].contains(state), options?.canMeter == true else { return false }
+        service.focus(at: point)
+        return true
+    }
     func flip() { guard state == .ready else { return }; state = .preparing; service.flip() }
     private func receive(_ event: CaptureEvent) async {
         switch event {
@@ -97,6 +102,8 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
         case .failed(let text):
             message = text
             if busy { interruption = text; stop() } else { state = .failed }
+        case .notice(let text):
+            message = text
         }
     }
     private func beginBackgroundTime() {

@@ -135,7 +135,8 @@ struct CameraView: View {
     }
     private func preview() -> some View {
         ZStack {
-            CameraPreview(session: camera.service.session, angle: camera.options?.angle ?? 90, front: camera.options?.isFront ?? false)
+            CameraPreview(session: camera.service.session, angle: camera.options?.angle ?? 90, front: camera.options?.isFront ?? false,
+                onFocus: { camera.focus(at: $0) })
                 .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
                 .gesture(MagnificationGesture().onChanged { value in
                     guard camera.state == .ready || camera.state == .recording, let options = camera.options else { return }
