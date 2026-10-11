@@ -32,19 +32,23 @@
   ],
   "swift_files": 18,
   "not_performed": [
-    "Xcode compilation",
-    "XCTest execution",
+    "Xcode compilation and XCTest execution for the corrected revision",
     "real device tests"
   ],
-  "date": "2026-10-10",
+  "date": "2026-10-11",
   "native_tests_supplied": 13,
-  "native_tests_run": 0,
-  "native_build_status": "Rebuild pending after exposing immutable storage root across actor boundary",
+  "native_tests_run": 13,
+  "native_build_status": "Rebuild pending after correcting silent-movie composition track setup",
   "previous_cloud_build": {
-    "commit": "94f6cace6e0c7e887e95c16cc4f183367f2fc015",
-    "status": "App target compiled; test-target compilation failed; tests cancelled",
-    "compiler_error_sites": 12,
-    "distinct_compiler_error_causes": 1
+    "commit": "168d71c793d7b4aac245f6ec99ac23f6ab92e966",
+    "status": "App and test targets compiled; 13 tests ran, 11 passed and 2 export tests failed",
+    "tests_failed": [
+      "PipelineTests.testCompositionSnapshotAndExportAgreeWithoutAudio",
+      "PipelineTests.testPortraitExportUsesFullPortraitCanvas"
+    ],
+    "export_error": "AVFoundationErrorDomain -11838; underlying OSStatus -16976"
   },
-  "testflight_uploaded": false
+  "testflight_uploaded": false,
+  "native_tests_passed": 11,
+  "native_tests_failed": 2
 }

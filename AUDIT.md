@@ -106,3 +106,11 @@ The supplied plain-text log for commit `94f6cace6e0c7e887e95c16cc4f183367f2fc015
 `root` is now explicitly `nonisolated let`: an immutable, Sendable URL set during initialization. Mutable storage state remains actor-isolated. This allows both test modules to read the configured directory without disabling concurrency checks or introducing unsafe isolation overrides.
 
 Portable source checks pass. Native test compilation and all 13 supplied tests remain pending a new cloud build.
+
+## Third cloud build — 2026-10-11 correction
+
+Codemagic build 3 for commit `168d71c793d7b4aac245f6ec99ac23f6ab92e966` compiled the app and test targets and executed all 13 tests: 11 passed, including all five backup tests; two video-export tests failed with AVFoundation -11838 / OSStatus -16976. This proves execution of the supplied storage/recovery/backup tests, not real-device recording or release readiness.
+
+Both failures export video-only fixtures. Inspection found that the shared assembler always created an empty audio track, with no media segments or audio format. This revision creates the audio track only when a source has an overlapping, nonempty audio range, so silent movies contain only video. Video-composition frame timing now explicitly references the populated video track. The existing export tests retain their duration and full-frame dimension checks and now also check that silent compositions/exports contain no audio track.
+
+The empty audio track is the suspected common cause; confirming the fix requires another cloud run. Portable grammar/configuration checks pass. No tests were skipped or weakened, and no native rerun has been performed here.

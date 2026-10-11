@@ -41,10 +41,11 @@ actor MediaAssembler {
         let scenes = movie.activeScenes
         guard !scenes.isEmpty else { throw HomeMovieError.message("Record a scene first.") }
         let composition = AVMutableComposition()
-        guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
-              let audioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+        guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
             throw HomeMovieError.message("Could not prepare movie tracks.")
         }
+        // A silent movie must not contain an empty, formatless audio track.
+        var audioTrack: AVMutableCompositionTrack?
         var cursor = CMTime.zero
         var instructions: [AVVideoCompositionInstructionProtocol] = []
         for scene in scenes {
@@ -61,6 +62,10 @@ actor MediaAssembler {
                 let audioRange = try await sourceAudio.load(.timeRange)
                 let intersection = CMTimeRangeGetIntersection(selected, otherRange: audioRange)
                 if intersection.isValid, intersection.duration.isNumeric, intersection.duration.seconds > 0 {
+                    if audioTrack == nil {
+                        audioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+                    }
+                    guard let audioTrack else { throw HomeMovieError.message("Could not prepare movie audio.") }
                     let audioPosition = CMTimeAdd(cursor, CMTimeSubtract(intersection.start, selected.start))
                     try audioTrack.insertTimeRange(intersection, of: sourceAudio, at: audioPosition)
                 }
@@ -79,6 +84,7 @@ actor MediaAssembler {
         let videoComposition = AVMutableVideoComposition()
         videoComposition.renderSize = movie.format.canvas
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
+        videoComposition.sourceTrackIDForFrameTiming = videoTrack.trackID
         videoComposition.instructions = instructions
         return CompositionBundle(asset: composition, videoComposition: videoComposition, duration: cursor)
     }

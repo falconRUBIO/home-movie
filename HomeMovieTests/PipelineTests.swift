@@ -99,6 +99,8 @@ final class PipelineTests: XCTestCase {
         let bundle = try await assembler.build(movie: snapshot, root: store.root)
         XCTAssertEqual(bundle.duration.seconds, 4, accuracy: 0.05)
         XCTAssertEqual(bundle.videoComposition.instructions.count, 2)
+        let audioTracks = try await bundle.asset.loadTracks(withMediaType: .audio)
+        XCTAssertTrue(audioTracks.isEmpty, "Video-only movies must not include formatless audio tracks")
         _ = try await record(movie, into: store)
         XCTAssertEqual(bundle.duration.seconds, 4, accuracy: 0.05)
         let output = store.root.appendingPathComponent("test-export.mp4")
@@ -109,6 +111,7 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(info.duration.seconds, bundle.duration.seconds, accuracy: 0.15)
         XCTAssertEqual(info.size.width, 1920, accuracy: 1)
         XCTAssertEqual(info.size.height, 1080, accuracy: 1)
+        XCTAssertFalse(info.hasAudio)
     }
     func testPortraitExportUsesFullPortraitCanvas() async throws {
         let store = try await makeStore(), movie = try await store.create(name: "Portrait", format: .portrait)
@@ -122,6 +125,7 @@ final class PipelineTests: XCTestCase {
         let info = try await MediaInspector.inspect(output)
         XCTAssertEqual(info.size.width, 1080, accuracy: 1)
         XCTAssertEqual(info.size.height, 1920, accuracy: 1)
+        XCTAssertFalse(info.hasAudio)
     }
     func testDamagedCatalogIsNeverReplacedWithAnEmptyLibrary() async throws {
         let store = try await makeStore()
