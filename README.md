@@ -4,11 +4,15 @@ A SwiftUI iPhone application for recording multiple ongoing movies, scene by sce
 
 ## Status — read this first
 
-This package contains a native Xcode project and implementation source, not an installed or device-certified application. It was created in a Linux workspace without Xcode, the Apple SDK, or an iPhone. Swift grammar parsing and project/configuration validation were performed here. **No Xcode build, XCTest run, signing, or camera/device test was possible here.** The included automated tests are written but unrun. Follow the steps below to compile and establish the first device baseline. Treat compiler diagnostics and device results as the next acceptance gate, not as proof already obtained.
+This repository contains a native Xcode project and implementation source. Codemagic compiled the app and test targets for commit `168d71c` and ran all 13 tests: 11 passed, including all backup tests; two video-export tests failed. Commit `6383ee6` corrects the suspected silent-export cause and awaits a native rerun. See `AUDIT.md` and `VALIDATION.json` for evidence and limitations. Signing, TestFlight upload, and physical-device recording tests remain pending.
+
+## Automatic GitHub build tests
+
+[Open GitHub Actions](https://github.com/falconRUBIO/home-movie/actions/workflows/ios-tests.yml). The **Compile and test Home Movie** workflow runs on every push to `main`, pull requests targeting `main`, and manually through **Run workflow**. It generates the project and runs the existing simulator tests on a hosted Mac. Failed tests fail the build; logs and zipped XCTest results are retained for 14 days. New updates cancel an older run for the same branch. This workflow requires no Apple signing credentials and does not upload to TestFlight.
 
 ## TestFlight without local Xcode
 
-Start with `TESTFLIGHT.md`. The included Codemagic workflows first compile and run tests on a cloud Mac, then build a signed internal TestFlight archive after you connect your repository and Apple signing integration. They have not been run. Your developer account is sufficient for membership; no login page is needed in the app.
+Start with `TESTFLIGHT.md`. Codemagic remains configured for a signed internal TestFlight archive after you connect your Apple signing integration and registered bundle identifier. The unsigned test workflow has run; the signed upload workflow has not. No login page is needed in the app.
 
 ## Open it on your Mac
 
@@ -20,7 +24,7 @@ Start with `TESTFLIGHT.md`. The included Codemagic workflows first compile and r
 6. Press **Run** (the triangle at the top of Xcode). Allow camera and microphone access when opening the camera.
 7. Choose **Product → Test** to run `PipelineTests` and `BackupTests`. Camera testing requires a physical device; generated-media unit tests can also run in Simulator.
 
-If Xcode reports a compiler error, keep its complete diagnostic and file/line reference for the next revision. This package has not been through semantic compilation.
+If Xcode reports a compiler error, keep its complete diagnostic and file/line reference for the next revision.
 
 Optional terminal commands on your Mac:
 

@@ -1,0 +1,46 @@
+name: Compile and test Home Movie
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator-tests:
+    name: iPhone simulator tests
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Generate Xcode project
+        run: python3 scripts/generate_project.py
+      - name: Compile and run simulator tests
+        run: bash scripts/test_simulator.sh
+      - name: Package test results
+        if: always()
+        run: |
+          if [ -d build/TestResults.xcresult ]; then
+            ditto -c -k --keepParent build/TestResults.xcresult build/TestResults.xcresult.zip
+          fi
+      - name: Save build log and test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            build/xcodebuild.log
+            build/TestResults.xcresult.zip
+          if-no-files-found: warn
+          retention-days: 14
