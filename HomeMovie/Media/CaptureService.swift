@@ -166,7 +166,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             guard session.canAddOutput(liveOutput) else { throw HomeMovieError.message("Live Log preview is unavailable on this camera.") }
             session.addOutput(liveOutput)
             liveOutput.alwaysDiscardsLateVideoFrames = true
-            let available = liveOutput.availableVideoCVPixelFormatTypes
+            let available = liveOutput.availableVideoPixelFormatTypes
             guard let pixelFormat = [kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange, kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange].first(where: { available.contains($0) }) else {
                 throw HomeMovieError.message("A high-quality live Log preview is unavailable on this camera.")
             }
@@ -339,6 +339,9 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             live.automaticallyAdjustsVideoMirroring = false
             if live.isVideoMirroringSupported { live.isVideoMirrored = false }
             if live.isVideoStabilizationSupported { live.preferredVideoStabilizationMode = .off }
+        }
+        if configuredProfile == .appleLog, output.availableVideoCodecTypes.contains(.hevc) {
+            output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
         }
         if configuredProfile == .standard && output.availableVideoCodecTypes.contains(.h264) {
             output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.h264], for: connection)

@@ -78,7 +78,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         if lookView == nil, active, cube != nil, let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) {
             let view = MTKView(frame: bounds, device: device)
             view.isUserInteractionEnabled = false; view.framebufferOnly = false
-            view.colorPixelFormat = .bgra8Unorm; view.colorspace = CGColorSpace(name: CGColorSpace.itur_709)
+            view.colorPixelFormat = .bgra8Unorm; (view.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: CGColorSpace.itur_709)
             view.autoResizeDrawable = false; view.isPaused = true; view.enableSetNeedsDisplay = false; view.alpha = 0
             view.delegate = renderer; insertSubview(view, at: 0)
             lookView = view; lookRenderer = renderer
@@ -95,6 +95,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         }
         lookRenderer?.cube = cube; lookRenderer?.front = showingFront
         if cube == nil || !active { lookView?.alpha = 0 }
+        else if lookView?.alpha == 0 { lookView?.alpha = 0.001 }
         resizeLookView()
     }
     private func resizeLookView() {
