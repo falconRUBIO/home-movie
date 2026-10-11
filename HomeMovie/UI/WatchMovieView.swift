@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import UniformTypeIdentifiers
 
 struct WatchMovieView: View {
     @EnvironmentObject private var app: AppModel
@@ -13,6 +14,10 @@ struct WatchMovieView: View {
     @State private var problem: String?
     @State private var review: Scene?
     @State private var exporting = false
+    @State private var looks: [LUTReference] = []
+    @State private var importingLook = false
+    @State private var changingLook = false
+    @State private var showOriginalLog = false
     private var movie: Movie? { app.movie(movieID) }
     var body: some View {
         NavigationStack {
@@ -40,22 +45,68 @@ struct WatchMovieView: View {
                 }
                 .navigationTitle(movie.name).navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    if movie.captureProfile == .appleLog {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Menu {
+                                Button { showOriginalLog.toggle() } label: {
+                                    Label("Show Original", systemImage: showOriginalLog ? "checkmark" : "circle")
+                                }
+                                Divider()
+                                Button { selectLook(nil) } label: {
+                                    Label("Apple Standard", systemImage: movie.look == nil ? "checkmark" : "circle")
+                                }
+                                ForEach(looks, id: \.id) { look in
+                                    Button { selectLook(look) } label: {
+                                        Label(look.name, systemImage: movie.look?.id == look.id ? "checkmark" : "circle")
+                                    }
+                                }
+                                Divider()
+                                Button("Add Apple Log Look…", systemImage: "plus") { importingLook = true }
+                            } label: { Image(systemName: "slider.horizontal.3") }
+                                .accessibilityLabel("Look: \(showOriginalLog ? "Original Log" : movie.lookName)")
+                                .disabled(changingLook)
+                        }
+                    }
                     ToolbarItem(placement: .cancellationAction) { Button("Done") { player?.pause(); dismiss() } }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Export", systemImage: "square.and.arrow.up") { player?.pause(); exporting = true }
-                            .disabled(movie.activeScenes.isEmpty || loading || problem != nil)
+                            .disabled(movie.activeScenes.isEmpty || loading || changingLook || problem != nil)
                     }
                 }
-                .task(id: movie.revision) {
+                .fileImporter(isPresented: $importingLook, allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data], allowsMultipleSelection: false) { result in
+                    switch result {
+                    case .success(let urls):
+                        guard let url = urls.first else { return }
+                        changingLook = true
+                        Task {
+                            defer { changingLook = false }
+                            do {
+                                let look = try await app.store.importLook(from: url)
+                                try await app.store.setLook(movieID: movieID, look: look)
+                                looks = await app.store.availableLooks(); showOriginalLog = false; await app.refresh()
+                            } catch { app.error = error.localizedDescription }
+                        }
+                    case .failure(let error): app.error = error.localizedDescription
+                    }
+                }
+                .task { looks = await app.store.availableLooks() }
+                .task(id: "\(movie.revision)-\(showOriginalLog)") {
+                    let position = player?.currentTime() ?? .zero
+                    let wasPlaying = player?.rate != 0 && player != nil
                     player?.pause(); loading = true; problem = nil
                     defer { loading = false }
                     do {
                         try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
                         try AVAudioSession.sharedInstance().setActive(true)
-                        let bundle = try await app.assembler.build(movie: movie, root: app.store.root)
+                        let bundle = try await app.assembler.build(movie: movie, root: app.store.root, showOriginalLog: showOriginalLog)
                         try Task.checkCancellation()
                         let item = AVPlayerItem(asset: bundle.asset); item.videoComposition = bundle.videoComposition
                         player = AVPlayer(playerItem: item)
+                        if position.isNumeric, position.seconds > 0 {
+                            _ = await player?.seek(to: CMTimeMinimum(position, bundle.duration), toleranceBefore: .zero, toleranceAfter: .zero)
+                        }
+                        guard !Task.isCancelled else { return }
+                        if wasPlaying { player?.play() }
                         if !presentedInitialReview {
                             presentedInitialReview = true
                             if let initialSceneID { review = movie.activeScenes.first { $0.id == initialSceneID } }
@@ -67,8 +118,19 @@ struct WatchMovieView: View {
             } else { ContentUnavailableView("Movie unavailable", systemImage: "film") }
         }
         .onDisappear { player?.pause() }
+        .alert("Look unavailable", isPresented: Binding(get: { app.error != nil }, set: { if !$0 { app.error = nil } })) {
+            Button("OK") { app.error = nil }
+        } message: { Text(app.error ?? "") }
     }
 
+    private func selectLook(_ look: LUTReference?) {
+        guard !changingLook else { return }
+        changingLook = true; showOriginalLog = false
+        Task {
+            defer { changingLook = false }
+            await app.run { try await app.store.setLook(movieID: movieID, look: look) }
+        }
+    }
     private func sceneTimeline(movie: Movie) -> some View {
         VStack(spacing: verticalSizeClass == .compact ? 8 : 12) {
             HStack {
@@ -157,6 +219,19 @@ struct SceneReviewView: View {
                 }
             } message: { Text("Restore it later from Settings. Its original file will be kept.") }
             .task {
+                if var movie = app.movie(movieID), movie.captureProfile == .appleLog {
+                    do {
+                        var fullScene = scene; fullScene.trimStart = MediaTime(.zero); fullScene.trimEnd = fullScene.sourceDuration
+                        movie.scenes = [fullScene]
+                        let bundle = try await app.assembler.build(movie: movie, root: app.store.root)
+                        guard !Task.isCancelled else { return }
+                        let item = AVPlayerItem(asset: bundle.asset); item.videoComposition = bundle.videoComposition
+                        item.forwardPlaybackEndTime = scene.trimEnd.cmTime
+                        originalStart = .zero; player = AVPlayer(playerItem: item)
+                        _ = await player?.seek(to: scene.trimStart.cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
+                    } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+                    return
+                }
                 let asset = AVURLAsset(url: app.store.root.appendingPathComponent(scene.source))
                 if let tracks = try? await asset.loadTracks(withMediaType: .video), let track = tracks.first,
                    let range = try? await track.load(.timeRange) { originalStart = range.start }

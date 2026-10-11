@@ -21,7 +21,7 @@ actor ProjectStore {
         return root.appendingPathComponent(relative)
     }
     private func ensureDirectories() throws {
-        for folder in ["", "Staging", "Originals", "Journal", "Recovery"] {
+        for folder in ["", "Staging", "Originals", "Journal", "Recovery", "Looks"] {
             let directory = root.appendingPathComponent(folder)
             try fm.createDirectory(at: directory, withIntermediateDirectories: true)
             try fm.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: directory.path)
@@ -33,6 +33,11 @@ actor ProjectStore {
               Set(scenes.map(\.id)).count == scenes.count else { throw HomeMovieError.message("The catalog contains duplicate identifiers. Its file has been preserved.") }
         var totalBytes: Int64 = 0
         for movie in value.movies {
+            if let look = movie.look {
+                guard movie.captureProfile == .appleLog, !look.name.isEmpty, look.name.count <= 80 else {
+                    throw HomeMovieError.message("The movie’s look metadata is invalid.")
+                }
+            }
             guard !movie.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   movie.revision >= 0 && movie.revision < Int.max,
                   Set(movie.scenes.map(\.sequence)).count == movie.scenes.count else {
@@ -152,12 +157,52 @@ actor ProjectStore {
         return Array(Set(notices)).sorted()
     }
     func snapshot() -> [Movie] { catalog.movies.sorted { ($0.lastRecordedAt ?? $0.createdAt) > ($1.lastRecordedAt ?? $1.createdAt) } }
-    @discardableResult func create(name: String, format: MovieFormat) throws -> Movie {
+    @discardableResult func create(name: String, format: MovieFormat, profile: CaptureProfile = .standard) throws -> Movie {
         try requireIdle()
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= 80 else { throw HomeMovieError.message("Give your movie a name of up to 80 characters.") }
-        let movie = Movie(name: clean, format: format)
+        var movie = Movie(name: clean, format: format)
+        movie.profile = profile == .standard ? nil : profile
         var next = catalog; next.movies.append(movie); try write(next); return movie
+    }
+    func availableLooks() -> [LUTReference] {
+        let directory = root.appendingPathComponent("Looks")
+        let files = (try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        return files.compactMap { file in
+            guard file.pathExtension == "json", let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent) else { return nil }
+            let reference = LUTReference(id: id, name: "Look")
+            guard let cube = try? ColorCube.load(reference, root: root) else { return nil }
+            return LUTReference(id: id, name: cube.name)
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+    func importLook(from source: URL) throws -> LUTReference {
+        try requireIdle()
+        let access = source.startAccessingSecurityScopedResource()
+        defer { if access { source.stopAccessingSecurityScopedResource() } }
+        var imported: ColorCube?, readError: Error?, coordinationError: NSError?
+        NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinationError) { readable in
+            do {
+                let info = try readable.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+                guard info.isRegularFile == true, info.isSymbolicLink != true, let size = info.fileSize,
+                      size > 0, size <= 32_000_000 else { throw HomeMovieError.message("Choose a cube file smaller than 32 MB.") }
+                imported = try ColorCube.parse(String(contentsOf: readable, encoding: .utf8), name: source.deletingPathExtension().lastPathComponent)
+            } catch { readError = error }
+        }
+        if let coordinationError { throw coordinationError }
+        if let readError { throw readError }
+        guard let imported else { throw HomeMovieError.message("This look could not be opened.") }
+        let reference = LUTReference(id: UUID(), name: imported.name)
+        try requireSpace(bytes: 20_000_000)
+        try encoder.encode(imported).write(to: url(reference.path), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        return reference
+    }
+    func setLook(movieID: UUID, look: LUTReference?) throws {
+        try requireIdle()
+        let i = try index(movieID)
+        guard catalog.movies[i].captureProfile == .appleLog else { throw HomeMovieError.message("Looks are available for Apple Log movies.") }
+        if let look { _ = try ColorCube.load(look, root: root) }
+        guard catalog.movies[i].look != look else { return }
+        var next = catalog; next.movies[i].look = look; next.movies[i].revision += 1; try write(next)
     }
     func rename(_ id: UUID, name: String) throws {
         try requireIdle()
@@ -165,15 +210,16 @@ actor ProjectStore {
         guard !clean.isEmpty, clean.count <= 80 else { throw HomeMovieError.message("Enter a name of up to 80 characters.") }
         let i = try index(id); var next = catalog; next.movies[i].name = clean; next.movies[i].revision += 1; try write(next)
     }
-    func begin(movieID: UUID, format: MovieFormat? = nil) throws -> CaptureTicket {
+    func begin(movieID: UUID, format: MovieFormat? = nil, profile: CaptureProfile? = nil) throws -> CaptureTicket {
         try requireIdle()
         let i = try index(movieID)
         guard catalog.movies[i].deletedAt == nil else { throw HomeMovieError.message("Restore this movie before recording.") }
+        if let profile, profile != catalog.movies[i].captureProfile { throw HomeMovieError.message("The camera’s recording profile does not match this movie.") }
         if let format, let locked = catalog.movies[i].recordingFormat, format != locked {
             throw HomeMovieError.message("Rotate your iPhone to record in \(locked.label).")
         }
         try requireSpace(bytes: 300_000_000)
-        let ticket = CaptureTicket(movieID: movieID, sequence: catalog.movies[i].nextSequence, format: format)
+        let ticket = CaptureTicket(movieID: movieID, sequence: catalog.movies[i].nextSequence, format: format, profile: profile)
         try encoder.encode(ticket).write(to: try url(ticket.journal), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         return ticket
     }
@@ -193,11 +239,15 @@ actor ProjectStore {
         let staging = try url(ticket.staging), source = try url(ticket.source)
         let input = fm.fileExists(atPath: source.path) ? source : staging
         let info = try await MediaInspector.inspect(input)
+        if ticket.profile == .appleLog && info.profile != .appleLog {
+            throw HomeMovieError.message("The camera did not produce verified Apple Log footage. The original file has been preserved for recovery.")
+        }
         guard !catalog.movies.flatMap(\.scenes).contains(where: { $0.id == ticket.sceneID }) else { return }
         let i = try index(ticket.movieID)
         if input != source { try fm.moveItem(at: input, to: source) }
         var next = catalog
         if next.movies[i].recordingFormat == nil {
+            if info.profile == .appleLog { next.movies[i].profile = .appleLog }
             next.movies[i].format = ticket.format ?? (info.size.width > info.size.height ? .landscape : .portrait)
         }
         // Preserve uniqueness even if startup recovery finds competing journal positions.
@@ -205,7 +255,7 @@ actor ProjectStore {
         next.movies[i].scenes.append(Scene(id: ticket.sceneID, sequence: position, source: ticket.source,
             capturedAt: ticket.capturedAt, timeZone: ticket.timeZone, sourceDuration: MediaTime(info.duration),
             trimStart: MediaTime(.zero), trimEnd: MediaTime(info.duration), width: info.size.width,
-            height: info.size.height, hasAudio: info.hasAudio, bytes: info.bytes))
+            height: info.size.height, hasAudio: info.hasAudio, bytes: info.bytes, profile: ticket.profile ?? info.profile))
         next.movies[i].lastRecordedAt = ticket.capturedAt; next.movies[i].revision += 1
         try write(next)
         try? fm.removeItem(at: url(ticket.journal))

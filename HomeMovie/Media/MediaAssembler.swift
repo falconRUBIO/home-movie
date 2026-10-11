@@ -6,6 +6,7 @@ struct MediaInfo: Sendable {
     var size: CGSize
     var hasAudio: Bool
     var bytes: Int64
+    var profile: CaptureProfile? = nil
 }
 
 enum MediaInspector {
@@ -24,10 +25,14 @@ enum MediaInspector {
               bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0 else {
             throw HomeMovieError.message("The recording has no valid video duration.")
         }
+        let descriptions = try await video.load(.formatDescriptions)
+        let metadata = descriptions.map { String(describing: CMFormatDescriptionGetExtensions($0)) }.joined()
+            .lowercased().replacingOccurrences(of: "_", with: "").replacingOccurrences(of: " ", with: "")
+        let profile: CaptureProfile? = metadata.contains("applelog") && !metadata.contains("applelog2") ? .appleLog : nil
         let audio = try await asset.loadTracks(withMediaType: .audio)
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         return MediaInfo(duration: range.duration, size: CGSize(width: abs(bounds.width), height: abs(bounds.height)),
-            hasAudio: !audio.isEmpty, bytes: (attributes[.size] as? NSNumber)?.int64Value ?? 0)
+            hasAudio: !audio.isEmpty, bytes: (attributes[.size] as? NSNumber)?.int64Value ?? 0, profile: profile)
     }
 }
 
@@ -39,9 +44,11 @@ struct CompositionBundle: @unchecked Sendable {
 
 actor MediaAssembler {
     // Every build uses an immutable movie snapshot. Trims never modify source files.
-    func build(movie: Movie, root: URL) async throws -> CompositionBundle {
+    func build(movie: Movie, root: URL, showOriginalLog: Bool = false) async throws -> CompositionBundle {
         let scenes = movie.activeScenes
         guard !scenes.isEmpty else { throw HomeMovieError.message("Record a scene first.") }
+        let usesLog = movie.captureProfile == .appleLog || scenes.contains { $0.profile == .appleLog }
+        let cube: ColorCube? = usesLog && !showOriginalLog ? try movie.look.map { try ColorCube.load($0, root: root) } ?? ColorCube.appleStandard.get() : nil
         let composition = AVMutableComposition()
         guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
             throw HomeMovieError.message("Could not prepare movie tracks.")
@@ -87,7 +94,11 @@ actor MediaAssembler {
             instruction.timeRange = CMTimeRange(start: cursor, duration: scene.playableDuration)
             instruction.backgroundColor = CGColor(gray: 0, alpha: 1)
             instruction.layerInstructions = [layer]
-            instructions.append(instruction)
+            if usesLog {
+                instructions.append(ColorInstruction(range: instruction.timeRange, trackID: videoTrack.trackID,
+                    transform: Self.fitTransform(size: naturalSize, preferred: preferred, canvas: movie.format.canvas),
+                    cube: (scene.profile ?? movie.captureProfile) == .appleLog ? cube : nil))
+            } else { instructions.append(instruction) }
             cursor = CMTimeAdd(cursor, scene.playableDuration)
         }
         let videoComposition = AVMutableVideoComposition()
@@ -95,6 +106,12 @@ actor MediaAssembler {
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
         videoComposition.sourceTrackIDForFrameTiming = videoTrack.trackID
         videoComposition.instructions = instructions
+        if usesLog {
+            videoComposition.customVideoCompositorClass = LogVideoCompositor.self
+            videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+            videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+            videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
+        }
         return CompositionBundle(asset: composition, videoComposition: videoComposition, duration: cursor)
     }
     nonisolated static func hasValidGeometry(size: CGSize, preferred: CGAffineTransform) -> Bool {

@@ -27,12 +27,14 @@ struct CameraOptions: Sendable {
     var multiplier: CGFloat
     var isFront: Bool
     var angle: CGFloat
+    var profile: CaptureProfile
     var canMeter: Bool
     var canLock: Bool
     var focusLocked: Bool
     var exposureBias: Float
     var minimumExposureBias: Float
     var maximumExposureBias: Float
+    var canFlip: Bool
     var hasTorch: Bool
     var torchOn: Bool
 }
@@ -57,6 +59,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private var stopRequested = false
     private var observers: [NSObjectProtocol] = []
     private var rotationObservation: NSKeyValueObservation?
+    private var configuredProfile = CaptureProfile.standard
     private var configured = false
     private var isFront = false
     private var focusLocked = false
@@ -107,11 +110,22 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         let microphone = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized ? true : await AVCaptureDevice.requestAccess(for: .audio)
         return camera && microphone
     }
-    func prepare(front: Bool) {
+    static func supportsAppleLog() -> Bool {
+        AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInTripleCamera, .builtInDualWideCamera, .builtInWideAngleCamera],
+            mediaType: .video, position: .back).devices.contains { camera in
+                camera.formats.contains { $0.supportedColorSpaces.contains(.appleLog) && $0.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 } }
+            }
+    }
+    func prepare(front: Bool, profile: CaptureProfile = .standard) {
         queue.async {
             do {
                 if self.ticket != nil { return }
-                if !self.configured { try self.configure(front: front) }
+                if !self.configured || self.configuredProfile != profile {
+                    self.configured = false
+                    if self.session.isRunning { self.session.stopRunning() }
+                    self.configuredProfile = profile
+                    try self.configure(front: profile == .appleLog ? false : front)
+                }
                 try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .videoRecording, options: [.defaultToSpeaker])
                 try AVAudioSession.sharedInstance().setActive(true)
                 if !self.session.isRunning { self.session.startRunning() }
@@ -124,13 +138,16 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private func device(front: Bool) -> AVCaptureDevice? {
         let types: [AVCaptureDevice.DeviceType] = front ? [.builtInTrueDepthCamera, .builtInWideAngleCamera] : [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
         let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video, position: front ? .front : .back)
-        return types.compactMap { type in discovery.devices.first { $0.deviceType == type } }.first
+        return types.compactMap { type in discovery.devices.first {
+            $0.deviceType == type && (configuredProfile == .standard || $0.formats.contains { $0.supportedColorSpaces.contains(.appleLog) && $0.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 } })
+        } }.first
     }
     private func configure(front: Bool) throws {
         session.beginConfiguration(); defer { session.commitConfiguration() }
         guard session.canSetSessionPreset(.hd1920x1080) else { throw HomeMovieError.message("1080p recording is not available on this device.") }
         session.inputs.forEach { session.removeInput($0) }; session.outputs.forEach { session.removeOutput($0) }
-        session.sessionPreset = .hd1920x1080
+        session.sessionPreset = configuredProfile == .appleLog ? .inputPriority : .hd1920x1080
+        session.automaticallyConfiguresCaptureDeviceForWideColor = false
         session.automaticallyConfiguresApplicationAudioSession = false
         guard let camera = device(front: front) else { throw HomeMovieError.message("No supported camera found.") }
         let input = try AVCaptureDeviceInput(device: camera)
@@ -148,6 +165,20 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     }
     private func configureFormat(_ camera: AVCaptureDevice) throws {
         try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
+        if configuredProfile == .appleLog {
+            let formats = camera.formats.filter {
+                let size = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
+                return $0.supportedColorSpaces.contains(.appleLog) && size.width >= 1920 && size.height >= 1080 &&
+                    $0.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 }
+            }.sorted {
+                let a = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
+                let b = CMVideoFormatDescriptionGetDimensions($1.formatDescription)
+                return Int64(a.width) * Int64(a.height) < Int64(b.width) * Int64(b.height)
+            }
+            guard let format = formats.first else { throw HomeMovieError.message("Apple Log is not available on this camera. Switch back to a supported rear camera.") }
+            camera.activeFormat = format
+            camera.activeColorSpace = .appleLog
+        } else if camera.activeFormat.supportedColorSpaces.contains(.sRGB) { camera.activeColorSpace = .sRGB }
         if camera.activeFormat.videoSupportedFrameRateRanges.contains(where: { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 }) {
             camera.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
             camera.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
@@ -188,14 +219,14 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             multiplier: multiplier, switchFactors: switches, secondaryFactors: secondary)
         return CameraOptions(lenses: lenses,
             zoom: camera.videoZoomFactor, minimum: camera.minAvailableVideoZoomFactor, maximum: camera.maxAvailableVideoZoomFactor,
-            multiplier: multiplier, isFront: isFront, angle: coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90,
+            multiplier: multiplier, isFront: isFront, angle: coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90, profile: configuredProfile,
             canMeter: (camera.isFocusPointOfInterestSupported && camera.isFocusModeSupported(.continuousAutoFocus)) ||
                 (camera.isExposurePointOfInterestSupported && camera.isExposureModeSupported(.continuousAutoExposure)),
             canLock: camera.isExposurePointOfInterestSupported && camera.isExposureModeSupported(.autoExpose) &&
                 (!camera.isFocusPointOfInterestSupported || camera.isFocusModeSupported(.autoFocus)),
             focusLocked: focusLocked, exposureBias: camera.exposureTargetBias,
             minimumExposureBias: camera.minExposureTargetBias, maximumExposureBias: camera.maxExposureTargetBias,
-            hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on)
+            canFlip: device(front: !isFront) != nil, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on)
     }
     func focus(at point: CGPoint, locked: Bool = false) {
         guard point.x.isFinite, point.y.isFinite, (0...1).contains(point.x), (0...1).contains(point.y) else { return }
@@ -287,7 +318,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         connection.automaticallyAdjustsVideoMirroring = false
         if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
         if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
-        if output.availableVideoCodecTypes.contains(.h264) {
+        if configuredProfile == .standard && output.availableVideoCodecTypes.contains(.h264) {
             output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.h264], for: connection)
         }
     }
@@ -334,6 +365,12 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             }
             guard connection.isVideoRotationAngleSupported(angle) else {
                 self.onEvent?(.finished(ticket, HomeMovieError.message("This camera rotation is unsupported."))); return
+            }
+            if self.configuredProfile == .appleLog {
+                guard self.videoInput?.device.activeColorSpace == .appleLog, self.output.availableVideoCodecTypes.contains(.hevc) else {
+                    self.onEvent?(.finished(ticket, HomeMovieError.message("Apple Log recording is unavailable. Your movie was not recorded in Standard mode."))); return
+                }
+                self.output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
             }
             connection.videoRotationAngle = angle
             self.ticket = ticket; self.recordingURL = url.standardizedFileURL; self.stopRequested = false

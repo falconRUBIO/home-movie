@@ -1,5 +1,6 @@
 import XCTest
 import AVFoundation
+import CoreImage
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
@@ -126,6 +127,93 @@ final class PipelineTests: XCTestCase {
         XCTAssertFalse(app.loaded)
         XCTAssertNotNil(app.loadFailure)
         XCTAssertEqual(try Data(contentsOf: file), damaged)
+    }
+    private var testCube: String { "TITLE \"Test\"\nLUT_3D_SIZE 2\n" + Array(repeating: "0.9 0.1 0.2", count: 8).joined(separator: "\n") }
+    func testCubeParserBoundsDomainsAndRejectsMalformedFiles() throws {
+        let cube = try ColorCube.parse(testCube, name: "Filmica LUT")
+        XCTAssertEqual(cube.name, "Filmica")
+        XCTAssertEqual(cube.dimension, 2)
+        XCTAssertEqual(cube.rgba.count, 128)
+        for text in ["LUT_1D_SIZE 4096", "LUT_3D_SIZE 128", "LUT_3D_SIZE 2\n0 0 0", testCube + "\n0 0 0",
+                     testCube.replacingOccurrences(of: "0.9", with: "nan"), "LUT_3D_SIZE 2\nDOMAIN_MIN 1 1 1\nDOMAIN_MAX 0 0 0\n" + Array(repeating: "0 0 0", count: 8).joined(separator: "\n")] {
+            XCTAssertThrowsError(try ColorCube.parse(text, name: "Invalid"))
+        }
+    }
+    func testStandardLookAssetAndLegacyProfiles() throws {
+        let cube = try ColorCube.appleStandard.get(); try cube.validate()
+        XCTAssertEqual(cube.dimension, 65)
+        let movie = Movie(name: "Legacy", format: .portrait)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(movie)) as? [String: Any])
+        json.removeValue(forKey: "profile"); json.removeValue(forKey: "look")
+        let decoded = try JSONDecoder().decode(Movie.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(decoded.captureProfile, .standard)
+        XCTAssertNil(decoded.look)
+    }
+    func testLookSelectionPersistsAndInvalidatesExportRevision() async throws {
+        let store = try await makeStore(), movie = try await store.create(name: "Log", format: .landscape, profile: .appleLog)
+        do { _ = try await store.begin(movieID: movie.id, profile: .standard); XCTFail("A Log movie must not silently record Standard") } catch {}
+        let file = store.root.appendingPathComponent("Filmica LUT.cube"); try testCube.write(to: file, atomically: true, encoding: .utf8)
+        let look = try await store.importLook(from: file)
+        try await store.setLook(movieID: movie.id, look: look)
+        let revision = await store.snapshot().first!.revision
+        try await store.setLook(movieID: movie.id, look: look)
+        let unchanged = await store.snapshot()
+        XCTAssertEqual(unchanged.first?.revision, revision)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let saved = await reopened.snapshot()
+        XCTAssertEqual(saved.first?.look, look)
+        XCTAssertEqual(saved.first?.captureProfile, .appleLog)
+        let restoredCube = try ColorCube.load(look, root: store.root)
+        XCTAssertEqual(restoredCube.rgba.count, 128)
+        try await reopened.setLook(movieID: movie.id, look: nil)
+        let standard = await reopened.snapshot()
+        XCTAssertEqual(standard.first?.revision, revision + 1)
+        XCTAssertNil(standard.first?.look)
+    }
+    func testBackupCarriesSelectedLookWithoutChangingExistingFiles() async throws {
+        let store = try await makeStore(), movie = try await store.create(name: "Look Backup", format: .landscape, profile: .appleLog)
+        let ticket = try await record(movie, into: store)
+        let original = try Data(contentsOf: store.root.appendingPathComponent(ticket.source))
+        let file = store.root.appendingPathComponent("Filmica LUT.cube"); try testCube.write(to: file, atomically: true, encoding: .utf8)
+        let look = try await store.importLook(from: file); try await store.setLook(movieID: movie.id, look: look)
+        let backup = BackupService(), prepared = try await backup.create(store: store) { _ in }
+        let destination = try await makeStore()
+        try await backup.restore(from: prepared.url, store: destination) { _ in }
+        let restored = await destination.snapshot()
+        let imported = try XCTUnwrap(restored.first?.look)
+        XCTAssertNotEqual(imported.id, look.id)
+        XCTAssertEqual(try ColorCube.load(imported, root: destination.root).rgba, ColorCube.load(look, root: store.root).rgba)
+        XCTAssertEqual(try Data(contentsOf: store.root.appendingPathComponent(ticket.source)), original)
+        try await backup.discard(prepared.url)
+    }
+    func testCustomLookPlaybackAndExportUseSameCompositor() async throws {
+        let store = try await makeStore(), movie = try await store.create(name: "Look Export", format: .portrait, profile: .appleLog)
+        _ = try await record(movie, into: store, rotated: true)
+        let file = store.root.appendingPathComponent("Look.cube"); try testCube.write(to: file, atomically: true, encoding: .utf8)
+        let look = try await store.importLook(from: file); try await store.setLook(movieID: movie.id, look: look)
+        let snapshot = await store.snapshot().first!, assembler = MediaAssembler()
+        let bundle = try await assembler.build(movie: snapshot, root: store.root)
+        XCTAssertTrue(bundle.videoComposition.customVideoCompositorClass === LogVideoCompositor.self)
+        let original = try await assembler.build(movie: snapshot, root: store.root, showOriginalLog: true)
+        XCTAssertNil((original.videoComposition.instructions.first as? ColorInstruction)?.cube)
+        let preview = AVAssetImageGenerator(asset: bundle.asset); preview.videoComposition = bundle.videoComposition
+        let previewImage = try await preview.image(at: CMTime(seconds: 0.5, preferredTimescale: 600)).image
+        let output = store.root.appendingPathComponent("look-export.mp4")
+        let exporter = try XCTUnwrap(AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality))
+        exporter.videoComposition = bundle.videoComposition; try await exporter.export(to: output, as: .mp4)
+        let result = try await MediaInspector.inspect(output)
+        XCTAssertEqual(result.size.width, 1080, accuracy: 1); XCTAssertEqual(result.size.height, 1920, accuracy: 1)
+        let exportImage = try await AVAssetImageGenerator(asset: AVURLAsset(url: output)).image(at: CMTime(seconds: 0.5, preferredTimescale: 600)).image
+        func sample(_ image: CGImage) -> [UInt8] {
+            var pixel = [UInt8](repeating: 0, count: 4)
+            CIContext().render(CIImage(cgImage: image), toBitmap: &pixel, rowBytes: 4,
+                bounds: CGRect(x: image.width / 2, y: image.height / 2, width: 1, height: 1), format: .RGBA8,
+                colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+            return pixel
+        }
+        let a = sample(previewImage), b = sample(exportImage)
+        XCTAssertGreaterThan(a[0], 180); XCTAssertLessThan(a[1], 80)
+        for channel in 0..<3 { XCTAssertEqual(Double(a[channel]), Double(b[channel]), accuracy: 8) }
     }
     private func makeStore() async throws -> ProjectStore {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

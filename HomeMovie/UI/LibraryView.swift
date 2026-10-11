@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LibraryView: View {
     @EnvironmentObject private var app: AppModel
@@ -114,6 +115,12 @@ struct NewMovieView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
+    @State private var profile = CaptureProfile.standard
+    @State private var supportsLog = false
+    @State private var looks: [LUTReference] = []
+    @State private var selectedLook: LUTReference?
+    @State private var importingLook = false
+    @State private var loadingLook = false
     @State private var saving = false
     @State private var problem: String?
     let created: (UUID) -> Void
@@ -122,7 +129,23 @@ struct NewMovieView: View {
             Form {
                 Section {
                     TextField("Movie name", text: $name).textInputAutocapitalization(.sentences).submitLabel(.done)
-                } footer: { Text("Hold your iPhone upright or sideways. Your first recording sets the movie’s orientation. Each recording becomes the next scene.") }
+                    if supportsLog {
+                        Picker("Recording", selection: $profile) {
+                            Text("Standard").tag(CaptureProfile.standard)
+                            Text("Apple Log").tag(CaptureProfile.appleLog)
+                        }.pickerStyle(.menu)
+                        if profile == .appleLog {
+                            Menu {
+                                Button("Apple Standard") { selectedLook = nil }
+                                ForEach(looks, id: \.id) { look in Button(look.name) { selectedLook = look } }
+                                Divider()
+                                Button("Add Apple Log Look…", systemImage: "plus") { importingLook = true }
+                            } label: {
+                                HStack { Text("Look"); Spacer(); Text(selectedLook?.name ?? "Apple Standard").foregroundStyle(.secondary) }
+                            }.foregroundStyle(.primary).disabled(loadingLook)
+                        }
+                    }
+                } footer: { Text(profile == .appleLog ? "Keeps a flexible original. Choose its look after recording." : "Hold your iPhone upright or sideways. Your first recording sets the movie’s orientation. Each recording becomes the next scene.") }
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
             }.navigationTitle("New Movie").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -131,13 +154,26 @@ struct NewMovieView: View {
                         Button("Create") {
                             saving = true
                             Task {
-                                do { let movie = try await app.store.create(name: name, format: .portrait); await app.refresh(); created(movie.id) }
+                                do { let movie = try await app.store.create(name: name, format: .portrait, profile: profile); if profile == .appleLog, let selectedLook { try await app.store.setLook(movieID: movie.id, look: selectedLook) }; await app.refresh(); created(movie.id) }
                                 catch { problem = error.localizedDescription; saving = false }
                             }
-                        }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).count > 80 || saving)
+                        }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).count > 80 || saving || loadingLook)
                     }
                 }
         }.presentationDetents([.medium]).interactiveDismissDisabled(saving)
+                        .fileImporter(isPresented: $importingLook, allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data], allowsMultipleSelection: false) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }; loadingLook = true
+                    Task {
+                        defer { loadingLook = false }
+                        do { selectedLook = try await app.store.importLook(from: url); looks = await app.store.availableLooks() }
+                        catch { problem = error.localizedDescription }
+                    }
+                case .failure(let error): problem = error.localizedDescription
+                }
+            }
+            .task { supportsLog = await Task.detached { CaptureService.supportsAppleLog() }.value; looks = await app.store.availableLooks() }
     }
 }
 

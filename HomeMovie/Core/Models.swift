@@ -24,6 +24,8 @@ enum MovieFormat: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum CaptureProfile: String, Codable, Sendable { case standard, appleLog }
+
 struct Scene: Codable, Identifiable, Equatable, Sendable {
     var id: UUID
     var sequence: Int
@@ -41,6 +43,7 @@ struct Scene: Codable, Identifiable, Equatable, Sendable {
     var photosAssetID: String?
     var photosCopiedAt: Date?
     var missing = false
+    var profile: CaptureProfile? = nil
     var playableDuration: CMTime { CMTimeSubtract(trimEnd.cmTime, trimStart.cmTime) }
     var validTrim: Bool {
         trimStart.isValid && trimEnd.isValid && sourceDuration.isValid &&
@@ -60,6 +63,10 @@ struct Movie: Codable, Identifiable, Equatable, Sendable {
     var lastFilesBackupRevision: Int?
     var lastFilesBackupAt: Date?
     var scenes: [Scene] = []
+    var profile: CaptureProfile? = nil
+    var look: LUTReference? = nil
+    var captureProfile: CaptureProfile { profile ?? .standard }
+    var lookName: String { look?.name ?? "Apple Standard" }
     // Deleted scenes still lock the movie; removing a scene never changes its canvas.
     var recordingFormat: MovieFormat? { scenes.isEmpty && lastRecordedAt == nil ? nil : format }
     var activeScenes: [Scene] { scenes.filter { $0.deletedAt == nil }.sorted { $0.sequence < $1.sequence } }
@@ -79,6 +86,7 @@ struct CaptureTicket: Codable, Sendable {
     var capturedAt = Date()
     var timeZone = TimeZone.current.identifier
     var format: MovieFormat? = nil
+    var profile: CaptureProfile? = nil
     var staging: String { "Staging/\(sceneID.uuidString).mov" }
     var source: String { "Originals/\(sceneID.uuidString).mov" }
     var journal: String { "Journal/\(sceneID.uuidString).json" }

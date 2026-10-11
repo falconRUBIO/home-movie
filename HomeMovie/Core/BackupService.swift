@@ -62,7 +62,12 @@ actor BackupService {
         let value = try JSONDecoder().decode(ProjectBackup.self, from: Data(contentsOf: file))
         guard value.format == "HomeMovieBackup", value.version == 1 else { throw HomeMovieError.message("This backup format is not supported.") }
         let scenes = value.catalog.movies.flatMap(\.scenes)
-        guard Set(scenes.map(\.source)) == Set(value.files.keys), value.files.values.allSatisfy({ $0.bytes >= 0 && $0.bytes < Int64.max / 4 && $0.sha256.count == 64 }) else {
+        let lookPaths = Set(value.catalog.movies.compactMap { $0.look?.path })
+        if !lookPaths.isEmpty {
+            let looks = try package.appendingPathComponent("Looks").resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard looks.isDirectory == true, looks.isSymbolicLink != true else { throw HomeMovieError.message("The backup’s Looks folder is invalid.") }
+        }
+        guard Set(scenes.map(\.source)).union(lookPaths) == Set(value.files.keys), value.files.values.allSatisfy({ $0.bytes >= 0 && $0.bytes < Int64.max / 4 && $0.sha256.count == 64 }) else {
             throw HomeMovieError.message("The backup file list does not match its scenes.")
         }
         return value
@@ -76,10 +81,17 @@ actor BackupService {
         let package = folder.appendingPathComponent("Home Movie-\(UUID()).homemovie", isDirectory: true)
         do {
             try await store.validateBackupCatalog(snapshot)
-            let total = scenes.reduce(0.0) { $0 + Double($1.bytes) }
+            let references = Dictionary(snapshot.movies.compactMap { $0.look }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            var lookSizes: [String: Int64] = [:]
+            for look in references.values {
+                _ = try ColorCube.load(look, root: store.root)
+                lookSizes[look.path] = Int64(try store.root.appendingPathComponent(look.path).resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+            }
+            let total = scenes.reduce(0.0) { $0 + Double($1.bytes) } + lookSizes.values.reduce(0.0) { $0 + Double($1) }
             guard total < Double(Int64.max / 4) else { throw HomeMovieError.message("This backup is too large.") }
             try await store.requireSpace(bytes: Int64(total) + 300_000_000)
             try FileManager.default.createDirectory(at: package.appendingPathComponent("Originals"), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: package.appendingPathComponent("Looks"), withIntermediateDirectories: true)
             var entries: [String: BackupEntry] = [:], completed: Int64 = 0
             for scene in scenes {
                 try Task.checkCancellation()
@@ -89,6 +101,14 @@ actor BackupService {
                     progress(min(0.99, Double(before + copied) / max(1, total)))
                 }
                 entries[scene.source] = entry; completed += entry.bytes
+            }
+            for (path, bytes) in lookSizes {
+                try Task.checkCancellation()
+                let before = completed
+                let entry = try streamCopy(store.root.appendingPathComponent(path), to: package.appendingPathComponent(path), expectedBytes: bytes) { count in
+                    progress(min(0.99, Double(before + count) / max(1, total)))
+                }
+                entries[path] = entry; completed += entry.bytes
             }
             try Task.checkCancellation()
             let backup = ProjectBackup(catalog: snapshot, files: entries)
@@ -127,7 +147,28 @@ actor BackupService {
             try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
             var restored = backup.catalog.movies
             var completed: Int64 = 0
+            let references = Dictionary(restored.compactMap { $0.look }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            var restoredLooks: [UUID: LUTReference] = [:]
+            for look in references.values {
+                try Task.checkCancellation()
+                guard let expected = backup.files[look.path], expected.bytes > 0, expected.bytes <= 8_000_000 else {
+                    throw HomeMovieError.message("The backup’s look data is invalid.")
+                }
+                let newLook = LUTReference(id: UUID(), name: look.name)
+                let copied = staging.appendingPathComponent("\(newLook.id).json")
+                var entry: BackupEntry?; readError = nil; coordinationError = nil
+                coordinator.coordinate(readingItemAt: source.appendingPathComponent(look.path), options: [], error: &coordinationError) { readable in
+                    do { entry = try self.streamCopy(readable, to: copied, expectedBytes: expected.bytes) { _ in } }
+                    catch { readError = error }
+                }
+                if let coordinationError { throw coordinationError }
+                if let readError { throw readError }
+                guard entry?.sha256 == expected.sha256 else { throw HomeMovieError.message("Backup look verification failed.") }
+                let cube = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: copied)); try cube.validate()
+                restoredLooks[look.id] = newLook; completed += expected.bytes
+            }
             for m in restored.indices {
+                if let look = restored[m].look { restored[m].look = restoredLooks[look.id] }
                 restored[m].id = UUID(); restored[m].name += " (Restored)"
                 restored[m].lastFilesBackupRevision = nil; restored[m].lastFilesBackupAt = nil
                 for c in restored[m].scenes.indices {
@@ -159,6 +200,12 @@ actor BackupService {
             }
             try await store.validateBackupCatalog(Catalog(movies: restored))
             try Task.checkCancellation()
+            try FileManager.default.createDirectory(at: store.root.appendingPathComponent("Looks"), withIntermediateDirectories: true)
+            for look in restoredLooks.values {
+                try Task.checkCancellation()
+                let staged = staging.appendingPathComponent("\(look.id).json"), target = store.root.appendingPathComponent(look.path)
+                try FileManager.default.moveItem(at: staged, to: target); installed.append(target)
+            }
             for scene in restored.flatMap(\.scenes) {
                 try Task.checkCancellation()
                 let staged = staging.appendingPathComponent("\(scene.id).mov"), target = store.root.appendingPathComponent(scene.source)

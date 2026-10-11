@@ -29,26 +29,26 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
         self.app = app
         service.onEvent = { [weak self] event in Task { @MainActor in await self?.receive(event) } }
     }
-    func prepare() async {
+    func prepare(profile: CaptureProfile = .standard) async {
         guard !busy else { return }
         let requestID = UUID(); preparationID = requestID
         active = true; state = .preparing; message = nil; interruption = nil
         let granted = await CaptureService.permissions()
         guard active, preparationID == requestID else { return }
         guard granted else { state = .denied; return }
-        service.prepare(front: rememberedFront)
+        service.prepare(front: rememberedFront, profile: profile)
     }
     func record(movieID: UUID) {
         guard state == .ready, active, let app else { return }
         guard let angle = options?.angle, let format = MovieFormat.captureFormat(angle: angle),
               let movie = app.movie(movieID) else { return }
-        guard movie.recordingFormat == nil || movie.recordingFormat == format else { return }
+        guard movie.recordingFormat == nil || movie.recordingFormat == format, options?.profile == movie.captureProfile else { return }
         state = .starting; savedScene = false; message = nil; startCancelled = false
         operation = Task {
             var pendingTicket: CaptureTicket?
             defer { operation = nil }
             do {
-                let ticket = try await app.store.begin(movieID: movieID, format: format)
+                let ticket = try await app.store.begin(movieID: movieID, format: format, profile: movie.captureProfile)
                 pendingTicket = ticket
                 let path = try await app.store.url(ticket.staging)
                 guard active, !startCancelled, state == .starting, interruption == nil else {

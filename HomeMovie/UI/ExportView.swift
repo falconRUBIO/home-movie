@@ -15,6 +15,7 @@ struct ExportView: View {
                     LabeledContent("Movie", value: movie.name)
                     LabeledContent("Duration", value: durationLabel(movie.duration))
                     LabeledContent("Quality", value: "1080p SDR · MP4")
+                    if movie.captureProfile == .appleLog { LabeledContent("Look", value: movie.lookName) }
                 } footer: { Text("Export creates a copy. You can keep recording into your original movie.") }
                 if export.running {
                     Section {

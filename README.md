@@ -4,7 +4,7 @@ A SwiftUI iPhone application for recording multiple ongoing movies, scene by sce
 
 ## Status — read this first
 
-The full-app audit revision `448f36b` compiled and passed all 21 native tests in GitHub Actions run `38176920518`. The subsequent Watch Movie timeline layout awaits its own native compilation. A signed internal TestFlight build for `123e29e` uploaded successfully. See `AUDIT.md` and `VALIDATION.json` for evidence; complete physical-device acceptance remains pending.
+The orientation, timeline and library-export revision `d70fa524` compiled and passed all 25 native tests in GitHub Actions run `38177797042`. Optional Apple Log capture/looks now supplies 30 tests and awaits its native run. A signed internal TestFlight build for `123e29e` uploaded successfully. See `AUDIT.md` and `VALIDATION.json` for evidence; complete physical-device acceptance remains pending.
 
 ## Automatic GitHub build tests
 
@@ -103,3 +103,9 @@ The App Store privacy declaration, entitlements, actual binaries, accessibility,
 - [Required-reason privacy APIs](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitypereasons)
 
 Composition uses the older mutable instruction API because it supports the iOS 18 baseline. Those APIs are deprecated in newer SDK documentation but remain callable; a newer configuration API migration is deliberately deferred until an Xcode device baseline is established. This is not presented as a deprecation-free implementation.
+
+### Optional Apple Log and looks
+
+Standard is the default. Supported phones expose Apple Log under Recording in New Movie. Log movies have an optional Look row and a small playback Look menu. Apple Standard is included. Use Add Apple Log Look to import Filmica LUT.cube or another original-Apple-Log-input / SDR-output 3D cube through Files. Imported assets stay in the app container, and the selected look is included in project backups. Filmica’s purchased LUT/PowerGrade files are not published in this repository. A cube provides color, not Resolve grain/glow/blur effects.
+
+Show Original temporarily compares ungraded playback; export uses the movie’s selected look. Originals stay untouched. Color-managed playback/export use one compositor and selected-look revisions invalidate export caches. Actual Log capture and color accuracy require the physical-device acceptance tests; Filmica’s exact setup awaits its guide/reference. Apple Log 2 and LUTs expecting other input spaces are not interchangeable with this initial mode.

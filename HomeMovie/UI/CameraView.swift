@@ -62,11 +62,11 @@ struct CameraView: View {
         .background(.black).foregroundStyle(.white)
         .toolbar(.hidden, for: .navigationBar).navigationBarBackButtonHidden()
         .preferredColorScheme(.dark)
-        .task { await camera.prepare() }
+        .task(id: movieID) { await camera.prepare(profile: movie?.captureProfile ?? .standard) }
         .onDisappear { camera.suspend() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { camera.suspend() }
-            else if !watching && !camera.busy { Task { await camera.prepare() } }
+            else if !watching && !camera.busy { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }
         }
         .sheet(isPresented: $picking) {
             NavigationStack {
@@ -80,7 +80,7 @@ struct CameraView: View {
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { picking = false } } }
             }.presentationDetents([.medium, .large])
         }
-        .fullScreenCover(isPresented: $watching, onDismiss: { Task { await camera.prepare() } }) {
+        .fullScreenCover(isPresented: $watching, onDismiss: { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }) {
             WatchMovieView(movieID: movieID, initialSceneID: initialReviewID).environmentObject(app)
         }
     }
@@ -109,6 +109,7 @@ struct CameraView: View {
     }
     private func timer(movie: Movie) -> some View {
         VStack(spacing: 6) {
+            if movie.captureProfile == .appleLog { Text("LOG").font(.caption2.weight(.medium)).foregroundStyle(.secondary) }
             if camera.options?.focusLocked == true {
                 Text("AE/AF LOCK").font(.caption2.weight(.semibold)).foregroundStyle(.black)
                     .padding(.horizontal, 8).padding(.vertical, 4).background(.yellow, in: RoundedRectangle(cornerRadius: 3))
@@ -141,7 +142,7 @@ struct CameraView: View {
             }
             if let message = camera.message { Text(message) }
             if camera.state == .failed || camera.state == .interrupted {
-                Button("Resume Camera") { Task { await camera.prepare() } }.buttonStyle(.bordered)
+                Button("Resume Camera") { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }.buttonStyle(.bordered)
             }
         }.font(.footnote).multilineTextAlignment(.center)
             .shadow(color: .black.opacity(0.8), radius: 3)
@@ -198,7 +199,7 @@ struct CameraView: View {
         let flip = Button { camera.flip() } label: {
             Image(systemName: "arrow.triangle.2.circlepath.camera").font(.title2)
                 .frame(width: 46, height: 46).background(.white.opacity(0.15), in: Circle())
-        }.accessibilityLabel("Switch camera").disabled(camera.state != .ready)
+        }.accessibilityLabel("Switch camera").disabled(camera.state != .ready || camera.options?.canFlip != true)
         VStack(spacing: 15) {
             Text(camera.state == .finalizing ? "SAVING…" : "VIDEO").font(.caption.weight(.medium)).tracking(1).foregroundStyle(.yellow)
             if compact { recordButton; HStack { recent; flip } }
