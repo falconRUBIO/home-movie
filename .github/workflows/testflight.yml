@@ -1,0 +1,80 @@
+name: Upload internal TestFlight beta
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight-upload
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    name: Test, sign, and upload
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      BUNDLE_ID: com.falconcraft.homemovie
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check required signing secrets
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+          CERTIFICATE_PRIVATE_KEY: ${{ secrets.CERTIFICATE_PRIVATE_KEY }}
+        run: |
+          for name in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_PRIVATE_KEY CERTIFICATE_PRIVATE_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing GitHub Actions secret: $name. See TESTFLIGHT.md."
+              exit 1
+            fi
+          done
+      - name: Generate project and build number
+        run: |
+          export BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
+          python3 scripts/generate_project.py
+      - name: Require all simulator tests to pass
+        run: bash scripts/test_simulator.sh
+      - name: Install signing tools
+        run: |
+          python3 -m venv "$RUNNER_TEMP/signing-tools"
+          "$RUNNER_TEMP/signing-tools/bin/pip" install codemagic-cli-tools==0.70.0
+          echo "$RUNNER_TEMP/signing-tools/bin" >> "$GITHUB_PATH"
+      - name: Sign and upload to Apple
+        env:
+          APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+          CERTIFICATE_PRIVATE_KEY: ${{ secrets.CERTIFICATE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --strict-match-identifier --create
+          keychain add-certificates
+          xcode-project use-profiles --project HomeMovie.xcodeproj --custom-export-options='{"testFlightInternalTestingOnly": true}'
+          xcode-project build-ipa --project HomeMovie.xcodeproj --scheme HomeMovie --disable-xcpretty 2>&1 | tee build/archive.log
+          app-store-connect publish --path 'build/ios/ipa/*.ipa' --enable-package-validation
+      - name: Package test results
+        if: always()
+        run: |
+          if [ -d build/TestResults.xcresult ]; then
+            ditto -c -k --keepParent build/TestResults.xcresult build/TestResults.xcresult.zip
+          fi
+      - name: Save build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testflight-diagnostics-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            build/xcodebuild.log
+            build/archive.log
+            build/TestResults.xcresult.zip
+          if-no-files-found: warn
+          retention-days: 14

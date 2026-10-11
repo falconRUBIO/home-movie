@@ -4,7 +4,7 @@ A SwiftUI iPhone application for recording multiple ongoing movies, scene by sce
 
 ## Status — read this first
 
-This repository contains a native Xcode project and implementation source. Codemagic compiled the app and test targets for commit `168d71c` and ran all 13 tests: 11 passed, including all backup tests; two video-export tests failed. Commit `6383ee6` corrects the suspected silent-export cause and awaits a native rerun. See `AUDIT.md` and `VALIDATION.json` for evidence and limitations. Signing, TestFlight upload, and physical-device recording tests remain pending.
+This repository contains a native Xcode project and implementation source. GitHub Actions run 1 for commit `b684eb8` compiled the app and test targets and passed all 13 tests, including backup and silent landscape/portrait exports. See `AUDIT.md` and `VALIDATION.json` for evidence and limitations. Signing, TestFlight upload, and physical-device recording tests remain pending.
 
 ## Automatic GitHub build tests
 
@@ -12,7 +12,7 @@ This repository contains a native Xcode project and implementation source. Codem
 
 ## TestFlight without local Xcode
 
-Start with `TESTFLIGHT.md`. Codemagic remains configured for a signed internal TestFlight archive after you connect your Apple signing integration and registered bundle identifier. The unsigned test workflow has run; the signed upload workflow has not. No login page is needed in the app.
+Start with `TESTFLIGHT.md`. The manually started **Upload internal TestFlight beta** GitHub workflow tests, signs, and uploads the app using Apple credentials stored in GitHub Secrets. It uses the registered `com.falconcraft.homemovie` identifier and requires the signing setup described there. The signed upload workflow has not run. No login page is needed in the app.
 
 ## Open it on your Mac
 

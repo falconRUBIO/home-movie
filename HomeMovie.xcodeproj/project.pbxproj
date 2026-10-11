@@ -315,7 +315,7 @@
     "EF00B4C26D3BA245CBAB3F00" = {
       "isa" = "XCBuildConfiguration";
       "buildSettings" = {
-        "PRODUCT_BUNDLE_IDENTIFIER" = "com.example.HomeMovie";
+        "PRODUCT_BUNDLE_IDENTIFIER" = "com.falconcraft.homemovie";
         "PRODUCT_NAME" = "$(TARGET_NAME)";
         "INFOPLIST_FILE" = "HomeMovie/Info.plist";
         "GENERATE_INFOPLIST_FILE" = "NO";
@@ -330,7 +330,7 @@
     "49B4940C5F901788C278DD41" = {
       "isa" = "XCBuildConfiguration";
       "buildSettings" = {
-        "PRODUCT_BUNDLE_IDENTIFIER" = "com.example.HomeMovie";
+        "PRODUCT_BUNDLE_IDENTIFIER" = "com.falconcraft.homemovie";
         "PRODUCT_NAME" = "$(TARGET_NAME)";
         "INFOPLIST_FILE" = "HomeMovie/Info.plist";
         "GENERATE_INFOPLIST_FILE" = "NO";
@@ -374,7 +374,7 @@
     "BA1313667AFF67C3D4D3D6F1" = {
       "isa" = "XCBuildConfiguration";
       "buildSettings" = {
-        "PRODUCT_BUNDLE_IDENTIFIER" = "com.example.HomeMovie.Tests";
+        "PRODUCT_BUNDLE_IDENTIFIER" = "com.falconcraft.homemovie.Tests";
         "PRODUCT_NAME" = "$(TARGET_NAME)";
         "GENERATE_INFOPLIST_FILE" = "YES";
         "TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/HomeMovie.app/HomeMovie";
@@ -386,7 +386,7 @@
     "DA3246F3964ABD33305FD4C3" = {
       "isa" = "XCBuildConfiguration";
       "buildSettings" = {
-        "PRODUCT_BUNDLE_IDENTIFIER" = "com.example.HomeMovie.Tests";
+        "PRODUCT_BUNDLE_IDENTIFIER" = "com.falconcraft.homemovie.Tests";
         "PRODUCT_NAME" = "$(TARGET_NAME)";
         "GENERATE_INFOPLIST_FILE" = "YES";
         "TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/HomeMovie.app/HomeMovie";

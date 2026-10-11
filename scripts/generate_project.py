@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-bundle_id = os.environ.get('BUNDLE_ID', 'com.example.HomeMovie')
+bundle_id = os.environ.get('BUNDLE_ID', 'com.falconcraft.homemovie')
 build_number = os.environ.get('BUILD_NUMBER', '1')
 if not re.fullmatch(r'[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+', bundle_id):
     raise SystemExit('BUNDLE_ID must be a valid reverse-domain identifier')

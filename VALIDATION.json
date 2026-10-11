@@ -32,23 +32,24 @@
   ],
   "swift_files": 18,
   "not_performed": [
-    "Xcode compilation and XCTest execution for the corrected revision",
+    "Signed archive and TestFlight upload",
+    "Native compilation/tests for new signing configuration",
     "real device tests"
   ],
   "date": "2026-10-11",
   "native_tests_supplied": 13,
   "native_tests_run": 13,
-  "native_build_status": "Rebuild pending after correcting silent-movie composition track setup",
+  "native_build_status": "App and test targets compiled; all 13 tests passed at b684eb8. Signing workflow configuration awaits cloud validation.",
   "previous_cloud_build": {
-    "commit": "168d71c793d7b4aac245f6ec99ac23f6ab92e966",
-    "status": "App and test targets compiled; 13 tests ran, 11 passed and 2 export tests failed",
-    "tests_failed": [
-      "PipelineTests.testCompositionSnapshotAndExportAgreeWithoutAudio",
-      "PipelineTests.testPortraitExportUsesFullPortraitCanvas"
-    ],
-    "export_error": "AVFoundationErrorDomain -11838; underlying OSStatus -16976"
+    "commit": "b684eb8a8256e1196439a9b70c21721019ff8323",
+    "provider": "GitHub Actions",
+    "run_id": 38166745629,
+    "status": "PASS",
+    "tests_run": 13,
+    "tests_passed": 13,
+    "tests_failed": 0
   },
   "testflight_uploaded": false,
-  "native_tests_passed": 11,
-  "native_tests_failed": 2
+  "native_tests_passed": 13,
+  "native_tests_failed": 0
 }

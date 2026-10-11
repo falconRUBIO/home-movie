@@ -114,3 +114,9 @@ Codemagic build 3 for commit `168d71c793d7b4aac245f6ec99ac23f6ab92e966` compiled
 Both failures export video-only fixtures. Inspection found that the shared assembler always created an empty audio track, with no media segments or audio format. This revision creates the audio track only when a source has an overlapping, nonempty audio range, so silent movies contain only video. Video-composition frame timing now explicitly references the populated video track. The existing export tests retain their duration and full-frame dimension checks and now also check that silent compositions/exports contain no audio track.
 
 The empty audio track is the suspected common cause; confirming the fix requires another cloud run. Portable grammar/configuration checks pass. No tests were skipped or weakened, and no native rerun has been performed here.
+
+## Passing GitHub build and signing setup — 2026-10-11
+
+GitHub Actions run `38166745629` at commit `b684eb8a8256e1196439a9b70c21721019ff8323` compiled both targets and executed 13 tests with zero failures. Both previously failing landscape/portrait silent-export tests passed after the track setup correction. Logs report 79.322 seconds for all tests. This is a simulator result, not device-camera validation.
+
+The generator default now uses the user's registered `com.falconcraft.homemovie` identifier. A manual, main-only GitHub workflow runs tests before automatic Apple signing and internal-only upload. It uses standalone CLI tools, not Codemagic's hosted service. Signing requires an Admin API key and a persistent certificate private key in GitHub Secrets. Signing and upload are pending that setup; no native build of this configuration or TestFlight upload has yet run.
