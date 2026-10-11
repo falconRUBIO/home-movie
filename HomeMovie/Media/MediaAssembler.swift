@@ -19,7 +19,9 @@ enum MediaInspector {
         let size = try await video.load(.naturalSize)
         let transform = try await video.load(.preferredTransform)
         let bounds = CGRect(origin: .zero, size: size).applying(transform)
-        guard range.duration.isNumeric, range.duration.seconds > 0, bounds.width > 0, bounds.height > 0 else {
+        guard MediaAssembler.hasValidGeometry(size: size, preferred: transform), range.isValid,
+              range.start.isNumeric, range.start.seconds.isFinite, range.duration.isNumeric, range.duration.seconds.isFinite, range.duration.seconds > 0,
+              bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0 else {
             throw HomeMovieError.message("The recording has no valid video duration.")
         }
         let audio = try await asset.loadTracks(withMediaType: .audio)
@@ -54,6 +56,10 @@ actor MediaAssembler {
             let asset = AVURLAsset(url: root.appendingPathComponent(scene.source))
             guard let sourceVideo = try await asset.loadTracks(withMediaType: .video).first else { throw HomeMovieError.message("A scene has no video track.") }
             let sourceRange = try await sourceVideo.load(.timeRange)
+            guard sourceRange.isValid, sourceRange.start.isNumeric, sourceRange.start.seconds.isFinite,
+                  sourceRange.duration.isNumeric, sourceRange.duration.seconds.isFinite, sourceRange.duration.seconds > 0 else {
+                throw HomeMovieError.message("A scene has an invalid video time range. Its original file has been preserved.")
+            }
             let start = CMTimeAdd(sourceRange.start, scene.trimStart.cmTime)
             let selected = CMTimeRange(start: start, duration: scene.playableDuration)
             guard CMTimeCompare(CMTimeRangeGetEnd(selected), CMTimeRangeGetEnd(sourceRange)) <= 0 else { throw HomeMovieError.message("A scene trim extends beyond the video track.") }
@@ -72,6 +78,9 @@ actor MediaAssembler {
             }
             let naturalSize = try await sourceVideo.load(.naturalSize)
             let preferred = try await sourceVideo.load(.preferredTransform)
+            guard Self.hasValidGeometry(size: naturalSize, preferred: preferred) else {
+                throw HomeMovieError.message("A scene has invalid video dimensions. Its original file has been preserved.")
+            }
             let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
             layer.setTransform(Self.fitTransform(size: naturalSize, preferred: preferred, canvas: movie.format.canvas), at: cursor)
             let instruction = AVMutableVideoCompositionInstruction()
@@ -87,6 +96,12 @@ actor MediaAssembler {
         videoComposition.sourceTrackIDForFrameTiming = videoTrack.trackID
         videoComposition.instructions = instructions
         return CompositionBundle(asset: composition, videoComposition: videoComposition, duration: cursor)
+    }
+    nonisolated static func hasValidGeometry(size: CGSize, preferred: CGAffineTransform) -> Bool {
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0,
+              [preferred.a, preferred.b, preferred.c, preferred.d, preferred.tx, preferred.ty].allSatisfy({ $0.isFinite }) else { return false }
+        let bounds = CGRect(origin: .zero, size: size).applying(preferred)
+        return bounds.width.isFinite && bounds.height.isFinite && bounds.width > 0 && bounds.height > 0
     }
     nonisolated static func fitTransform(size: CGSize, preferred: CGAffineTransform, canvas: CGSize) -> CGAffineTransform {
         let bounds = CGRect(origin: .zero, size: size).applying(preferred)

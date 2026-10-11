@@ -19,7 +19,9 @@ actor PhotosSafetyService {
         guard let current, current.photosAssetID == nil, !copying.contains(scene.id) else { return }
         copying.insert(scene.id); defer { copying.remove(scene.id) }
         guard await authorize() else { throw HomeMovieError.message("Photos copy is not enabled by permission. The scene remains saved in Home Movie.") }
+        try Task.checkCancellation()
         let source = try await store.url(scene.source), receipt = PhotoReceipt()
+        try Task.checkCancellation()
         try await PHPhotoLibrary.shared().performChanges {
             let request = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: source)
             receipt.set(request?.placeholderForCreatedAsset?.localIdentifier)

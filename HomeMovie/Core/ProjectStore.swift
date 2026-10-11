@@ -31,6 +31,7 @@ actor ProjectStore {
         let scenes = value.movies.flatMap(\.scenes)
         guard Set(value.movies.map(\.id)).count == value.movies.count,
               Set(scenes.map(\.id)).count == scenes.count else { throw HomeMovieError.message("The catalog contains duplicate identifiers. Its file has been preserved.") }
+        var totalBytes: Int64 = 0
         for movie in value.movies {
             guard !movie.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   movie.revision >= 0 && movie.revision < Int.max,
@@ -40,9 +41,14 @@ actor ProjectStore {
             for scene in movie.scenes {
                 guard scene.validTrim, scene.sequence >= 0 && scene.sequence < 1_000_000_000,
                       scene.source == "Originals/\(scene.id.uuidString).mov",
-                      scene.width.isFinite && scene.height.isFinite && scene.width > 0 && scene.height > 0 && scene.bytes >= 0 else {
+                      scene.width.isFinite && scene.height.isFinite && scene.width > 0 && scene.height > 0 && scene.bytes >= 0 && scene.bytes <= Int64.max / 4 else {
                     throw HomeMovieError.message("A scene has invalid metadata. The catalog has been preserved.")
                 }
+                let (sum, overflow) = totalBytes.addingReportingOverflow(scene.bytes)
+                guard !overflow, sum <= Int64.max / 4 else {
+                    throw HomeMovieError.message("The catalog's storage total is invalid. Its file has been preserved.")
+                }
+                totalBytes = sum
             }
         }
     }
@@ -81,9 +87,10 @@ actor ProjectStore {
         let path = root.appendingPathComponent("catalog.json")
         if fm.fileExists(atPath: path.path) {
             // A damaged or newer manifest must never be overwritten by an empty catalog.
-            catalog = try JSONDecoder().decode(Catalog.self, from: Data(contentsOf: path))
-            guard catalog.schemaVersion == 1 else { throw HomeMovieError.message("This project uses a newer version of Home Movie.") }
-            try validate(catalog)
+            let decoded = try JSONDecoder().decode(Catalog.self, from: Data(contentsOf: path))
+            guard decoded.schemaVersion == 1 else { throw HomeMovieError.message("This project uses a newer version of Home Movie.") }
+            try validate(decoded)
+            catalog = decoded
         } else { try write(catalog) }
         var notices: [String] = []
         let journalFiles = try fm.contentsOfDirectory(at: root.appendingPathComponent("Journal"), includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" }

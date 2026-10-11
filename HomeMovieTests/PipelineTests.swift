@@ -17,6 +17,57 @@ final class PipelineTests: XCTestCase {
             switchFactors: [2, 8], secondaryFactors: [4, 16])
         XCTAssertEqual(restricted.map(\.displayed), [0.5, 1, 2, 4])
     }
+    func testInvalidVideoGeometryIsRejectedBeforeComposition() {
+        let valid = CGSize(width: 1920, height: 1080)
+        XCTAssertTrue(MediaAssembler.hasValidGeometry(size: valid, preferred: CGAffineTransform(rotationAngle: .pi / 2)))
+        XCTAssertFalse(MediaAssembler.hasValidGeometry(size: .zero, preferred: .identity))
+        XCTAssertFalse(MediaAssembler.hasValidGeometry(size: CGSize(width: .infinity, height: 1080), preferred: .identity))
+        XCTAssertFalse(MediaAssembler.hasValidGeometry(size: valid, preferred: CGAffineTransform(a: .nan, b: 0, c: 0, d: 1, tx: 0, ty: 0)))
+    }
+    func testDurationLabelsHandleExtremeAndInvalidTimes() {
+        XCTAssertEqual(durationLabel(CMTime(value: Int64.max, timescale: 1)), "2562047788015215:30:07")
+        XCTAssertEqual(durationLabel(.indefinite), "0:00")
+        XCTAssertEqual(durationLabel(CMTime(seconds: -1, preferredTimescale: 600)), "0:00")
+        XCTAssertEqual(durationLabel(CMTime(seconds: 3661, preferredTimescale: 600)), "1:01:01")
+    }
+    func testOversizedCatalogStorageIsRejectedWithoutOverwriting() async throws {
+        let store = try await makeStore()
+        _ = try await store.create(name: "Preserve", format: .landscape)
+        for aggregate in [false, true] {
+            var catalog = await store.catalogSnapshot()
+            catalog.movies[0].scenes = (0..<(aggregate ? 5 : 1)).map { position in
+                let id = UUID()
+                return Scene(id: id, sequence: position, source: "Originals/\(id).mov", capturedAt: Date(), timeZone: "UTC",
+                    sourceDuration: MediaTime(seconds: 1), trimStart: MediaTime(.zero), trimEnd: MediaTime(seconds: 1),
+                    width: 320, height: 240, hasAudio: false, bytes: aggregate ? Int64.max / 4 : Int64.max)
+            }
+            let file = store.root.appendingPathComponent("catalog.json")
+            let damaged = try JSONEncoder().encode(catalog)
+            try damaged.write(to: file)
+            let preservedMedia = store.root.appendingPathComponent(catalog.movies[0].scenes[0].source)
+            try Data([1, 2, 3]).write(to: preservedMedia)
+            let reopened = ProjectStore(root: store.root)
+            do { _ = try await reopened.load(); XCTFail("Unsafe storage metadata must be rejected") } catch {}
+            XCTAssertEqual(try Data(contentsOf: file), damaged)
+            let recovery = try await reopened.recoveryFiles()
+            XCTAssertTrue(recovery.contains { $0.url == preservedMedia }, "Rejected metadata must not hide preserved footage")
+        }
+    }
+    @MainActor func testFailedLibraryReloadClearsReadyStateAndPreservesCatalog() async throws {
+        let store = try await makeStore(), app = AppModel(store: store)
+        await app.load()
+        XCTAssertTrue(app.loaded)
+        try await store.beginMaintenance()
+        try await store.installImportedMovies([])
+        await store.endMaintenance()
+        let file = store.root.appendingPathComponent("catalog.json")
+        let damaged = Data("broken reload".utf8)
+        try damaged.write(to: file)
+        await app.load()
+        XCTAssertFalse(app.loaded)
+        XCTAssertNotNil(app.loadFailure)
+        XCTAssertEqual(try Data(contentsOf: file), damaged)
+    }
     private func makeStore() async throws -> ProjectStore {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let store = ProjectStore(root: root); _ = try await store.load()

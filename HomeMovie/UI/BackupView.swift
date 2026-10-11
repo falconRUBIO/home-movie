@@ -71,11 +71,11 @@ struct BackupView: View {
                     Button("Cancel", role: .destructive) { backup.cancel() }
                 } }
                 Section {
-                    Button("Prepare Project Backup", systemImage: "archivebox") { backup.create(app: app) }.disabled(!app.loaded || backup.running)
+                    Button("Prepare Project Backup", systemImage: "archivebox") { backup.create(app: app) }.disabled(!app.loaded || backup.running || repairRunning)
                     if backup.prepared != nil {
-                        Button("Save Backup to Files", systemImage: "folder") { saving = true }.disabled(backup.running)
+                        Button("Save Backup to Files", systemImage: "folder") { saving = true }.disabled(backup.running || repairRunning)
                     }
-                    Button("Restore Project Backup", systemImage: "arrow.counterclockwise") { importing = true }.disabled(backup.running)
+                    Button("Restore Project Backup", systemImage: "arrow.counterclockwise") { importing = true }.disabled(backup.running || repairRunning)
                 }
                 if !app.loaded {
                     Section("Recover the library") {

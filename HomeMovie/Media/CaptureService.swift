@@ -74,7 +74,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                    let options = try? self.options() { self.onEvent?(.ready(options)) }
             }
         })
-        observers.append(center.addObserver(forName: .AVCaptureSessionWasInterrupted, object: session, queue: nil) { [weak self] _ in
+        observers.append(center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] _ in
             guard let self else { return }
             self.queue.async {
                 self.requestStop()
@@ -82,7 +82,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 self.onEvent?(.interrupted("Camera interrupted. Your saved scenes are safe. Tap Resume Camera when ready."))
             }
         })
-        observers.append(center.addObserver(forName: .AVCaptureSessionRuntimeError, object: session, queue: nil) { [weak self] notification in
+        observers.append(center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] notification in
             let text = (notification.userInfo?[AVCaptureSessionErrorKey] as? Error)?.localizedDescription ?? "Camera unavailable. Try resuming the camera."
             self?.queue.async {
                 guard let self else { return }

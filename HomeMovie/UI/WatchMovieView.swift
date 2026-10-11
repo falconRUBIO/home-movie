@@ -141,6 +141,7 @@ struct SceneReviewView: View {
                 let asset = AVURLAsset(url: app.store.root.appendingPathComponent(scene.source))
                 if let tracks = try? await asset.loadTracks(withMediaType: .video), let track = tracks.first,
                    let range = try? await track.load(.timeRange) { originalStart = range.start }
+                guard !Task.isCancelled else { return }
                 let item = AVPlayerItem(asset: asset)
                 item.forwardPlaybackEndTime = CMTimeAdd(originalStart, scene.trimEnd.cmTime)
                 player = AVPlayer(playerItem: item)

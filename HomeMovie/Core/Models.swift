@@ -84,6 +84,8 @@ enum HomeMovieError: LocalizedError {
 func durationLabel(_ time: CMTime) -> String {
     let seconds = CMTimeGetSeconds(time)
     guard seconds.isFinite else { return "0:00" }
-    let s = max(0, Int(seconds))
-    return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
+    guard seconds > 0 else { return "0:00" }
+    // Double(Int.max) rounds upward on 64-bit platforms; do not convert that value.
+    let s = seconds >= Double(Int.max) ? Int.max : Int(seconds)
+    return s >= 3600 ? "\(s / 3600):" + String(format: "%02d:%02d", s / 60 % 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
 }

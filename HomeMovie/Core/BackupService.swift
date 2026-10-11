@@ -90,8 +90,11 @@ actor BackupService {
                 }
                 entries[scene.source] = entry; completed += entry.bytes
             }
+            try Task.checkCancellation()
             let backup = ProjectBackup(catalog: snapshot, files: entries)
-            try JSONEncoder().encode(backup).write(to: package.appendingPathComponent("manifest.json"), options: .atomic)
+            let manifestData = try JSONEncoder().encode(backup)
+            guard manifestData.count <= 10_000_000 else { throw HomeMovieError.message("This project is too large for a single backup manifest.") }
+            try manifestData.write(to: package.appendingPathComponent("manifest.json"), options: .atomic)
             progress(1); await store.endMaintenance()
             return PreparedBackup(url: package, snapshot: snapshot)
         } catch {
@@ -157,9 +160,11 @@ actor BackupService {
             try await store.validateBackupCatalog(Catalog(movies: restored))
             try Task.checkCancellation()
             for scene in restored.flatMap(\.scenes) {
+                try Task.checkCancellation()
                 let staged = staging.appendingPathComponent("\(scene.id).mov"), target = store.root.appendingPathComponent(scene.source)
                 try FileManager.default.moveItem(at: staged, to: target); installed.append(target)
             }
+            try Task.checkCancellation()
             try await store.installImportedMovies(restored); committed = true
             try? FileManager.default.removeItem(at: staging)
             await store.endMaintenance()

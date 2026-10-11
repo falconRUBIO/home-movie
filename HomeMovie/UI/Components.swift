@@ -48,7 +48,9 @@ struct SceneThumbnail: View {
         .task(id: scene.map { "\($0.id)-\($0.trimStart.value)" }) {
             image = nil
             guard let scene, !scene.missing else { return }
-            image = try? await ThumbnailService.shared.image(scene: scene, root: root)
+            let result = try? await ThumbnailService.shared.image(scene: scene, root: root)
+            guard !Task.isCancelled else { return }
+            image = result
         }
     }
 }

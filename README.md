@@ -4,7 +4,7 @@ A SwiftUI iPhone application for recording multiple ongoing movies, scene by sce
 
 ## Status — read this first
 
-This repository contains a native Xcode project and implementation source. GitHub Actions run 1 for commit `b684eb8` compiled the app and test targets and passed all 13 tests, including backup and silent landscape/portrait exports. See `AUDIT.md` and `VALIDATION.json` for evidence and limitations. Signing, TestFlight upload, and physical-device recording tests remain pending.
+The camera stability revision `14d68e8` compiled and passed all 17 native tests in GitHub Actions run `38176139953`. The broader audit now supplies 21 tests and awaits its own native run. A signed internal TestFlight build for `123e29e` uploaded successfully. See `AUDIT.md` and `VALIDATION.json` for evidence; complete physical-device acceptance remains pending.
 
 ## Automatic GitHub build tests
 
@@ -12,14 +12,14 @@ This repository contains a native Xcode project and implementation source. GitHu
 
 ## TestFlight without local Xcode
 
-Start with `TESTFLIGHT.md`. The manually started **Upload internal TestFlight beta** GitHub workflow tests, signs, and uploads the app using Apple credentials stored in GitHub Secrets. It uses the registered `com.falconcraft.homemovie` identifier and requires the signing setup described there. The signed upload workflow has not run. No login page is needed in the app.
+Start with `TESTFLIGHT.md`. The manually started **Upload internal TestFlight beta** GitHub workflow tests, signs, and uploads the app using Apple credentials stored in GitHub Secrets. It uses the registered `com.falconcraft.homemovie` identifier and requires the signing setup described there. The first signed upload succeeded; start a new workflow on main to upload later revisions. No login page is needed in the app.
 
 ## Open it on your Mac
 
 1. Unzip this package into a folder on your Mac.
 2. Install **Xcode 26 or newer**. The deployment target is iOS 18, with actual Liquid Glass guarded for iOS 26 and later.
 3. Double-click **HomeMovie.xcodeproj**. Choose the **HomeMovie** scheme.
-4. In the project’s **Signing & Capabilities**, select your Apple development team. Change `com.example.HomeMovie` to your own unique bundle identifier. Set the test target’s identifier accordingly if needed.
+4. In the project’s **Signing & Capabilities**, select your Apple development team. The app uses `com.falconcraft.homemovie`. Keep the registered identifier and the matching test identifier unless intentionally registering a different app.
 5. Connect an iPhone with iOS 18 or later. Enable Developer Mode if the phone asks. Select that iPhone as the run destination.
 6. Press **Run** (the triangle at the top of Xcode). Allow camera and microphone access when opening the camera.
 7. Choose **Product → Test** to run `PipelineTests` and `BackupTests`. Camera testing requires a physical device; generated-media unit tests can also run in Simulator.
@@ -45,10 +45,11 @@ xcodebuild -project HomeMovie.xcodeproj -scheme HomeMovie -destination 'platform
 - Native SwiftUI navigation, menus, forms, sheets, accessibility labels and scalable system typography. No reproduction of a fake camcorder interface.
 - Compact movie picker with native `glassEffect` on iOS 26; standard system material on iOS 18–25.
 - Familiar red video button in a white ring, stop square, latest-scene thumbnail, front/rear switch, timer, and saving state.
-- AVFoundation discovery of virtual rear cameras and available front cameras; lens choices derived from the device’s switch-over factors and `displayVideoZoomFactorMultiplier`. No hardcoded 0.5/1/3/5 list. Pinch zoom clamps to device limits. Virtual cameras decide which physical sensor to use; low light and other constraints can affect switching.
-- Full-frame `.resizeAspect` preview. Landscape movies require a landscape interface; portrait movies require portrait. Capture rotation is frozen for a take; composed playback/export letterbox differing source geometry rather than crop it. Front preview is mirrored; recorded footage is unmirrored. Verify on device.
+- AVFoundation discovery of virtual rear cameras and available front cameras; lens choices derived from switch-over and secondary native-resolution factors, converted with `displayVideoZoomFactorMultiplier`. No hardcoded 0.5/1/3/5 list. Pinch zoom clamps to device limits. Virtual cameras decide which physical sensor to use; low light and other constraints can affect switching.
+- Edge-to-edge `.resizeAspectFill` preview; display edges can be trimmed to fit the screen, while saved recordings retain their full source frame. Landscape movies require a landscape interface; portrait movies require portrait. Capture rotation is frozen for a take; composed playback/export letterbox differing source geometry rather than crop it. Front preview is mirrored; recorded footage is unmirrored. Verify on device.
 - 1080p, target 30 fps, SDR capture. Video stabilization is initially disabled to avoid a stabilization crop changing the preview/export field of view. This must be assessed on device before offering stabilization.
 - Explicit preparing, ready, starting, recording, finalizing, denied, interrupted and failed states. Movie and camera switching disabled throughout an active take and finalization.
+- Tap focus/exposure, long-press AE/AF lock, vertical brightness adjustment beside the yellow sun, and a hardware torch toggle. Controls use available device capabilities; native gesture and torch behavior need physical-device verification.
 - Serial capture configuration off the main thread. Recording destination frozen into a durable journal before starting. Short background allowance for finalization; no promise of background camera recording.
 - Local versioned JSON catalog under Application Support, relative source paths, atomic catalog replacement, rational media times, retained originals and startup reconciliation. Damaged manifests fail closed instead of becoming an empty library.
 - Startup recovery of playable journaled takes and orphan footage. Incomplete/unrecognized footage is preserved and reported. Recovery cannot reconstruct a video that the camera never finalized.
@@ -81,8 +82,8 @@ The App Store privacy declaration, entitlements, actual binaries, accessibility,
 - `HomeMovie/Media`: capture queue/delegates, camera state, assembly, export.
 - `HomeMovie/UI`: native library, camera, watch, review/trim, export and settings.
 - `HomeMovieTests/PipelineTests.swift`: generated video fixtures, persistence, journal recovery, invalid takes, nondestructive editing, composition/export and geometry tests.
-- `HomeMovieTests/BackupTests.swift`: backup round trips, tampering, maintenance/cancellation, catalog recovery and legacy metadata decoding (unrun).
-- `TESTFLIGHT.md` and `codemagic.yaml`: repository, signing and internal beta setup (unrun).
+- `HomeMovieTests/BackupTests.swift`: backup round trips, tampering, maintenance/cancellation, catalog recovery and legacy metadata decoding; these passed in the prior 13-test native suite.
+- `TESTFLIGHT.md` and `codemagic.yaml`: repository, signing and internal beta setup; GitHub signing/upload has succeeded.
 - `DEVICE_TESTS.md`: release-blocking device scenarios and an outcome log.
 - `AUDIT.md`: audit findings, checks performed and known limitations.
 - `scripts/generate_project.py`: deterministic regeneration of the already-included Xcode project; no XcodeGen dependency.

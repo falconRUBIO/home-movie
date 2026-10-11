@@ -152,7 +152,7 @@ struct SettingsView: View {
                 Section { NavigationLink("Privacy", destination: PrivacyView()) }
                 Section("Protection") {
                     Toggle("Copy original scenes to Photos", isOn: $copyScenesToPhotos)
-                        .onChange(of: copyScenesToPhotos) { _, enabled in if enabled { app.retryPhotosCopies() } }
+                        .onChange(of: copyScenesToPhotos) { _, enabled in if enabled { app.retryPhotosCopies() } else { app.stopPhotosRetries() } }
                     Text("Creates a separate Photos copy after each local save. Copies use extra storage. iCloud Photos syncing follows your Photos settings.").font(.footnote).foregroundStyle(.secondary)
                     if copyScenesToPhotos { Button("Retry Pending Photos Copies") { app.retryPhotosCopies() } }
                     if let status = app.photosCopyStatus { Text(status).font(.footnote).foregroundStyle(.secondary) }
