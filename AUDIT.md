@@ -16,14 +16,14 @@ These checks are **not Swift type checking, an Xcode build, XCTest execution or 
 
 - Lens buttons read real device switch-over factors and the iOS 18+ display multiplier; removed inferred/hardcoded telephoto choices.
 - Default rear zoom now normalizes to displayed 1× instead of opening on an ultra-wide virtual-device base zoom.
-- Preview uses aspect fit, no fill crop. Movie format is explicit and required starting orientation is enforced.
+- Live preview fills the display; preview edges may be cropped to the screen aspect. Saved footage retains the full source frame. Movie format is explicit and required starting orientation is enforced.
 - Recording rotation is frozen; it is not changed by live rotation notifications or zoom controls mid-take.
 - File completion success is checked before inspection/commit. UI waits for durable metadata before claiming a scene was saved.
 - Journal recovery sorts pending takes by capture date/sequence. Commit checks idempotence again after asynchronous media inspection.
 - Corrupt, unsupported-version, duplicate-ID, invalid-trim and inconsistent-path catalogs fail closed instead of being overwritten.
 - Catalog writes are atomic; journals cover the source move/database gap. Originals and directories use protection that remains readable after first unlock during finalization.
 - Scene/movie deletion preserves files and trim/sequence data. Recently Deleted provides restoration.
-- Preview and export share aspect-fitting semantics; playback and export use one composition builder.
+- Playback and export use one aspect-fitting composition builder. Live preview uses aspect fill to cover the screen; this presentation does not crop saved source files.
 - Audio insertion intersects selected video and source audio ranges and preserves their offsets. Missing audio is allowed.
 - Export uses an immutable snapshot, blocks duplicate starts, monitors framework progress, supports cancellation, verifies duration and portrait/landscape dimensions, and preserves originals.
 - Export uses the configured 1080p composition canvas with the highest-quality preset rather than forcing a landscape-sized preset onto portrait output.
@@ -128,3 +128,9 @@ The user's retry passed tests, Apple authentication, signing, archive, and IPA e
 The exported backup type, document-handler type, and Swift UTType now use `com.falconcraft.homemovie.backup`. The package extension and backup contents remain compatible. `LSSupportsOpeningDocumentsInPlace` is explicitly false because restore imports separate copies rather than editing an external project in place. Portable validation now checks the type declarations, runtime identifier agreement, and document configuration; both GitHub workflows run these checks before native tests.
 
 Local source checks pass. A new signed build and Apple package-validation run are required to confirm acceptance of this correction.
+
+## Edge-to-edge camera — 2026-10-11
+
+User-provided iPhone screenshot showed the preview boxed into a movie-aspect rectangle with side margins, separate header, and bottom control area. The camera now renders its live preview across the display, including safe-area backgrounds. The header, timer, available lenses, record/stop button, recent scene, camera flip, and review controls overlay the image. Subtle top/bottom gradients preserve control contrast. Portrait and landscape controls remain within safe areas; the preview no longer reserves space for them.
+
+AVCaptureVideoPreviewLayer uses aspect fill, which trims some visible preview edges on screens with a different aspect ratio. Capture settings and saved/exported frames are unchanged. This supersedes the earlier full-frame live-preview preference following the user's explicit full-screen request. Local Swift grammar/project checks pass; native compilation and physical-device layout verification of this revision are pending.

@@ -21,7 +21,7 @@ The app must not be represented as device-tested until this gate passes.
 | Lens discovery | Compare rear/front controls across devices | Only device-derived zoom/lens choices appear; no invented telephoto | NOT RUN |
 | Lens range | Pinch past either end, switch lenses while recording | Values clamp; no overlapping capture; valid output and sound | NOT RUN |
 | Default lens | Enter rear camera | Starts at the device’s displayed 1× where available | NOT RUN |
-| Full frame | Record a framing chart with corners visible | Preview and output contain the same complete frame; no preview-fill crop | NOT RUN |
+| Full frame | Record a framing chart with corners visible | Live preview fills the screen edge to edge in both orientations; controls stay inside safe areas. Fill preview may trim edges; saved footage and export retain the complete source frame | NOT RUN |
 | Orientation | Landscape left/right, Portrait, rotate during a take | Required starting orientation enforced; take orientation remains fixed | NOT RUN |
 | Front camera | Record a page of text | Mirrored preview; unmirrored saved footage; complete frame | NOT RUN |
 | Rapid taps | Tap Record/Stop repeatedly during start and save | One take and one commit; destination remains fixed | NOT RUN |

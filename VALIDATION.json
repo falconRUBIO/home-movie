@@ -36,13 +36,14 @@
   ],
   "swift_files": 18,
   "not_performed": [
-    "Native build and Apple package validation of the corrected revision",
-    "real device tests"
+    "Native compilation/tests of edge-to-edge camera revision",
+    "Physical-device layout verification of edge-to-edge camera",
+    "complete real device acceptance tests"
   ],
   "date": "2026-10-11",
   "native_tests_supplied": 13,
   "native_tests_run": 13,
-  "native_build_status": "Tests, signing, archive and IPA export passed; Apple package validation rejected reserved backup type. Corrected type awaits native rerun.",
+  "native_build_status": "Previous signed revision passed tests and upload. Edge-to-edge camera revision awaits native compilation and device verification.",
   "previous_cloud_build": {
     "commit": "b684eb8a8256e1196439a9b70c21721019ff8323",
     "provider": "GitHub Actions",
@@ -52,9 +53,11 @@
     "tests_passed": 13,
     "tests_failed": 0
   },
-  "testflight_uploaded": false,
+  "testflight_uploaded": true,
   "native_tests_passed": 13,
   "native_tests_failed": 0,
   "signed_archive_created": true,
-  "apple_package_validation_status": "Retry pending after correcting errors 90847 and warning 90737"
+  "apple_package_validation_status": "PASS for 123e29e; upload succeeded",
+  "uploaded_commit": "123e29e7de0dedaf4ae8ecb42bd539018203825d",
+  "successful_upload_run": 38173470003
 }

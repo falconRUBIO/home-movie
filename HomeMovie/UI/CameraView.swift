@@ -24,27 +24,36 @@ struct CameraView: View {
         GeometryReader { geometry in
             let landscape = geometry.size.width > geometry.size.height
             if let movie {
-                VStack(spacing: landscape ? 8 : 14) {
-                    HStack {
-                        Button { dismiss() } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }
-                            .accessibilityLabel("Back to Movies").disabled(camera.busy)
-                        Spacer(minLength: 8)
-                        Button { picking = true } label: {
-                            HStack(spacing: 7) { Text(movie.name).font(.subheadline.weight(.medium)).lineLimit(1); Image(systemName: "chevron.down").font(.caption2) }
-                                .padding(.horizontal, 15).frame(minHeight: 40).homeGlass()
-                        }.disabled(camera.busy).accessibilityLabel("Recording into \(movie.name). Change movie")
-                        Spacer(minLength: 8)
-                        Color.clear.frame(width: 44, height: 44)
-                    }.padding(.horizontal, 12)
-                    if landscape {
-                        HStack(spacing: 16) {
-                            preview(movie: movie).frame(maxWidth: .infinity, maxHeight: .infinity)
-                            controls(movie: movie, compact: true).frame(width: 110)
-                        }.padding(.horizontal, 16)
-                    } else {
-                        preview(movie: movie).frame(maxWidth: .infinity, maxHeight: .infinity)
-                        controls(movie: movie, compact: false).padding(.bottom, 10)
+                ZStack {
+                    preview().ignoresSafeArea()
+                    LinearGradient(stops: [
+                        .init(color: .black.opacity(0.55), location: 0),
+                        .init(color: .clear, location: 0.24),
+                        .init(color: .clear, location: 0.62),
+                        .init(color: .black.opacity(0.65), location: 1)
+                    ], startPoint: .top, endPoint: .bottom)
+                        .ignoresSafeArea().allowsHitTesting(false)
+                    VStack(spacing: 10) {
+                        header(movie: movie)
+                        if landscape {
+                            HStack(spacing: 16) {
+                                VStack(spacing: 10) {
+                                    timer(movie: movie)
+                                    Spacer(minLength: 12)
+                                    status(movie: movie)
+                                    lenses
+                                }.frame(maxWidth: .infinity)
+                                controls(movie: movie, compact: true).frame(width: 110)
+                            }
+                        } else {
+                            timer(movie: movie)
+                            Spacer(minLength: 16)
+                            status(movie: movie)
+                            lenses
+                            controls(movie: movie, compact: false)
+                        }
                     }
+                    .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 10)
                 }
                 .onAppear { layoutLandscape = landscape }
                 .onChange(of: landscape) { _, value in layoutLandscape = value }
@@ -75,57 +84,79 @@ struct CameraView: View {
             WatchMovieView(movieID: movieID, initialSceneID: initialReviewID).environmentObject(app)
         }
     }
-    @ViewBuilder private func preview(movie: Movie) -> some View {
-        VStack(spacing: 10) {
-            ZStack {
-                CameraPreview(session: camera.service.session, angle: camera.options?.angle ?? 90, front: camera.options?.isFront ?? false)
-                    .aspectRatio(movie.format.aspect, contentMode: .fit)
-                    .gesture(MagnificationGesture().onChanged { value in
-                        guard camera.state == .ready || camera.state == .recording, let options = camera.options else { return }
-                        if pinchBase == nil { pinchBase = options.zoom }
-                        if Date().timeIntervalSince(lastZoomAt) > 0.05 {
-                            camera.zoom((pinchBase ?? options.zoom) * value); lastZoomAt = Date()
-                        }
-                    }.onEnded { _ in pinchBase = nil })
-                VStack {
-                    Text(camera.state == .recording ? "● \(durationLabel(camera.elapsed))" : "\(durationLabel(movie.duration)) total")
-                        .font(.caption.monospacedDigit()).padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(camera.state == .recording ? Color.red : Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 5))
-                        .padding(.top, 10)
-                    Spacer()
-                    if let options = camera.options, options.lenses.count > 1 {
-                        HStack(spacing: 6) {
-                            ForEach(options.lenses) { lens in
-                                let selected = abs(lens.factor - options.zoom) < 0.06
-                                Button { camera.zoom(lens.factor) } label: {
-                                    Text(lens.label).font(.caption.weight(.medium)).monospacedDigit()
-                                        .foregroundStyle(selected ? .yellow : .white)
-                                        .frame(minWidth: 44, minHeight: 44)
-                                        .background(selected ? Color.white.opacity(0.15) : .clear, in: Circle())
-                                }.disabled(camera.state != .ready && camera.state != .recording)
-                                    .accessibilityLabel("\(lens.label) lens").accessibilityAddTraits(selected ? .isSelected : [])
-                            }
-                        }.padding(4).homeGlass().padding(.bottom, 10)
-                    }
+    private func header(movie: Movie) -> some View {
+        HStack {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left").frame(width: 44, height: 44).homeGlass()
+            }.accessibilityLabel("Back to Movies").disabled(camera.busy)
+            Spacer(minLength: 8)
+            Button { picking = true } label: {
+                HStack(spacing: 7) {
+                    Text(movie.name).font(.subheadline.weight(.medium)).lineLimit(1)
+                    Image(systemName: "chevron.down").font(.caption2)
+                }.padding(.horizontal, 15).frame(minHeight: 40).homeGlass()
+            }.disabled(camera.busy).accessibilityLabel("Recording into \(movie.name). Change movie")
+            Spacer(minLength: 8)
+            Color.clear.frame(width: 44, height: 44)
+        }
+    }
+    private func timer(movie: Movie) -> some View {
+        Text(camera.state == .recording ? "● \(durationLabel(camera.elapsed))" : "\(durationLabel(movie.duration)) total")
+            .font(.caption.monospacedDigit()).padding(.horizontal, 10).padding(.vertical, 5)
+            .background(camera.state == .recording ? Color.red : Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 5))
+    }
+    @ViewBuilder private var lenses: some View {
+        if let options = camera.options, options.lenses.count > 1 {
+            HStack(spacing: 6) {
+                ForEach(options.lenses) { lens in
+                    let selected = abs(lens.factor - options.zoom) < 0.06
+                    Button { camera.zoom(lens.factor) } label: {
+                        Text(lens.label).font(.caption.weight(.medium)).monospacedDigit()
+                            .foregroundStyle(selected ? .yellow : .white)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .background(selected ? Color.white.opacity(0.15) : .clear, in: Circle())
+                    }.disabled(camera.state != .ready && camera.state != .recording)
+                        .accessibilityLabel("\(lens.label) lens").accessibilityAddTraits(selected ? .isSelected : [])
                 }
-                if camera.state == .preparing { ProgressView("Preparing camera…").padding().background(.black.opacity(0.8), in: Capsule()) }
-                if camera.state == .denied {
-                    VStack(spacing: 12) {
-                        Text("Camera and microphone access are needed to record.").multilineTextAlignment(.center)
-                        Button("Open Settings") { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
-                    }.padding(20).background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
-                }
-            }.aspectRatio(movie.format.aspect, contentMode: .fit)
+            }.padding(4).homeGlass()
+        }
+    }
+    @ViewBuilder private func status(movie: Movie) -> some View {
+        VStack(spacing: 8) {
             if !correctOrientation && !camera.busy {
-                Text("Rotate your iPhone to record in \(movie.format.label).").font(.footnote).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center)
+                Text("Rotate your iPhone to record in \(movie.format.label).")
             }
-            if let message = camera.message {
-                Text(message).font(.footnote).foregroundStyle(.white.opacity(0.9)).multilineTextAlignment(.center)
-            }
+            if let message = camera.message { Text(message) }
             if camera.state == .failed || camera.state == .interrupted {
                 Button("Resume Camera") { Task { await camera.prepare() } }.buttonStyle(.bordered)
             }
-        }.padding(.horizontal, layoutLandscape ? 0 : 14)
+        }.font(.footnote).multilineTextAlignment(.center)
+            .shadow(color: .black.opacity(0.8), radius: 3)
+    }
+    private func preview() -> some View {
+        ZStack {
+            CameraPreview(session: camera.service.session, angle: camera.options?.angle ?? 90, front: camera.options?.isFront ?? false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+                .gesture(MagnificationGesture().onChanged { value in
+                    guard camera.state == .ready || camera.state == .recording, let options = camera.options else { return }
+                    if pinchBase == nil { pinchBase = options.zoom }
+                    if Date().timeIntervalSince(lastZoomAt) > 0.05 {
+                        camera.zoom((pinchBase ?? options.zoom) * value); lastZoomAt = Date()
+                    }
+                }.onEnded { _ in pinchBase = nil })
+            if camera.state == .preparing {
+                ProgressView("Preparing camera…").padding().background(.black.opacity(0.8), in: Capsule())
+            }
+            if camera.state == .denied {
+                VStack(spacing: 12) {
+                    Text("Camera and microphone access are needed to record.").multilineTextAlignment(.center)
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                }.padding(20).background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
+                    .padding(24)
+            }
+        }
     }
     @ViewBuilder private func controls(movie: Movie, compact: Bool) -> some View {
         let recordButton = Button {
