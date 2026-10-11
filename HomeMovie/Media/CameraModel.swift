@@ -19,6 +19,9 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
     private var finishing = false
     private var interruption: String?
     private var operation: Task<Void, Never>?
+    private var startCancelled = false
+    private var activeSceneID: UUID?
+    private var preparationID = UUID()
     @AppStorage("frontCamera") var rememberedFront = false
     var busy: Bool { [.starting, .recording, .finalizing].contains(state) }
 
@@ -28,55 +31,74 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
     }
     func prepare() async {
         guard !busy else { return }
+        let requestID = UUID(); preparationID = requestID
         active = true; state = .preparing; message = nil; interruption = nil
-        guard await CaptureService.permissions() else { state = .denied; return }
-        guard active else { return }
+        let granted = await CaptureService.permissions()
+        guard active, preparationID == requestID else { return }
+        guard granted else { state = .denied; return }
         service.prepare(front: rememberedFront)
     }
     func record(movieID: UUID) {
         guard state == .ready, active, let app else { return }
-        state = .starting; savedScene = false; message = nil
+        state = .starting; savedScene = false; message = nil; startCancelled = false
         operation = Task {
+            var pendingTicket: CaptureTicket?
+            defer { operation = nil }
             do {
                 let ticket = try await app.store.begin(movieID: movieID)
-                guard active else { state = .interrupted; endBackgroundTime(); return }
+                pendingTicket = ticket
                 let path = try await app.store.url(ticket.staging)
+                guard active, !startCancelled, state == .starting, interruption == nil else {
+                    try await app.store.abandonUnstarted(ticket)
+                    state = active && interruption == nil ? .ready : .interrupted
+                    endBackgroundTime()
+                    return
+                }
+                // No await between the final cancellation check and handing off ownership.
+                activeSceneID = ticket.sceneID
                 service.record(ticket: ticket, url: path)
-            } catch { state = .failed; message = error.localizedDescription }
+                pendingTicket = nil
+            } catch {
+                if let pendingTicket { try? await app.store.abandonUnstarted(pendingTicket) }
+                state = .failed; message = error.localizedDescription; endBackgroundTime()
+            }
         }
     }
     func stop() {
         guard state == .recording || state == .starting else { return }
+        startCancelled = true
         state = .finalizing; timer?.invalidate(); beginBackgroundTime(); service.stop()
     }
     func suspend() {
-        active = false
+        active = false; startCancelled = true; preparationID = UUID()
         if busy { beginBackgroundTime(); state = .finalizing; timer?.invalidate() }
         service.suspend()
     }
     func pauseForPlayback() async {
-        active = false
+        active = false; startCancelled = true; preparationID = UUID()
         await withCheckedContinuation { continuation in
             service.suspend { continuation.resume() }
         }
     }
-    func zoom(_ factor: CGFloat) { if [.ready, .recording].contains(state) { service.zoom(factor) } }
+    func zoom(_ factor: CGFloat) { if active, [.ready, .recording].contains(state) { service.zoom(factor) } }
     func focus(at point: CGPoint, locked: Bool = false) -> Bool {
-        guard [.ready, .recording].contains(state), options?.canMeter == true else { return false }
+        guard active, [.ready, .recording].contains(state), options?.canMeter == true else { return false }
         guard !locked || options?.canLock == true else { return false }
         service.focus(at: point, locked: locked)
         return true
     }
-    func exposure(_ bias: Float) { if [.ready, .recording].contains(state) { service.exposure(bias) } }
-    func toggleTorch() { if [.ready, .recording].contains(state) { service.toggleTorch() } }
-    func flip() { guard state == .ready else { return }; state = .preparing; service.flip() }
+    func exposure(_ bias: Float) { if active, [.ready, .recording].contains(state) { service.exposure(bias) } }
+    func toggleTorch() { if active, [.ready, .recording].contains(state) { service.toggleTorch() } }
+    func flip() { guard active, state == .ready else { return }; state = .preparing; service.flip() }
     private func receive(_ event: CaptureEvent) async {
         switch event {
         case .ready(let options):
             self.options = options; rememberedFront = options.isFront
             if !busy && active && interruption == nil { state = .ready }
-        case .started:
-            guard active, state != .finalizing else { service.stop(); return }
+        case .started(let sceneID):
+            guard activeSceneID == sceneID else { return }
+            if state == .recording { return }
+            guard active, !startCancelled, state == .starting, interruption == nil else { service.stop(); return }
             state = .recording; beganAt = ProcessInfo.processInfo.systemUptime; elapsed = .zero
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
@@ -86,9 +108,9 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
                 }
             }
         case .finished(let ticket, let error):
-            guard !finishing else { return }; finishing = true
+            guard activeSceneID == ticket.sceneID, !finishing else { return }; finishing = true
             timer?.invalidate(); state = .finalizing; beginBackgroundTime()
-            defer { finishing = false; endBackgroundTime() }
+            defer { finishing = false; activeSceneID = nil; endBackgroundTime() }
             do {
                 if let error { throw error }
                 guard let app else { throw HomeMovieError.message("The project is unavailable.") }
@@ -100,7 +122,7 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
                 message = interruption
             } catch { state = .failed; message = "\(error.localizedDescription) Any recording file has been preserved for recovery." }
         case .interrupted(let text):
-            interruption = text; message = text
+            interruption = text; message = text; startCancelled = true
             if busy { state = .finalizing; beginBackgroundTime() } else { state = .interrupted }
         case .failed(let text):
             message = text

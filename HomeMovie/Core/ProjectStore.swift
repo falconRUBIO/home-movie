@@ -167,6 +167,17 @@ actor ProjectStore {
         try encoder.encode(ticket).write(to: try url(ticket.journal), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         return ticket
     }
+    // Only the caller that has NOT handed the ticket to AVFoundation may use this.
+    // Even then, never remove a journal if any recording bytes exist.
+    func abandonUnstarted(_ ticket: CaptureTicket) throws {
+        guard !catalog.movies.flatMap(\.scenes).contains(where: { $0.id == ticket.sceneID }),
+              !fm.fileExists(atPath: try url(ticket.staging).path),
+              !fm.fileExists(atPath: try url(ticket.source).path) else {
+            throw HomeMovieError.message("Recording data exists and has been preserved for recovery.")
+        }
+        let journal = try url(ticket.journal)
+        if fm.fileExists(atPath: journal.path) { try fm.removeItem(at: journal) }
+    }
     func commit(_ ticket: CaptureTicket) async throws {
         if catalog.movies.flatMap(\.scenes).contains(where: { $0.id == ticket.sceneID }) { return }
         let staging = try url(ticket.staging), source = try url(ticket.source)

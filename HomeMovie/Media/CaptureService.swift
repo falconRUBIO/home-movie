@@ -38,7 +38,7 @@ struct CameraOptions: Sendable {
 }
 enum CaptureEvent {
     case ready(CameraOptions)
-    case started
+    case started(UUID)
     case finished(CaptureTicket, Error?)
     case interrupted(String)
     case failed(String)
@@ -54,6 +54,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private var coordinator: AVCaptureDevice.RotationCoordinator?
     private var ticket: CaptureTicket?
     private var captureAngle: CGFloat?
+    private var recordingURL: URL?
+    private var stopRequested = false
     private var observers: [NSObjectProtocol] = []
     private var rotationObservation: NSKeyValueObservation?
     private var configured = false
@@ -68,26 +70,33 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             let deviceID = (notification.object as? AVCaptureDevice)?.uniqueID
             self?.queue.async {
                 guard let self, let camera = self.videoInput?.device, camera.uniqueID == deviceID, !self.focusLocked else { return }
-                try? self.applyFocus(at: CGPoint(x: 0.5, y: 0.5), camera: camera, monitor: false)
+                if (try? self.applyFocus(at: CGPoint(x: 0.5, y: 0.5), camera: camera, monitor: false)) != nil,
+                   let options = try? self.options() { self.onEvent?(.ready(options)) }
             }
         })
         observers.append(center.addObserver(forName: .AVCaptureSessionWasInterrupted, object: session, queue: nil) { [weak self] _ in
             guard let self else { return }
             self.queue.async {
-                if self.output.isRecording { self.output.stopRecording() }
+                self.requestStop()
+                self.turnOffTorch()
                 self.onEvent?(.interrupted("Camera interrupted. Your saved scenes are safe. Tap Resume Camera when ready."))
             }
         })
         observers.append(center.addObserver(forName: .AVCaptureSessionRuntimeError, object: session, queue: nil) { [weak self] notification in
             let text = (notification.userInfo?[AVCaptureSessionErrorKey] as? Error)?.localizedDescription ?? "Camera unavailable. Try resuming the camera."
-            self?.queue.async { self?.onEvent?(.failed(text)) }
+            self?.queue.async {
+                guard let self else { return }
+                self.requestStop(); self.turnOffTorch(); self.configured = false
+                self.onEvent?(.failed(text))
+            }
         })
         observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: nil) { [weak self] notification in
             guard let value = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                   value == AVAudioSession.InterruptionType.began.rawValue else { return }
             self?.queue.async {
                 guard let self else { return }
-                if self.output.isRecording { self.output.stopRecording() }
+                self.requestStop()
+                self.turnOffTorch()
                 self.onEvent?(.interrupted("Audio interrupted. Resume the camera before recording again."))
             }
         })
@@ -108,6 +117,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 try AVAudioSession.sharedInstance().setActive(true)
                 if !self.session.isRunning { self.session.startRunning() }
                 guard self.session.isRunning else { throw HomeMovieError.message("The camera could not start.") }
+                guard !self.session.isInterrupted else { throw HomeMovieError.message("The camera is still interrupted. Try Resume Camera again when it is available.") }
                 self.onEvent?(.ready(try self.options()))
             } catch { self.onEvent?(.failed(error.localizedDescription)) }
         }
@@ -133,14 +143,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         session.addInput(audio); session.addOutput(output)
         try configureFormat(camera)
         setCoordinator(camera)
-        if let connection = output.connection(with: .video) {
-            connection.automaticallyAdjustsVideoMirroring = false
-            if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
-            if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
-        }
-        if let videoConnection = output.connection(with: .video), output.availableVideoCodecTypes.contains(.h264) {
-            output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.h264], for: videoConnection)
-        }
+        configureVideoConnection()
         output.minFreeDiskSpaceLimit = 200_000_000
         configured = true
     }
@@ -198,12 +201,15 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     func focus(at point: CGPoint, locked: Bool = false) {
         guard point.x.isFinite, point.y.isFinite, (0...1).contains(point.x), (0...1).contains(point.y) else { return }
         queue.async {
-            guard self.session.isRunning, let camera = self.videoInput?.device else { return }
+            guard self.session.isRunning, !self.session.isInterrupted, let camera = self.videoInput?.device else { return }
             do {
                 try self.applyFocus(at: point, camera: camera, monitor: !locked, locked: locked)
                 self.onEvent?(.ready(try self.options()))
             }
-            catch { self.onEvent?(.notice("Focus could not be adjusted. Try tapping again.")) }
+            catch {
+                self.onEvent?(.notice("Focus could not be adjusted. Try tapping again."))
+                if let options = try? self.options() { self.onEvent?(.ready(options)) }
+            }
         }
     }
     private func applyFocus(at point: CGPoint, camera: AVCaptureDevice, monitor: Bool, locked: Bool = false) throws {
@@ -226,7 +232,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     func exposure(_ bias: Float) {
         guard bias.isFinite else { return }
         queue.async {
-            guard self.session.isRunning, let camera = self.videoInput?.device else { return }
+            guard self.session.isRunning, !self.session.isInterrupted, let camera = self.videoInput?.device else { return }
             do {
                 try camera.lockForConfiguration()
                 camera.setExposureTargetBias(min(camera.maxExposureTargetBias, max(camera.minExposureTargetBias, bias)), completionHandler: nil)
@@ -237,7 +243,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     }
     func toggleTorch() {
         queue.async {
-            guard self.session.isRunning, let camera = self.videoInput?.device, camera.hasTorch else { return }
+            guard self.session.isRunning, !self.session.isInterrupted, let camera = self.videoInput?.device, camera.hasTorch else { return }
             do {
                 try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
                 if camera.torchMode == .on { camera.torchMode = .off }
@@ -257,40 +263,66 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         } catch { }
     }
     func zoom(_ factor: CGFloat) {
+        guard factor.isFinite, factor > 0 else { return }
         queue.async {
-            guard let camera = self.videoInput?.device else { return }
+            guard self.session.isRunning, !self.session.isInterrupted, let camera = self.videoInput?.device else { return }
             do {
                 try camera.lockForConfiguration()
                 camera.videoZoomFactor = min(max(factor, camera.minAvailableVideoZoomFactor), camera.maxAvailableVideoZoomFactor)
                 camera.unlockForConfiguration()
                 self.onEvent?(.ready(try self.options()))
-            } catch { self.onEvent?(.failed(error.localizedDescription)) }
+            } catch { self.onEvent?(.notice("Zoom could not be adjusted. Try again.")) }
+        }
+    }
+    private func replaceInput(_ old: AVCaptureDeviceInput, with next: AVCaptureDeviceInput) throws {
+        session.beginConfiguration(); defer { session.commitConfiguration() }
+        session.removeInput(old)
+        guard session.canAddInput(next) else {
+            if session.canAddInput(old) { session.addInput(old) }
+            throw HomeMovieError.message("This camera is unavailable.")
+        }
+        session.addInput(next)
+    }
+    private func configureVideoConnection() {
+        guard let connection = output.connection(with: .video) else { return }
+        connection.automaticallyAdjustsVideoMirroring = false
+        if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
+        if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
+        if output.availableVideoCodecTypes.contains(.h264) {
+            output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.h264], for: connection)
         }
     }
     func flip() {
         queue.async {
-            guard self.ticket == nil, let old = self.videoInput, let camera = self.device(front: !self.isFront) else { return }
+            guard self.ticket == nil, let old = self.videoInput else { return }
+            let oldFront = self.isFront
             do {
+                guard let camera = self.device(front: !oldFront) else { throw HomeMovieError.message("No other camera is available.") }
                 let next = try AVCaptureDeviceInput(device: camera)
-                self.session.beginConfiguration(); self.session.removeInput(old)
-                guard self.session.canAddInput(next) else {
-                    self.session.addInput(old); self.session.commitConfiguration()
-                    throw HomeMovieError.message("This camera is unavailable.")
+                self.turnOffTorch()
+                try self.replaceInput(old, with: next)
+                self.videoInput = next; self.isFront = !oldFront
+                do { try self.configureFormat(camera) }
+                catch {
+                    try self.replaceInput(next, with: old)
+                    self.videoInput = old; self.isFront = oldFront
+                    try self.configureFormat(old.device)
+                    self.setCoordinator(old.device); self.configureVideoConnection()
+                    throw error
                 }
-                // The old camera may still own an illuminated torch after removal.
-                if old.device.hasTorch, (try? old.device.lockForConfiguration()) != nil {
-                    old.device.torchMode = .off; old.device.unlockForConfiguration()
-                }
-                self.session.addInput(next); self.session.commitConfiguration()
-                self.videoInput = next; self.isFront.toggle()
-                try self.configureFormat(camera)
-                self.setCoordinator(camera)
-                if let c = self.output.connection(with: .video) {
-                    c.automaticallyAdjustsVideoMirroring = false
-                    if c.isVideoMirroringSupported { c.isVideoMirrored = false }
-                }
+                self.setCoordinator(camera); self.configureVideoConnection()
                 self.onEvent?(.ready(try self.options()))
-            } catch { self.onEvent?(.failed(error.localizedDescription)) }
+            } catch {
+                if self.videoInput?.device.uniqueID == old.device.uniqueID,
+                   self.session.inputs.contains(where: { $0 === old }), let options = try? self.options() {
+                    self.setCoordinator(old.device); self.configureVideoConnection()
+                    self.onEvent?(.notice("Camera could not be switched. The current camera is still available."))
+                    self.onEvent?(.ready(options))
+                } else {
+                    self.configured = false
+                    self.onEvent?(.failed("Camera could not be switched. Tap Resume Camera to reconnect."))
+                }
+            }
         }
     }
     func record(ticket: CaptureTicket, url: URL) {
@@ -307,14 +339,18 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             }
             connection.videoRotationAngle = angle
             self.captureAngle = angle
-            self.ticket = ticket
+            self.ticket = ticket; self.recordingURL = url.standardizedFileURL; self.stopRequested = false
             self.output.startRecording(to: url, recordingDelegate: self)
         }
     }
-    func stop() { queue.async { if self.output.isRecording { self.output.stopRecording() } } }
+    private func requestStop() {
+        if ticket != nil { stopRequested = true }
+        if output.isRecording { output.stopRecording() }
+    }
+    func stop() { queue.async { self.requestStop() } }
     func suspend(completion: (@Sendable () -> Void)? = nil) {
         queue.async {
-            if self.output.isRecording { self.output.stopRecording() }
+            self.requestStop()
             self.turnOffTorch()
             if self.session.isRunning { self.session.stopRunning() }
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -322,11 +358,16 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         }
     }
     func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
-        onEvent?(.started)
+        queue.async {
+            guard let ticket = self.ticket, self.recordingURL == fileURL.standardizedFileURL else { return }
+            if self.stopRequested { self.output.stopRecording() }
+            self.onEvent?(.started(ticket.sceneID))
+        }
     }
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo fileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
         queue.async {
-            guard let ticket = self.ticket else { return }; self.ticket = nil; self.captureAngle = nil
+            guard let ticket = self.ticket, self.recordingURL == fileURL.standardizedFileURL else { return }
+            self.ticket = nil; self.recordingURL = nil; self.captureAngle = nil; self.stopRequested = false
             let success = error == nil || ((error as NSError?)?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool == true)
             self.onEvent?(.finished(ticket, success ? nil : error))
             if self.session.isRunning, let options = try? self.options() { self.onEvent?(.ready(options)) }

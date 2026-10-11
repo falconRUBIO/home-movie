@@ -66,6 +66,8 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     private var dragBias: Float = 0
     private var lastExposureAt = Date.distantPast
     private var hideIndicator: DispatchWorkItem?
+    private var focusDevicePoint: CGPoint?
+    private var showingFront = false
     override init(frame: CGRect) {
         super.init(frame: frame)
         focusIndicator.bounds = CGRect(x: 0, y: 0, width: 68, height: 68)
@@ -103,19 +105,37 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     private func requestFocus(at point: CGPoint, locked: Bool) {
         let devicePoint = previewLayer.captureDevicePointConverted(fromLayerPoint: point)
         guard onFocus?(devicePoint, locked) == true else { return }
+        focusDevicePoint = devicePoint
         self.locked = locked
         if !locked { exposureBias = 0 }
         hideIndicator?.cancel()
         focusIndicator.layer.removeAllAnimations()
         sun.layer.removeAllAnimations()
-        focusIndicator.center = CGPoint(x: min(max(36, point.x), max(36, bounds.width - 36)),
-                                        y: min(max(36, point.y), max(36, bounds.height - 36)))
+        repositionIndicator()
         focusIndicator.alpha = 1; sun.alpha = 1
         focusIndicator.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
         positionSun()
         UIView.animate(withDuration: 0.18) { self.focusIndicator.transform = .identity }
         if locked { UISelectionFeedbackGenerator().selectionChanged() }
         scheduleHide()
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        repositionIndicator()
+    }
+    func setFront(_ front: Bool) {
+        guard showingFront != front else { return }
+        showingFront = front; focusDevicePoint = nil; hideIndicator?.cancel()
+        focusIndicator.layer.removeAllAnimations(); sun.layer.removeAllAnimations()
+        focusIndicator.alpha = 0; sun.alpha = 0
+    }
+    func repositionIndicator() {
+        guard let focusDevicePoint else { return }
+        let point = previewLayer.layerPointConverted(fromCaptureDevicePoint: focusDevicePoint)
+        guard point.x.isFinite, point.y.isFinite else { return }
+        focusIndicator.center = CGPoint(x: min(max(36, point.x), max(36, bounds.width - 36)),
+                                        y: min(max(36, point.y), max(36, bounds.height - 36)))
+        positionSun()
     }
     func updateMetering(_ options: CameraOptions) {
         let wasLocked = locked
@@ -175,11 +195,13 @@ struct CameraPreview: UIViewRepresentable {
     }
     func updateUIView(_ view: PreviewUIView, context: Context) {
         view.onFocus = onFocus; view.onExposure = onExposure
+        view.setFront(front)
         if let options { view.updateMetering(options) }
         guard let connection = view.previewLayer.connection else { return }
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
         connection.automaticallyAdjustsVideoMirroring = false
         if connection.isVideoMirroringSupported { connection.isVideoMirrored = front }
+        view.repositionIndicator()
     }
 }
 

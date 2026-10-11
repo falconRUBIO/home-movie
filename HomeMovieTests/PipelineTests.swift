@@ -69,6 +69,36 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(movies.first { $0.id == b.id }?.scenes.count, 1)
         XCTAssertEqual(movies.first { $0.id == a.id }?.scenes.first?.id, ticket.sceneID)
     }
+    func testCancelledUnstartedCaptureRemovesOnlyEmptyJournal() async throws {
+        let store = try await makeStore(), movie = try await store.create(name: "Cancel", format: .landscape)
+        let ticket = try await store.begin(movieID: movie.id)
+        let journal = try await store.url(ticket.journal)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path))
+        try await store.abandonUnstarted(ticket)
+        try await store.abandonUnstarted(ticket)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        let reopened = ProjectStore(root: store.root)
+        let notices = try await reopened.load()
+        XCTAssertTrue(notices.isEmpty)
+        let movies = await reopened.snapshot()
+        XCTAssertTrue(movies.first!.scenes.isEmpty)
+        _ = try await record(movie, into: reopened)
+        let afterRecording = await reopened.snapshot()
+        XCTAssertEqual(afterRecording.first!.scenes.count, 1)
+    }
+    func testCancellingNeverRemovesStagingOrOriginalBytes() async throws {
+        let store = try await makeStore(), movie = try await store.create(name: "Keep footage", format: .landscape)
+        for original in [false, true] {
+            let ticket = try await store.begin(movieID: movie.id)
+            let media = try await store.url(original ? ticket.source : ticket.staging)
+            let journal = try await store.url(ticket.journal)
+            let bytes = Data([1, 2, 3])
+            try bytes.write(to: media)
+            do { try await store.abandonUnstarted(ticket); XCTFail("Existing footage must be preserved") } catch {}
+            XCTAssertEqual(try Data(contentsOf: media), bytes)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path))
+        }
+    }
     func testJournalRecoversCompletedButUncommittedTake() async throws {
         let store = try await makeStore(), movie = try await store.create(name: "Recovery", format: .landscape)
         let ticket = try await store.begin(movieID: movie.id)
