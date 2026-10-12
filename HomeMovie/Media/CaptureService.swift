@@ -137,7 +137,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 guard !self.session.isInterrupted else { throw HomeMovieError.message("The camera is still interrupted. Try Resume Camera again when it is available.") }
                 try self.ensureLogCaptureReady()
                 self.onEvent?(.ready(try self.options()))
-            } catch { self.onEvent?(.failed(error.localizedDescription)) }
+            } catch { self.configured = false; self.onEvent?(.failed(error.localizedDescription)) }
         }
     }
     private func device(front: Bool) -> AVCaptureDevice? {
@@ -419,7 +419,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             }
             if self.configuredProfile == .appleLog {
                 do { try self.ensureLogCaptureReady() }
-                catch { self.onEvent?(.finished(ticket, error)); return }
+                catch { self.configured = false; self.onEvent?(.finished(ticket, error)); return }
             }
             connection.videoRotationAngle = angle
             self.ticket = ticket; self.recordingURL = url.standardizedFileURL; self.stopRequested = false
