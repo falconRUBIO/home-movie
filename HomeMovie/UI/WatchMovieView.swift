@@ -64,7 +64,7 @@ struct WatchMovieView: View {
                                 }
                                 ForEach(looks, id: \.id) { look in
                                     Button { selectLook(look) } label: {
-                                        Label(look.name, systemImage: movie.look?.id == look.id ? "checkmark" : "circle")
+                                        Label(look.displayName, systemImage: movie.look?.id == look.id ? "checkmark" : "circle")
                                     }
                                 }
                                 Divider()

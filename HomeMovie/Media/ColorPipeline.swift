@@ -4,9 +4,10 @@ import CoreImage
 import CryptoKit
 
 struct LUTReference: Codable, Equatable, Sendable {
-    static let filmica = LUTReference(id: UUID(uuidString: "BAA6B811-4136-44D8-92ED-56C78AF001CA")!, name: "Filmica")
+    static let filmica = LUTReference(id: UUID(uuidString: "BAA6B811-4136-44D8-92ED-56C78AF001CA")!, name: "Cinema")
     var id: UUID
     var name: String
+    var displayName: String { id == Self.filmica.id ? "Cinema" : name }
     var path: String { "Looks/\(id.uuidString).json" }
 }
 struct ColorCube: Codable, Sendable {
@@ -76,11 +77,11 @@ struct ColorCube: Codable, Sendable {
     }
     static let filmica: Result<ColorCube, Error> = Result {
         guard let url = Bundle.main.url(forResource: "Filmica", withExtension: "json") else {
-            throw HomeMovieError.message("The Filmica look is unavailable.")
+            throw HomeMovieError.message("The Cinema look is unavailable.")
         }
         let cube = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: url))
         try cube.validate()
-        return cube
+        return ColorCube(name: "Cinema", dimension: cube.dimension, rgba: cube.rgba, minimum: cube.minimum, maximum: cube.maximum)
     }
     static let appleStandard: Result<ColorCube, Error> = Result {
         guard let url = Bundle.main.url(forResource: "AppleLogToRec709", withExtension: "lut") else {

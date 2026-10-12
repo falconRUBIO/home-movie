@@ -90,6 +90,7 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
     func configureSmoothZoom(speed: SmoothZoomSpeed, stayOnLens: Bool) { service.configureSmoothZoom(speed: speed, stayOnLens: stayOnLens) }
     func beginSmoothZoom() { if active, [.ready, .recording].contains(state) { service.beginSmoothZoom() } }
     func smoothZoom(to factor: CGFloat) { if active, [.ready, .recording].contains(state) { service.smoothZoom(to: factor) } }
+    func dollyZoom(to factor: CGFloat) { if active, [.ready, .recording].contains(state) { service.dollyZoom(to: factor) } }
     func endSmoothZoom() { service.endSmoothZoom() }
     func focus(at point: CGPoint, locked: Bool = false) -> Bool {
         guard active, [.ready, .recording].contains(state), options?.canMeter == true else { return false }

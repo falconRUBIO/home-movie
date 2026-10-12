@@ -155,15 +155,15 @@ struct NewMovieView: View {
                         if profile == .appleLog {
                             Menu {
                                 Button("Apple Standard") { selectedLook = nil }
-                                ForEach(looks, id: \.id) { look in Button(look.name) { selectedLook = look } }
+                                ForEach(looks, id: \.id) { look in Button(look.displayName) { selectedLook = look } }
                                 Divider()
                                 Button("Add Apple Log Look…", systemImage: "plus") { importingLook = true }
                             } label: {
-                                HStack { Text("Look"); Spacer(); Text(selectedLook?.name ?? "Apple Standard").foregroundStyle(.secondary) }
+                                HStack { Text("Look"); Spacer(); Text(selectedLook?.displayName ?? "Apple Standard").foregroundStyle(.secondary) }
                             }.foregroundStyle(.primary).disabled(loadingLook)
                         }
                     }
-                } footer: { Text(profile == .appleLog ? "\(selectedLook?.name ?? "Apple Standard") is applied to preview, playback and export. Your Apple Log original stays intact. ProRes is used when needed and takes more storage." : "Hold your iPhone upright or sideways. Your first recording sets the movie’s orientation. Each recording becomes the next scene.") }
+                } footer: { Text(profile == .appleLog ? "\(selectedLook?.displayName ?? "Apple Standard") is applied to preview, playback and export. Your Apple Log original stays intact. ProRes is used when needed and takes more storage." : "Hold your iPhone upright or sideways. Your first recording sets the movie’s orientation. Each recording becomes the next scene.") }
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
             }.navigationTitle("New Movie").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -195,7 +195,6 @@ struct NewMovieView: View {
                 defer { checkingCapabilities = false }
                 supportsLog = await Task.detached { CaptureService.supportsAppleLog() }.value
                 guard !Task.isCancelled else { return }
-                if supportsLog { profile = .appleLog }
                 looks = await app.store.availableLooks()
             }
     }

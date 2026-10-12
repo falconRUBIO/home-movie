@@ -184,7 +184,7 @@ actor ProjectStore {
             guard file.pathExtension == "json", let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent) else { return nil }
             let reference = LUTReference(id: id, name: "Look")
             guard let cube = try? ColorCube.load(reference, root: root) else { return nil }
-            return LUTReference(id: id, name: cube.name)
+            return LUTReference(id: id, name: id == LUTReference.filmica.id ? LUTReference.filmica.name : cube.name)
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
     func importLook(from source: URL) throws -> LUTReference {

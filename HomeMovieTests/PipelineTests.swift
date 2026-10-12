@@ -86,6 +86,23 @@ final class PipelineTests: XCTestCase {
         }
         XCTAssertEqual(fast.value, 1, accuracy: 0.001)
     }
+    func testDollyLensTargetsEaseInAndOutInBothDirections() throws {
+        for (start, end) in [(1.0, 8.0), (8.0, 1.0), (1.0, 4.0), (4.0, 1.0)] {
+            var filter = try XCTUnwrap(SmoothZoomFilter(current: start, minimum: 1, maximum: 16))
+            filter.setTarget(end)
+            var steps: [Double] = []
+            for _ in 0..<240 {
+                let previous = filter.value
+                let next = filter.advance(seconds: 0.05, rate: 0.75)
+                steps.append(abs(log2(next / previous)))
+                XCTAssertGreaterThanOrEqual(next, min(start, end))
+                XCTAssertLessThanOrEqual(next, max(start, end))
+            }
+            XCTAssertLessThan(steps[0], steps[6], "The beginning accelerates gently")
+            XCTAssertLessThan(steps[100], steps[6], "The ending settles gently")
+            XCTAssertEqual(filter.value, end, accuracy: 0.001)
+        }
+    }
     func testSmoothZoomRangeChangesClampTargetsAndCoordinatesRoundTrip() throws {
         var filter = try XCTUnwrap(SmoothZoomFilter(current: 8, minimum: 4, maximum: 12))
         filter.setTarget(1); XCTAssertEqual(filter.target, 4)
@@ -303,7 +320,7 @@ final class PipelineTests: XCTestCase {
     }
     func testBundledFilmicaDefaultsPersistAndStandardRemainsSelectable() async throws {
         let cube = try ColorCube.filmica.get(); try cube.validate()
-        XCTAssertEqual(cube.name, "Filmica"); XCTAssertEqual(cube.dimension, 65)
+        XCTAssertEqual(cube.name, "Cinema"); XCTAssertEqual(cube.dimension, 65)
         let first = cube.rgba.withUnsafeBytes { $0.loadUnaligned(as: Float.self) }
         XCTAssertEqual(first, 0.0308995, accuracy: 0.0000001)
         let store = try await makeStore()
@@ -319,6 +336,8 @@ final class PipelineTests: XCTestCase {
         XCTAssertNil(movies.first?.look, "An explicit Apple Standard selection survives relaunch")
         let standard = try await reopened.create(name: "SDR", format: .portrait)
         XCTAssertNil(standard.look)
+        XCTAssertEqual(standard.captureProfile, .standard)
+        XCTAssertEqual(LUTReference(id: LUTReference.filmica.id, name: "Filmica").displayName, "Cinema")
         let explicit = try await reopened.create(name: "Apple Standard", format: .portrait, profile: .appleLog, useDefaultLook: false)
         XCTAssertNil(explicit.look)
     }
@@ -331,7 +350,7 @@ final class PipelineTests: XCTestCase {
         try await service.restore(from: backup.url, store: destination) { _ in }
         let movies = await destination.snapshot()
         let look = try XCTUnwrap(movies.first?.look)
-        XCTAssertEqual(look.name, "Filmica")
+        XCTAssertEqual(look.name, "Cinema")
         let restored = try ColorCube.load(look, root: destination.root)
         XCTAssertEqual(restored.rgba, try ColorCube.filmica.get().rgba)
         try await service.discard(backup.url)

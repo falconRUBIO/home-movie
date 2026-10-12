@@ -142,7 +142,7 @@ struct CameraView: View {
                     Divider()
                     Button { changeLiveLook(nil) } label: { Label("Apple Standard", systemImage: movie.look == nil ? "checkmark" : "circle") }
                     ForEach(looks, id: \.id) { look in
-                        Button { changeLiveLook(look) } label: { Label(look.name, systemImage: movie.look?.id == look.id ? "checkmark" : "circle") }
+                        Button { changeLiveLook(look) } label: { Label(look.displayName, systemImage: movie.look?.id == look.id ? "checkmark" : "circle") }
                     }
                     Divider()
                     Button("Add Apple Log Look…", systemImage: "plus") { addingLook = true }.disabled(camera.busy)
@@ -189,10 +189,7 @@ struct CameraView: View {
             }
         }.clipped()
             .overlay(alignment: .bottom) {
-                VStack(spacing: 8) {
-                    if smoothZoomOpen, let options = camera.options { smoothZoomBar(options: options) }
-                    lenses
-                }.padding(.horizontal, landscape ? 100 : 12)
+                lenses.padding(.horizontal, landscape ? 100 : 12)
                     .padding(.bottom, landscape ? 10 : 116)
             }
             .overlay(alignment: landscape ? .trailing : .bottom) {
@@ -216,19 +213,23 @@ struct CameraView: View {
     @ViewBuilder private var lenses: some View {
         if let options = camera.options, !options.lenses.isEmpty {
             VStack(spacing: 0) {
+                if smoothZoomOpen { smoothZoomBar(options: options) }
                 ViewThatFits(in: .horizontal) {
                     lensButtons(options: options)
                     ScrollView(.horizontal) { lensButtons(options: options) }
                         .scrollIndicators(.hidden).frame(height: 44)
-                }.padding(4).homeGlass()
-            }
+                }.padding(4)
+            }.homeGlass().frame(maxWidth: 360)
         }
     }
     private func lensButtons(options: CameraOptions) -> some View {
         HStack(spacing: 6) {
             ForEach(options.lenses) { lens in
                 let selected = abs(lens.factor - options.zoom) < 0.06
-                Button { camera.zoom(lens.factor) } label: {
+                Button {
+                    if smoothZoomOpen { camera.dollyZoom(to: lens.factor) }
+                    else { camera.zoom(lens.factor) }
+                } label: {
                     Text(lens.label).font(.caption.weight(.medium)).monospacedDigit()
                         .foregroundStyle(selected ? .yellow : .white)
                         .frame(minWidth: 44, minHeight: 44)
@@ -245,7 +246,7 @@ struct CameraView: View {
                         .foregroundStyle(smoothZoomOpen ? .yellow : .white)
                         .frame(width: 44, height: 44)
                         .background(smoothZoomOpen ? Color.white.opacity(0.15) : .clear, in: Circle())
-                }.accessibilityLabel("Smooth Zoom").accessibilityValue(smoothZoomOpen ? "Open" : "Closed")
+                }.accessibilityLabel("Dolly").accessibilityValue(smoothZoomOpen ? "Open" : "Closed")
                     .accessibilityAddTraits(smoothZoomOpen ? .isSelected : [])
                     .disabled(!smoothZoomOpen && camera.state != .ready && camera.state != .recording)
             }
@@ -280,7 +281,7 @@ struct CameraView: View {
                     let factor = Double(options.zoom) * pow(2, direction == .increment ? 0.25 : -0.25)
                     setSmoothPosition(SmoothZoomFilter.position(factor, minimum: Double(options.minimum), maximum: Double(options.maximum)), options: options)
                 }
-        }.padding(.horizontal, 12).padding(.vertical, 5).homeGlass(interactive: false)
+        }.padding(.horizontal, 12).padding(.vertical, 5)
             .contentShape(Rectangle()).onTapGesture { }
             .frame(maxWidth: 360).disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum)
     }

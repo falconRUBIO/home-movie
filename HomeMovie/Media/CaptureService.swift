@@ -447,12 +447,12 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         }
     }
     func beginSmoothZoom() { queue.async { self.beginSmoothZoomOnQueue() } }
-    private func beginSmoothZoomOnQueue() {
+    private func beginSmoothZoomOnQueue(lockLens: Bool = true) {
         guard !smoothOpen, session.isRunning, !session.isInterrupted, let camera = videoInput?.device else { return }
         do {
             try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
             // .locked holds the current primary camera and narrows its hardware zoom range.
-            if stayOnLens, camera.isVirtualDevice, camera.activePrimaryConstituent != nil,
+            if lockLens, stayOnLens, camera.isVirtualDevice, camera.activePrimaryConstituent != nil,
                camera.primaryConstituentDeviceSwitchingBehavior != .unsupported {
                 smoothUnlockedRange = camera.minAvailableVideoZoomFactor...camera.maxAvailableVideoZoomFactor
                 camera.setPrimaryConstituentDeviceSwitchingBehavior(.locked, restrictedSwitchingBehaviorConditions: [])
@@ -466,6 +466,19 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             }
             if let options = try? options() { onEvent?(.ready(options)) }
         } catch { onEvent?(.notice("Smooth Zoom could not be enabled. Your recording continues.")) }
+    }
+    func dollyZoom(to factor: CGFloat) {
+        guard factor.isFinite, factor > 0 else { return }
+        queue.async {
+            guard self.session.isRunning, !self.session.isInterrupted, let camera = self.videoInput?.device else { return }
+            // Explicit lens buttons can leave the optional slider's current-lens lock.
+            if self.smoothLensLocked,
+               factor < camera.minAvailableVideoZoomFactor || factor > camera.maxAvailableVideoZoomFactor {
+                self.stopSmoothZoomOnQueue()
+                self.beginSmoothZoomOnQueue(lockLens: false)
+            }
+            self.setSmoothTargetOnQueue(factor)
+        }
     }
     func smoothZoom(to factor: CGFloat) {
         guard factor.isFinite, factor > 0 else { return }
