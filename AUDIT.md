@@ -433,3 +433,9 @@ Additional landscape fix: keep a single native viewfinder identity instead of re
 
 
 Follow-up native compilation exposed a truncated uploaded CameraView.swift in commit 705655d (local source was complete). Repair uses separately created Git blobs with local hash verification, followed by tree SHA references and remote read verification before moving main. Additional authorized changes: allow idle camera rotation independent of an established movie’s export canvas, record each clip in its observed orientation, and support front/rear handoffs during recording by committing the completed segment before switching and automatically starting the next segment in the same movie. Keep Stop usable through handoff; preserve elapsed capture time; cancel continuation on Stop, interruption, backgrounding or save failure. Original segment journals remain the recovery mechanism. Profile compatibility and native stabilization are preserved for each camera. A brief physical-camera transition and separate scene segments are expected; no claim of gap-free capture or Apple Camera parity is made. Final native validation and hardware checks remain pending.
+
+## Film Effects final native verification
+
+Snapshot 3fa21420ebf47b8cd22d90a2322e3f2edefcd619 passed 103 native tests with zero failures in GitHub Actions run 38301869132 (315.735 test seconds; no application-source warnings). Coverage includes independent effect kernels, persistence, exact preview/export frame agreement, MP4 export, fullscreen player reuse and native lens-control touch routing.
+
+The tested preview-continuity follow-up is reconciled with current main without replacing newer camera follow-ups or their regressions. Those newer changes remain subject to their own native validation. Physical iPhone appearance, control touch/layout, sustained GPU/thermal and encoded texture acceptance plus a new TestFlight upload remain pending.

@@ -5,11 +5,14 @@ import AVKit
     @Published var player: AVPlayer?
     @Published var loading = false
     @Published var error: String?
+    private var preparedMovieID: UUID?
     private var template: AVMutableVideoComposition?
     private var statusObservation: NSKeyValueObservation?
     private var requestID = UUID()
     private var updateID = UUID()
     func prepare(movie: Movie, app: AppModel, settings: FilmEffectsSettings) async {
+        // Fullscreen presentation can restart the parent task. Keep its player/timeline.
+        if preparedMovieID == movie.id, player != nil, error == nil { return }
         let id = UUID(); requestID = id; loading = true; error = nil
         defer { if requestID == id { loading = false } }
         do {
@@ -18,7 +21,7 @@ import AVKit
             let bundle = try await app.assembler.build(movie: movie, root: app.store.root, filmEffects: settings, forFilmEffectsPreview: true)
             try Task.checkCancellation()
             guard requestID == id else { return }
-            template = bundle.videoComposition
+            template = bundle.videoComposition; preparedMovieID = movie.id
             let item = AVPlayerItem(asset: bundle.asset)
             item.videoComposition = bundle.videoComposition; item.audioMix = bundle.audioMix
             player = AVPlayer(playerItem: item)

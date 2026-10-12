@@ -1,5 +1,5 @@
 {
-  "status": "SOURCE CHECKS PASS; NATIVE VALIDATION PENDING",
+  "status": "PASS: FILM EFFECTS/TOUCH SNAPSHOT; NEWER CAMERA CHECKS PENDING",
   "checks": [
     "Permission purpose strings present",
     "No broad Photos read permission requested",
@@ -48,13 +48,12 @@
     "Phone listening: verify scene edge treatment is inaudible and suppresses the reported click, comparing original takes with Watch Movie and fresh exports.",
     "Physical-camera frame delivery, live Cinema versus Original comparison and sustained GPU/thermal acceptance of the visible-overlay fix.",
     "Current-source iPhone Dolly: all physical lens pairs/durations, manual drag/pinch speeds, response settings, retargets, Stay on This Lens, focus/exposure and warm/low-light delivered-frame smoothness.",
-    "Physical iPhone Film Effects visual calibration, encoded grain preservation, sustained GPU/thermal and accessibility acceptance.",
-    "Final Film Effects preview/export integration and lens touch-routing native validation."
+    "Physical iPhone Film Effects visual calibration, encoded grain preservation, sustained GPU/thermal and accessibility acceptance."
   ],
   "date": "2026-10-12",
   "native_tests_supplied": 99,
-  "native_tests_run": 87,
-  "native_build_status": "Film Effects initial source compiled and passed 95 native tests. Final responsive preview/export integration and camera touch-routing regression source await native CI.",
+  "native_tests_run": 103,
+  "native_build_status": "Film Effects, fullscreen player reuse, MP4 integration and lens-touch snapshot 3fa21420 passed 103 native tests. Preserve newer camera follow-ups; their combined validation is pending.",
   "previous_cloud_build": {
     "commit": "f8294c31719e540c87d42f75eaf90d30b55fe8c9",
     "provider": "GitHub Actions",
@@ -68,7 +67,7 @@
     "application_source_warnings": 0
   },
   "testflight_uploaded": true,
-  "native_tests_passed": 87,
+  "native_tests_passed": 103,
   "native_tests_failed": 0,
   "signed_archive_created": true,
   "apple_package_validation_status": "PASS for build 1041; signed upload succeeded",
@@ -83,15 +82,15 @@
   },
   "current_revision_testflight_uploaded": false,
   "latest_cloud_build": {
-    "commit": "7a65c9c0fca3a93addf2e9cf64cc1917add30b63",
+    "commit": "3fa21420ebf47b8cd22d90a2322e3f2edefcd619",
     "provider": "GitHub Actions",
-    "run_id": 38281869971,
-    "url": "https://github.com/falconRUBIO/home-movie/actions/runs/38281869971",
+    "run_id": 38301869132,
+    "url": "https://github.com/falconRUBIO/home-movie/actions/runs/38301869132",
     "status": "PASS",
-    "tests_run": 87,
-    "tests_passed": 87,
+    "tests_run": 103,
+    "tests_passed": 103,
     "tests_failed": 0,
-    "test_execution_seconds": 312.449,
+    "test_execution_seconds": 315.735,
     "application_source_warnings": 0
   },
   "audit_initial_cloud_build": {
@@ -115,8 +114,8 @@
   "reported_device": "iPhone 17 family; user reports latest iOS update, exact variant/version unconfirmed",
   "physical_device_live_look_status": "User reports flat live preview despite LOG Cinema, while graded playback works. Visible Metal overlay/display-loop fix and render-status badge pass native GPU/presentation tests; corrected-source iPhone confirmation and TestFlight upload pending.",
   "physical_device_dolly_status": "User reports jerky Dolly. Repeated 20 Hz native ramps replaced with one 60 Hz trajectory; adaptive drag speed, response, retargeting, clock and range tests pass. Physical lens handoffs and saved-frame smoothness across actual device speeds/lighting/thermal states remain unverified.",
-  "physical_device_dolly_ui_status": "NOT RUN: final rounded glass, narrow layouts, accessibility text, touch targets, VoiceOver endpoint guidance, route reset and hands-free flow need physical iPhone acceptance. Final presentation-only follow-up was source/grammar checked, not separately natively recompiled.",
-  "film_effects_status": "Implementation and Swift grammar checks pass. Final responsive preview/fullscreen controls, renderer regressions and actual Standard-video export integration await native validation.",
+  "physical_device_dolly_ui_status": "Native touch routing passed for sibling/hosted controls and rotated geometry. Physical iPhone layout/touch acceptance pending.",
+  "film_effects_status": "PASS in simulator: kernels, saved settings, preview/export frame agreement, MP4 and fullscreen player reuse. Physical iPhone acceptance pending.",
   "film_effects_initial_build": {
     "commit": "177bcdca8ae334a26c9ba676a0e5751f0d1a8e26",
     "run_id": 38297230863,
