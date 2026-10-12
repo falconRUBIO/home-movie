@@ -147,40 +147,32 @@ struct LibraryView: View {
 }
 
 
-// Attach the system menu to the actual, stable 44-point ellipsis button.
-@MainActor private final class MovieOverflowButton: UIButton {
-    override func menuAttachmentPoint(for configuration: UIContextMenuConfiguration) -> CGPoint {
-        CGPoint(x: bounds.midX, y: bounds.maxY)
-    }
-}
-
-@MainActor private struct MovieOverflowMenu: UIViewRepresentable {
+private struct MovieOverflowMenu: View {
     let movieName: String
     let canExport: Bool
     let onExport: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
 
-    func makeUIView(context: Context) -> MovieOverflowButton {
-        let button = MovieOverflowButton(type: .system)
-        button.setImage(UIImage(systemName: "ellipsis"), for: .normal)
-        button.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 18, weight: .medium), forImageIn: .normal)
-        button.tintColor = .label
-        button.showsMenuAsPrimaryAction = true
-        button.preferredMenuElementOrder = .fixed
-        configure(button)
-        return button
-    }
-    func updateUIView(_ button: MovieOverflowButton, context: Context) { configure(button) }
-    private func configure(_ button: MovieOverflowButton) {
-        button.accessibilityLabel = "Manage \(movieName)"
-        button.accessibilityHint = "Opens movie actions"
-        let export = UIAction(title: "Export", image: UIImage(systemName: "square.and.arrow.up"),
-            attributes: canExport ? [] : [.disabled]) { _ in onExport() }
-        let rename = UIAction(title: "Rename", image: UIImage(systemName: "pencil")) { _ in onRename() }
-        let delete = UIAction(title: "Delete Movie", image: UIImage(systemName: "trash"),
-            attributes: [.destructive]) { _ in onDelete() }
-        button.menu = UIMenu(children: [export, UIMenu(options: .displayInline, children: [rename, delete])])
+    var body: some View {
+        Menu {
+            Button("Export", systemImage: "square.and.arrow.up", action: onExport)
+                .disabled(!canExport)
+            Section {
+                Button("Rename", systemImage: "pencil", action: onRename)
+                Button("Delete Movie", systemImage: "trash", role: .destructive, action: onDelete)
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.primary)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .menuOrder(.fixed)
+        .accessibilityLabel("Manage \(movieName)")
+        .accessibilityHint("Opens movie actions")
     }
 }
 
