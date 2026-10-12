@@ -9,26 +9,26 @@ final class PipelineTests: XCTestCase {
         let parameters = AVMutableAudioMixInputParameters()
         MediaAssembler.smoothAudioEdges(parameters, range: CMTimeRange(start: CMTime(seconds: 2.25, preferredTimescale: 48000), duration: CMTime(seconds: 1, preferredTimescale: 48000)))
         var start: Float = -1, end: Float = -1, range = CMTimeRange.invalid
-        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.26, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.252, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
         XCTAssertEqual(start, 0); XCTAssertEqual(end, 1)
         XCTAssertEqual(range.start.seconds, 2.25, accuracy: 0.00001)
-        XCTAssertEqual(range.duration.seconds, 0.02, accuracy: 0.00001)
+        XCTAssertEqual(range.duration.seconds, 0.005, accuracy: 0.00001)
         XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.75, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
         XCTAssertEqual(start, 1); XCTAssertEqual(end, 1)
-        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 3.24, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 3.248, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
         XCTAssertEqual(start, 1); XCTAssertEqual(end, 0)
         XCTAssertEqual(CMTimeRangeGetEnd(range).seconds, 3.25, accuracy: 0.00001)
     }
     func testVeryShortSceneAudioFadesDoNotOverlap() {
         let parameters = AVMutableAudioMixInputParameters()
-        MediaAssembler.smoothAudioEdges(parameters, range: CMTimeRange(start: .zero, duration: CMTime(value: 480, timescale: 48000)))
+        MediaAssembler.smoothAudioEdges(parameters, range: CMTimeRange(start: .zero, duration: CMTime(value: 192, timescale: 48000)))
         var start: Float = -1, end: Float = -1, range = CMTimeRange.invalid
-        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(value: 120, timescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(value: 48, timescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
         XCTAssertEqual(start, 0); XCTAssertEqual(end, 1)
-        XCTAssertEqual(range.duration.seconds, 0.005, accuracy: 0.00001)
-        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(value: 360, timescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertEqual(range.duration.seconds, 0.002, accuracy: 0.00001)
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(value: 144, timescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
         XCTAssertEqual(start, 1); XCTAssertEqual(end, 0)
-        XCTAssertEqual(range.start.seconds, 0.005, accuracy: 0.00001)
+        XCTAssertEqual(range.start.seconds, 0.002, accuracy: 0.00001)
     }
     func testAudioMixSurvivesSilentSceneGapsTrimsAndExport() async throws {
         let store = try await makeStore(), movie = try await store.create(name: "Audio cuts", format: .landscape)
@@ -64,9 +64,9 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(bundle.duration.seconds, 5, accuracy: 0.0001)
         let mix = try XCTUnwrap(bundle.audioMix), parameters = try XCTUnwrap(mix.inputParameters.first)
         var start: Float = -1, end: Float = -1, range = CMTimeRange.invalid
-        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.01, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.002, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
         XCTAssertEqual(start, 0); XCTAssertEqual(end, 1); XCTAssertEqual(range.start.seconds, 2, accuracy: 0.0001)
-        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.99, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.998, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
         XCTAssertEqual(start, 1); XCTAssertEqual(end, 0)
         let output = store.root.appendingPathComponent("smoothed.mp4")
         let exporter = try XCTUnwrap(AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality))

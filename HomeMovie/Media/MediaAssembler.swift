@@ -134,7 +134,7 @@ actor MediaAssembler {
     // Brief fades remove waveform discontinuities at cuts without changing scene timing or source files.
     nonisolated static func smoothAudioEdges(_ parameters: AVMutableAudioMixInputParameters, range: CMTimeRange) {
         guard range.isValid, range.duration.isNumeric, range.duration.seconds > 0 else { return }
-        let fade = CMTimeMinimum(CMTime(value: 1, timescale: 50), CMTimeMultiplyByFloat64(range.duration, multiplier: 0.5))
+        let fade = CMTimeMinimum(CMTime(value: 1, timescale: 200), CMTimeMultiplyByFloat64(range.duration, multiplier: 0.5))
         parameters.setVolumeRamp(fromStartVolume: 0, toEndVolume: 1,
             timeRange: CMTimeRange(start: range.start, duration: fade))
         parameters.setVolumeRamp(fromStartVolume: 1, toEndVolume: 0,
