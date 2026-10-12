@@ -48,12 +48,13 @@
     "Physical-device genuine Apple Log bit depth/codec/lenses; long LUT rendering; Cinema match against guide/Resolve reference",
     "Physical-device live Metal LUT preview, high-bit-depth simultaneous capture, established UIKit geometry and metering alignment",
     "Signed archive/upload and physical-device acceptance of current preview-handoff audit revision",
-    "Physical-device capture-time Smooth Zoom filtering, native ease-out/held zoom, primary-lens lock/range, persistent overlay/touch/VoiceOver layout and uninterrupted audio/video"
+    "Physical-device capture-time Smooth Zoom filtering, native ease-out/held zoom, primary-lens lock/range, persistent overlay/touch/VoiceOver layout and uninterrupted audio/video",
+    "Physical-device native 9:16/16:9 preview proportions, overlaid capture controls, review strip/runtime, focus alignment and accessibility layout"
   ],
   "date": "2026-10-12",
   "native_tests_supplied": 43,
   "native_tests_run": 43,
-  "native_build_status": "PASS: Apple Log format/codec negotiation and readiness corrections, plus Smooth Zoom, compiled and passed all 43 native simulator tests.",
+  "native_build_status": "Camera preview proportions and runtime placement pass portable checks; native compilation/tests pending. Previous source 785eae90 passed 43 tests.",
   "previous_cloud_build": {
     "commit": "6750e2065d3790e3d14da2bc999e33183a0110e9",
     "provider": "GitHub Actions",

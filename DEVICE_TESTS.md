@@ -114,3 +114,8 @@ Smooth Zoom acceptance (NOT RUN): verify the closed screen only adds a small but
 4. Verify ProRes footage produces a valid Cinema preview/export and untouched source. Check low-storage start refusal and mid-take stop without deleting any original or recovery file.
 
 Status: NOT RUN. Simulator cannot exercise capture codec negotiation.
+
+
+## Camera preview proportions follow-up
+
+Compare against IMG_5438.PNG on the same iPhone: tall 9:16 portrait preview; header, lens buttons and Record overlay the picture; thumbnail and Watch Movie occupy the small lower black strip; total runtime sits below Watch Movie. Landscape preview must retain 16:9 with a compact side review rail. Opening/closing Smooth Zoom must not change the preview frame. Check taps/pinch/metering around the overlays, hardware orientation, smaller screens and accessibility text. Verify elapsed take time appears during recording and total duration updates below Watch Movie after durable save. Status/errors must remain readable above the controls. Status: NOT RUN.

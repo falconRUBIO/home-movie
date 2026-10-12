@@ -22,6 +22,7 @@ struct CameraView: View {
     @AppStorage("smoothStayOnLens") private var stayOnLens = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     init(app: AppModel, movieID: UUID) {
         self.app = app; _movieID = State(initialValue: movieID)
         _camera = StateObject(wrappedValue: CameraModel(app: app))
@@ -32,25 +33,28 @@ struct CameraView: View {
         GeometryReader { geometry in
             let landscape = geometry.size.width > geometry.size.height
             if let movie {
-                VStack(spacing: 0) {
-                    header(movie: movie)
-                        .padding(.horizontal, 12).padding(.vertical, 8).background(.black)
-                    if landscape {
-                        HStack(spacing: 0) {
-                            VStack(spacing: 0) {
-                                viewfinder(movie: movie)
-                                lenses.padding(.vertical, 8).frame(maxWidth: .infinity).background(.black)
-                            }
-                            controls(movie: movie, compact: true)
-                                .frame(width: 132).frame(maxHeight: .infinity)
-                                .padding(.horizontal, 8).background(.black)
-                        }
-                    } else {
-                        viewfinder(movie: movie)
-                        VStack(spacing: 10) {
-                            lenses
-                            controls(movie: movie, compact: false)
-                        }.padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
+                let footerHeight: CGFloat = dynamicTypeSize.isAccessibilitySize ? 100 : 64
+                let railWidth: CGFloat = 112
+                let ratio: CGFloat = landscape ? 16 / 9 : 9 / 16
+                let availableWidth = max(1, geometry.size.width - (landscape ? railWidth : 0))
+                let availableHeight = max(1, geometry.size.height - (landscape ? 0 : footerHeight))
+                let previewWidth = min(availableWidth, availableHeight * ratio)
+                let previewHeight = previewWidth / ratio
+                if landscape {
+                    HStack(spacing: 0) {
+                        viewfinder(movie: movie, landscape: true)
+                            .frame(width: previewWidth, height: previewHeight)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        reviewControls(movie: movie, landscape: true)
+                            .frame(width: railWidth).frame(maxHeight: .infinity).background(.black)
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        viewfinder(movie: movie, landscape: false)
+                            .frame(width: previewWidth, height: previewHeight)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        reviewControls(movie: movie, landscape: false)
+                            .padding(.horizontal, 20).frame(height: footerHeight)
                             .frame(maxWidth: .infinity).background(.black)
                     }
                 }
@@ -155,31 +159,40 @@ struct CameraView: View {
             } else { Color.clear.frame(width: 44, height: 44) }
         }
     }
-    private func viewfinder(movie: Movie) -> some View {
+    private func viewfinder(movie: Movie, landscape: Bool) -> some View {
         ZStack {
             preview()
-            VStack {
-                timer(movie: movie).padding(.top, 8)
-                Spacer(minLength: 12)
-                status(movie: movie).padding(.horizontal, 20).padding(.bottom, smoothZoomOpen ? 64 : 12)
+            VStack(spacing: 4) {
+                header(movie: movie).padding(.horizontal, 12).padding(.top, 8)
+                captureIndicators(movie: movie)
+                Spacer(minLength: 0)
+                status(movie: movie).padding(.horizontal, landscape ? 100 : 20)
+                    .padding(.bottom, landscape ? (smoothZoomOpen ? 108 : 64) : (smoothZoomOpen ? 216 : 172))
             }
-        }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+        }.clipped()
             .overlay(alignment: .bottom) {
-                if smoothZoomOpen, let options = camera.options {
-                    smoothZoomBar(options: options).padding(.horizontal, 12).padding(.bottom, 2)
-                }
+                VStack(spacing: 8) {
+                    if smoothZoomOpen, let options = camera.options { smoothZoomBar(options: options) }
+                    lenses
+                }.padding(.horizontal, landscape ? 100 : 12)
+                    .padding(.bottom, landscape ? 10 : 116)
+            }
+            .overlay(alignment: landscape ? .trailing : .bottom) {
+                recordControl.padding(landscape ? .trailing : .bottom, 16)
             }
     }
-    private func timer(movie: Movie) -> some View {
+    private func captureIndicators(movie: Movie) -> some View {
         VStack(spacing: 6) {
-            if movie.captureProfile == .appleLog { Text("LOG").font(.caption2.weight(.medium)).foregroundStyle(.secondary) }
+            if movie.captureProfile == .appleLog { Text("LOG").font(.caption2.weight(.medium)).foregroundStyle(.white.opacity(0.8)).shadow(radius: 2) }
             if camera.options?.focusLocked == true {
                 Text("AE/AF LOCK").font(.caption2.weight(.semibold)).foregroundStyle(.black)
                     .padding(.horizontal, 8).padding(.vertical, 4).background(.yellow, in: RoundedRectangle(cornerRadius: 3))
             }
-        Text(camera.state == .recording ? "● \(durationLabel(camera.elapsed))" : "\(durationLabel(movie.duration)) total")
-            .font(.caption.monospacedDigit()).padding(.horizontal, 10).padding(.vertical, 5)
-            .background(camera.state == .recording ? Color.red : Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 5))
+            if camera.state == .recording {
+                Text("● \(durationLabel(camera.elapsed))")
+                    .font(.caption.monospacedDigit()).padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(.red, in: RoundedRectangle(cornerRadius: 5))
+            }
         }
     }
     @ViewBuilder private var lenses: some View {
@@ -310,19 +323,22 @@ struct CameraView: View {
             }
         }
     }
-    @ViewBuilder private func controls(movie: Movie, compact: Bool) -> some View {
-        let recordButton = Button {
+    private var recordControl: some View {
+        Button {
             if camera.state == .recording { camera.stop() } else { camera.record(movieID: movieID) }
         } label: {
             ZStack {
+                Circle().fill(.black.opacity(0.25)).frame(width: 78, height: 78)
                 Circle().strokeBorder(.white, lineWidth: 3).frame(width: 78, height: 78)
                 RoundedRectangle(cornerRadius: camera.state == .recording ? 5 : 32)
                     .fill(.red).frame(width: camera.state == .recording ? 29 : 62, height: camera.state == .recording ? 29 : 62)
             }
         }.buttonStyle(.plain)
-            .disabled(camera.state != .recording && (camera.state != .ready))
-            .opacity(camera.state != .recording && (camera.state != .ready) ? 0.4 : 1)
+            .disabled(camera.state != .recording && camera.state != .ready)
+            .opacity(camera.state != .recording && camera.state != .ready ? 0.4 : 1)
             .accessibilityLabel(camera.state == .recording ? "Stop recording" : "Record next scene")
+    }
+    @ViewBuilder private func reviewControls(movie: Movie, landscape: Bool) -> some View {
         let recent = Button { openWatch(sceneID: movie.activeScenes.last?.id) } label: {
             SceneThumbnail(scene: movie.activeScenes.last, root: app.store.root)
                 .frame(width: 46, height: 46).clipShape(RoundedRectangle(cornerRadius: 8))
@@ -331,14 +347,20 @@ struct CameraView: View {
             Image(systemName: "arrow.triangle.2.circlepath.camera").font(.title2)
                 .frame(width: 46, height: 46).background(.white.opacity(0.15), in: Circle())
         }.accessibilityLabel("Switch camera").disabled(camera.state != .ready || camera.options?.canFlip != true)
-        VStack(spacing: 15) {
-            if compact { recordButton; HStack { recent; flip } }
-            else { HStack { recent; Spacer(); recordButton; Spacer(); flip }.padding(.horizontal, 30) }
+        let watch = VStack(spacing: 0) {
             Button { openWatch() } label: {
                 Label(camera.savedScene ? "Scene Saved · Watch" : "Watch Movie", systemImage: camera.savedScene ? "checkmark" : "play.fill")
                     .font(.footnote).frame(minHeight: 44)
             }.disabled(camera.busy || movie.activeScenes.isEmpty)
                 .accessibilityLabel(camera.savedScene ? "Scene saved. Watch movie" : "Watch movie")
+            Text("\(durationLabel(movie.duration)) total")
+                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                .accessibilityLabel("Total movie runtime, \(durationLabel(movie.duration))")
+        }
+        if landscape {
+            VStack(spacing: 12) { recent; watch; flip }.padding(.horizontal, 8)
+        } else {
+            HStack(spacing: 8) { recent; Spacer(minLength: 0); watch; Spacer(minLength: 0); flip }
         }
     }
     private func changeLiveLook(_ look: LUTReference?) {

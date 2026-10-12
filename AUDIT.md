@@ -308,3 +308,13 @@ Readiness follow-up: camera option updates now require a configured, running, un
 
 
 Native verification: source 785eae9015bf5e5af36b63a928722ccf653ee4df passed GitHub Actions run 38193140949. All 43 tests passed with zero failures in 209.997 seconds, with no application-source warnings. This supersedes the pending native statuses above. Log capture and Smooth Zoom hardware acceptance remain NOT RUN. Current source requires a new signed TestFlight upload; build 1041 contains the earlier failure.
+
+
+## Native camera framing follow-up — 2026-10-12
+
+User screenshots IMG_5437.PNG / IMG_5438.PNG show our separate header and tall recording footer reducing the preview to approximately 4:5, while the native Camera preview is 9:16.
+
+- Camera stage now fits a stable 9:16 portrait / 16:9 landscape rectangle inside the safe area and available review strip. Header, lens choices, Smooth Zoom and Record overlay that stage instead of reducing its height.
+- Portrait review strip contains thumbnail, Watch Movie with total runtime directly below, and camera switch. Landscape uses a compact review rail. Accessibility text receives more review-strip space.
+- Live take elapsed time remains visible while recording; idle total runtime no longer overlays the picture. Opening Smooth Zoom does not resize the stage. Capture settings, originals, recording rotation and export geometry are unchanged.
+- Portable source/project/grammar checks pass. New native compilation and device framing/touch/layout acceptance are pending; no rendered SwiftUI camera screenshot was produced on Linux.
