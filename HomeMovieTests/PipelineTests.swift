@@ -324,7 +324,8 @@ final class PipelineTests: XCTestCase {
     }
     func testBundledFilmicaBackupIncludesExactSamples() async throws {
         let store = try await makeStore()
-        _ = try await store.create(name: "Default look backup", format: .portrait, profile: .appleLog)
+        let movie = try await store.create(name: "Default look backup", format: .portrait, profile: .appleLog)
+        _ = try await record(movie, into: store)
         let service = BackupService(), backup = try await service.create(store: store) { _ in }
         let destination = try await makeStore()
         try await service.restore(from: backup.url, store: destination) { _ in }
@@ -334,6 +335,35 @@ final class PipelineTests: XCTestCase {
         let restored = try ColorCube.load(look, root: destination.root)
         XCTAssertEqual(restored.rgba, try ColorCube.filmica.get().rgba)
         try await service.discard(backup.url)
+    }
+    func testRecoveryRejectsSDRIntoLogAndPreservesSource() async throws {
+        let store = try await makeStore()
+        let movie = try await store.create(name: "Log recovery", format: .portrait, profile: .appleLog)
+        let source = store.root.appendingPathComponent("Recovery/sdr.mov")
+        try await footage(source)
+        let files = try await store.recoveryFiles()
+        let file = try XCTUnwrap(files.first { $0.url == source })
+        do { try await store.recoverFile(file, movieID: movie.id); XCTFail("SDR must not be treated as Log") } catch {}
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+        let movies = await store.snapshot(); XCTAssertTrue(movies.first!.scenes.isEmpty)
+        let standard = try await store.create(name: "SDR recovery", format: .landscape)
+        try await store.recoverFile(file, movieID: standard.id)
+        let recovered = await store.snapshot().first { $0.id == standard.id }
+        XCTAssertEqual(recovered?.scenes.first?.profile, .standard)
+    }
+    func testThumbnailsHonorFilmicaAndInvalidateOnLookChange() async throws {
+        let store = try await makeStore()
+        var movie = try await store.create(name: "Thumbnail", format: .landscape, profile: .appleLog)
+        _ = try await record(movie, into: store)
+        let saved = await store.snapshot(); movie = try XCTUnwrap(saved.first)
+        let scene = try XCTUnwrap(movie.activeScenes.first)
+        let filmica = try await ThumbnailService.shared.image(scene: scene, root: store.root, movie: movie)
+        movie.look = nil; movie.revision += 1
+        let standard = try await ThumbnailService.shared.image(scene: scene, root: store.root, movie: movie)
+        XCTAssertNotEqual(filmica.pngData(), standard.pngData(), "Look changes must not return a stale cached thumbnail")
+        movie.profile = nil; movie.revision += 1
+        let original = try await ThumbnailService.shared.image(scene: scene, root: store.root, movie: movie)
+        XCTAssertNotEqual(filmica.pngData(), original.pngData())
     }
     func testLookSelectionPersistsAndInvalidatesExportRevision() async throws {
         let store = try await makeStore(), movie = try await store.create(name: "Log", format: .landscape, profile: .appleLog)

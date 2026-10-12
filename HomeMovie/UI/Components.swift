@@ -17,17 +17,30 @@ actor ThumbnailService {
     static let shared = ThumbnailService()
     private let cache = NSCache<NSString, UIImage>()
     init() { cache.countLimit = 48; cache.totalCostLimit = 32 * 1024 * 1024 }
-    func image(scene: Scene, root: URL) async throws -> UIImage {
-        let key = "\(scene.id)-\(scene.trimStart.value)-\(scene.trimStart.scale)" as NSString
+    func image(scene: Scene, root: URL, movie: Movie? = nil) async throws -> UIImage {
+        let key = "\(root.path)-\(scene.id)-\(scene.trimStart.value)-\(scene.trimStart.scale)-\(movie?.revision ?? 0)-\(movie?.look?.id.uuidString ?? "standard")" as NSString
         if let image = cache.object(forKey: key) { return image }
-        let asset = AVURLAsset(url: root.appendingPathComponent(scene.source))
-        let tracks = try await asset.loadTracks(withMediaType: .video)
-        guard let track = tracks.first else { throw HomeMovieError.message("No preview available.") }
-        let range = try await track.load(.timeRange)
-        let generator = AVAssetImageGenerator(asset: asset)
+        let generator: AVAssetImageGenerator
+        let time: CMTime
+        if (scene.profile ?? movie?.captureProfile ?? .standard) == .appleLog {
+            var preview = movie ?? Movie(name: "Preview", format: scene.width > scene.height ? .landscape : .portrait)
+            preview.scenes = [scene]
+            preview.profile = .appleLog
+            let bundle = try await MediaAssembler().build(movie: preview, root: root)
+            generator = AVAssetImageGenerator(asset: bundle.asset)
+            generator.videoComposition = bundle.videoComposition
+            time = .zero
+        } else {
+            let asset = AVURLAsset(url: root.appendingPathComponent(scene.source))
+            let tracks = try await asset.loadTracks(withMediaType: .video)
+            guard let track = tracks.first else { throw HomeMovieError.message("No preview available.") }
+            let range = try await track.load(.timeRange)
+            generator = AVAssetImageGenerator(asset: asset)
+            time = CMTimeAdd(range.start, scene.trimStart.cmTime)
+        }
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 700, height: 700)
-        let (cg, _) = try await generator.image(at: CMTimeAdd(range.start, scene.trimStart.cmTime))
+        let (cg, _) = try await generator.image(at: time)
         let image = UIImage(cgImage: cg)
         cache.setObject(image, forKey: key, cost: cg.bytesPerRow * cg.height); return image
     }
@@ -36,6 +49,7 @@ actor ThumbnailService {
 struct SceneThumbnail: View {
     let scene: Scene?
     let root: URL
+    var movie: Movie? = nil
     @State private var image: UIImage?
     var body: some View {
         GeometryReader { proxy in
@@ -46,10 +60,10 @@ struct SceneThumbnail: View {
             }
         }
         .accessibilityHidden(true)
-        .task(id: scene.map { "\($0.id)-\($0.trimStart.value)" }) {
+        .task(id: scene.map { "\($0.id)-\($0.trimStart.value)-\($0.trimStart.scale)-\(movie?.revision ?? 0)-\(movie?.look?.id.uuidString ?? "standard")" }) {
             image = nil
             guard let scene, !scene.missing else { return }
-            let result = try? await ThumbnailService.shared.image(scene: scene, root: root)
+            let result = try? await ThumbnailService.shared.image(scene: scene, root: root, movie: movie)
             guard !Task.isCancelled else { return }
             image = result
         }

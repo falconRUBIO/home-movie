@@ -160,7 +160,7 @@ struct WatchMovieView: View {
                     ForEach(Array(movie.activeScenes.enumerated()), id: \.element.id) { item in
                         Button { player?.pause(); review = item.element } label: {
                             VStack(alignment: .leading, spacing: 6) {
-                                SceneThumbnail(scene: item.element, root: app.store.root)
+                                SceneThumbnail(scene: item.element, root: app.store.root, movie: movie)
                                     .frame(width: 100, height: verticalSizeClass == .compact ? 44 : 67)
                                     .clipShape(RoundedRectangle(cornerRadius: 10))
                                 Text("Scene \(item.offset + 1)").font(.caption)
@@ -198,7 +198,7 @@ struct SceneReviewView: View {
             ScrollView {
             VStack(spacing: 20) {
                 if let player { VideoPlayer(player: player).frame(height: 260) }
-                TrimRangeControl(scene: scene, root: app.store.root, start: $start, end: $end)
+                TrimRangeControl(scene: scene, root: app.store.root, start: $start, end: $end, movie: app.movie(movieID))
                     .frame(height: 64).padding(.horizontal, 22)
                 HStack {
                     Text(durationLabel(CMTime(seconds: start, preferredTimescale: 600)))
@@ -270,6 +270,7 @@ struct TrimRangeControl: View {
     let root: URL
     @Binding var start: Double
     @Binding var end: Double
+    var movie: Movie? = nil
     private var duration: Double { max(scene.sourceDuration.seconds, 1 / 600) }
     private var minimum: Double { min(1 / 30, duration) }
     var body: some View {
@@ -280,7 +281,7 @@ struct TrimRangeControl: View {
             ZStack(alignment: .leading) {
                 HStack(spacing: 1) {
                     ForEach(0..<6) { i in
-                        SceneThumbnail(scene: thumbnailScene(at: i), root: root)
+                        SceneThumbnail(scene: thumbnailScene(at: i), root: root, movie: movie)
                     }
                 }.clipShape(RoundedRectangle(cornerRadius: 8)).padding(.horizontal, 14)
                 Color.black.opacity(0.55).frame(width: max(0, x1 - 14)).padding(.leading, 14).allowsHitTesting(false)
@@ -295,6 +296,7 @@ struct TrimRangeControl: View {
     private func thumbnailScene(at index: Int) -> Scene {
         var sample = scene
         sample.trimStart = MediaTime(seconds: Double(index) / 6 * duration)
+        sample.trimEnd = sample.sourceDuration
         return sample
     }
     private func handle(_ label: String, x: CGFloat, width: CGFloat, isStart: Bool) -> some View {

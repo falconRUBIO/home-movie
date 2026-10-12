@@ -382,9 +382,13 @@ actor ProjectStore {
         guard try recoveryFiles().contains(where: { $0.id == file.id && $0.url == file.url }), file.url.pathExtension == "mov" else {
             throw HomeMovieError.message("This recovery item cannot be imported as a recording.")
         }
-        _ = try await MediaInspector.inspect(file.url)
+        let info = try await MediaInspector.inspect(file.url)
         let m = try index(movieID)
-        let ticket = CaptureTicket(movieID: movieID, sequence: catalog.movies[m].nextSequence)
+        let profile = info.profile ?? .standard
+        guard profile == catalog.movies[m].captureProfile else {
+            throw HomeMovieError.message("This recording’s color format does not match the movie. Recover it into a matching Standard or Apple Log movie, or save a copy to Files.")
+        }
+        let ticket = CaptureTicket(movieID: movieID, sequence: catalog.movies[m].nextSequence, profile: profile)
         try requireSpace(bytes: file.bytes + 300_000_000)
         try fm.copyItem(at: file.url, to: url(ticket.staging))
         try encoder.encode(ticket).write(to: url(ticket.journal), options: .atomic)

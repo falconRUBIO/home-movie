@@ -42,7 +42,7 @@ struct LibraryView: View {
                                 VStack(alignment: .leading, spacing: 9) {
                                     ZStack(alignment: .bottomLeading) {
                                         Button { lastMovieID = movie.id.uuidString; path.append(movie.id) } label: {
-                                            SceneThumbnail(scene: movie.activeScenes.first, root: app.store.root)
+                                            SceneThumbnail(scene: movie.activeScenes.first, root: app.store.root, movie: movie)
                                                 .frame(height: 210).clipShape(RoundedRectangle(cornerRadius: 22))
                                                 .overlay(alignment: .bottomTrailing) {
                                                     Text(durationLabel(movie.duration)).font(.caption.monospacedDigit())
@@ -134,6 +134,7 @@ struct NewMovieView: View {
     @State private var name = ""
     @State private var profile = CaptureProfile.standard
     @State private var supportsLog = false
+    @State private var checkingCapabilities = true
     @State private var looks: [LUTReference] = []
     @State private var selectedLook: LUTReference? = .filmica
     @State private var importingLook = false
@@ -162,7 +163,7 @@ struct NewMovieView: View {
                             }.foregroundStyle(.primary).disabled(loadingLook)
                         }
                     }
-                } footer: { Text(profile == .appleLog ? "Filmica is applied to preview, playback and export. Your Apple Log original stays intact. ProRes is used when needed and takes more storage." : "Hold your iPhone upright or sideways. Your first recording sets the movie’s orientation. Each recording becomes the next scene.") }
+                } footer: { Text(profile == .appleLog ? "\(selectedLook?.name ?? "Apple Standard") is applied to preview, playback and export. Your Apple Log original stays intact. ProRes is used when needed and takes more storage." : "Hold your iPhone upright or sideways. Your first recording sets the movie’s orientation. Each recording becomes the next scene.") }
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
             }.navigationTitle("New Movie").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -174,7 +175,7 @@ struct NewMovieView: View {
                                 do { let movie = try await app.store.create(name: name, format: .portrait, profile: profile, look: profile == .appleLog ? selectedLook : nil, useDefaultLook: false); await app.refresh(); created(movie.id) }
                                 catch { problem = error.localizedDescription; saving = false }
                             }
-                        }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).count > 80 || saving || loadingLook)
+                        }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).count > 80 || saving || loadingLook || checkingCapabilities)
                     }
                 }
         }.presentationDetents([.medium, .large]).interactiveDismissDisabled(saving || loadingLook)
@@ -191,7 +192,9 @@ struct NewMovieView: View {
                 }
             }
             .task {
+                defer { checkingCapabilities = false }
                 supportsLog = await Task.detached { CaptureService.supportsAppleLog() }.value
+                guard !Task.isCancelled else { return }
                 if supportsLog { profile = .appleLog }
                 looks = await app.store.availableLooks()
             }

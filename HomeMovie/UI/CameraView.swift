@@ -340,7 +340,7 @@ struct CameraView: View {
     }
     @ViewBuilder private func reviewControls(movie: Movie, landscape: Bool) -> some View {
         let recent = Button { openWatch(sceneID: movie.activeScenes.last?.id) } label: {
-            SceneThumbnail(scene: movie.activeScenes.last, root: app.store.root)
+            SceneThumbnail(scene: movie.activeScenes.last, root: app.store.root, movie: movie)
                 .frame(width: 46, height: 46).clipShape(RoundedRectangle(cornerRadius: 8))
         }.accessibilityLabel("Review recent scene").disabled(camera.busy || movie.activeScenes.isEmpty)
         let flip = Button { camera.flip() } label: {
