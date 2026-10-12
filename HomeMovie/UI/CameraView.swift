@@ -12,6 +12,20 @@ private struct DollyLensButtonStyle: ButtonStyle {
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
+private struct CameraControlRegionsKey: PreferenceKey {
+    static var defaultValue: [CGRect] = []
+    static func reduce(value: inout [CGRect], nextValue: () -> [CGRect]) { value.append(contentsOf: nextValue()) }
+}
+private extension View {
+    func cameraControlRegion() -> some View {
+        background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: CameraControlRegionsKey.self,
+                    value: [geometry.frame(in: .named("cameraViewfinder"))])
+            }
+        }
+    }
+}
 private struct DollyControlHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 52
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
@@ -45,6 +59,7 @@ struct CameraView: View {
     @State private var undoingTake = false
     @State private var smoothZoomOpen = false
     @State private var lensControlHeight: CGFloat = 52
+    @State private var previewControlRegions: [CGRect] = []
     @State private var smoothPosition = 0.0
     @State private var zoomDragging = false
     @StateObject private var recordingCountdown = RecordingCountdown()
@@ -259,17 +274,17 @@ struct CameraView: View {
     }
     private func viewfinder(movie: Movie, landscape: Bool) -> some View {
         ZStack {
-            preview()
+            preview().zIndex(0)
             VStack(spacing: 4) {
-                header(movie: movie).padding(.horizontal, 12).padding(.top, 8)
+                header(movie: movie).cameraControlRegion().padding(.horizontal, 12).padding(.top, 8)
                 captureIndicators(movie: movie)
                 Spacer(minLength: 0)
-                status(movie: movie).padding(.horizontal, landscape ? 100 : 20)
+                status(movie: movie).cameraControlRegion().padding(.horizontal, landscape ? 100 : 20)
                     .padding(.bottom, lensControlHeight + (landscape ? 18 : 124))
             }
         }.clipped()
             .overlay(alignment: .bottom) {
-                lenses.background {
+                lenses.cameraControlRegion().zIndex(2).background {
                     GeometryReader { proxy in
                         Color.clear.preference(key: DollyControlHeightKey.self, value: proxy.size.height)
                     }
@@ -278,8 +293,10 @@ struct CameraView: View {
                     .padding(.bottom, landscape ? 10 : 116)
             }
             .overlay(alignment: landscape ? .trailing : .bottom) {
-                recordControl.padding(landscape ? .trailing : .bottom, 16)
+                recordControl.cameraControlRegion().zIndex(3).padding(landscape ? .trailing : .bottom, 16)
             }
+            .coordinateSpace(name: "cameraViewfinder")
+            .onPreferenceChange(CameraControlRegionsKey.self) { previewControlRegions = $0 }
     }
     private func captureIndicators(movie: Movie) -> some View {
         VStack(spacing: 6) {
@@ -371,6 +388,7 @@ struct CameraView: View {
         return Button { selectLens(factor) } label: {
             Text(label).font(.caption.weight(.medium)).monospacedDigit()
                 .foregroundStyle(foreground).frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
                 .background(background, in: Circle())
                 .overlay { Circle().strokeBorder(border, lineWidth: isDestination ? 1.5 : 1) }
         }.buttonStyle(DollyLensButtonStyle())
@@ -635,7 +653,7 @@ struct CameraView: View {
     private func preview() -> some View {
         ZStack {
             CameraPreview(session: camera.service.session, angle: camera.options?.angle ?? 90, front: camera.options?.isFront ?? false,
-                options: camera.options, liveFrames: camera.service.liveFrames,
+                options: camera.options, protectedRegions: previewControlRegions, liveFrames: camera.service.liveFrames,
                 liveCube: liveOriginal ? nil : liveCube,
                 liveActive: movie?.captureProfile == .appleLog && camera.state.showsLiveLook,
                 onLiveLookStatus: { status in
@@ -807,3 +825,4 @@ struct CameraView: View {
         Task { await camera.pauseForPlayback(); initialReviewID = sceneID; watching = true }
     }
 }
+

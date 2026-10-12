@@ -48,13 +48,13 @@
     "Phone listening: verify scene edge treatment is inaudible and suppresses the reported click, comparing original takes with Watch Movie and fresh exports.",
     "Physical-camera frame delivery, live Cinema versus Original comparison and sustained GPU/thermal acceptance of the visible-overlay fix.",
     "Current-source iPhone Dolly: all physical lens pairs/durations, manual drag/pinch speeds, response settings, retargets, Stay on This Lens, focus/exposure and warm/low-light delivered-frame smoothness.",
-    "Current Film Effects native compilation and renderer tests.",
-    "Physical iPhone Film Effects visual calibration, encoded grain preservation, sustained GPU/thermal and accessibility acceptance."
+    "Physical iPhone Film Effects visual calibration, encoded grain preservation, sustained GPU/thermal and accessibility acceptance.",
+    "Final Film Effects preview/export integration and lens touch-routing native validation."
   ],
   "date": "2026-10-12",
-  "native_tests_supplied": 96,
+  "native_tests_supplied": 98,
   "native_tests_run": 87,
-  "native_build_status": "Film Effects implementation added; previous Dolly source passed 87 tests. Current effects source awaits native compilation and renderer regression tests.",
+  "native_build_status": "Film Effects initial source compiled and passed 95 native tests. Final responsive preview/export integration and camera touch-routing regression source await native CI.",
   "previous_cloud_build": {
     "commit": "f8294c31719e540c87d42f75eaf90d30b55fe8c9",
     "provider": "GitHub Actions",
@@ -116,5 +116,12 @@
   "physical_device_live_look_status": "User reports flat live preview despite LOG Cinema, while graded playback works. Visible Metal overlay/display-loop fix and render-status badge pass native GPU/presentation tests; corrected-source iPhone confirmation and TestFlight upload pending.",
   "physical_device_dolly_status": "User reports jerky Dolly. Repeated 20 Hz native ramps replaced with one 60 Hz trajectory; adaptive drag speed, response, retargeting, clock and range tests pass. Physical lens handoffs and saved-frame smoothness across actual device speeds/lighting/thermal states remain unverified.",
   "physical_device_dolly_ui_status": "NOT RUN: final rounded glass, narrow layouts, accessibility text, touch targets, VoiceOver endpoint guidance, route reset and hands-free flow need physical iPhone acceptance. Final presentation-only follow-up was source/grammar checked, not separately natively recompiled.",
-  "film_effects_status": "Implementation and Swift grammar checks pass. Final responsive preview/fullscreen controls, renderer regressions and actual Standard-video export integration await native validation."
+  "film_effects_status": "Implementation and Swift grammar checks pass. Final responsive preview/fullscreen controls, renderer regressions and actual Standard-video export integration await native validation.",
+  "film_effects_initial_build": {
+    "commit": "177bcdca8ae334a26c9ba676a0e5751f0d1a8e26",
+    "run_id": 38297230863,
+    "tests_passed": 95,
+    "tests_failed": 0,
+    "status": "PASS"
+  }
 }

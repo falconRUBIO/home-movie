@@ -235,6 +235,16 @@
       "isa" = "PBXBuildFile";
       "fileRef" = "51A423BFA2C996478CB32221";
     };
+    "B4E5A0A7FBA8E01DE3472BAF" = {
+      "isa" = "PBXFileReference";
+      "lastKnownFileType" = "sourcecode.swift";
+      "path" = "HomeMovieTests/CameraTouchTests.swift";
+      "sourceTree" = "<group>";
+    };
+    "3D51C3AD62305391D934F3FF" = {
+      "isa" = "PBXBuildFile";
+      "fileRef" = "B4E5A0A7FBA8E01DE3472BAF";
+    };
     "97947CF7525D0283503C284B" = {
       "isa" = "PBXFileReference";
       "lastKnownFileType" = "sourcecode.swift";
@@ -321,7 +331,7 @@
     };
     "60436FC4EBAB21EC8F3AC97A" = {
       "isa" = "PBXGroup";
-      "children" = ("51A423BFA2C996478CB32221", "97947CF7525D0283503C284B", "4544D24A079AF4816CC09050",);
+      "children" = ("51A423BFA2C996478CB32221", "B4E5A0A7FBA8E01DE3472BAF", "97947CF7525D0283503C284B", "4544D24A079AF4816CC09050",);
       "name" = "Tests";
       "sourceTree" = "<group>";
     };
@@ -351,7 +361,7 @@
     "4AC6D2D3EB3B918C36F7C620" = {
       "isa" = "PBXSourcesBuildPhase";
       "buildActionMask" = 2147483647;
-      "files" = ("4EDDBF67C98E395BCD256FFF", "A1A0614E2BB36523ED25FFF6", "EAF5029F434F62D65EA47A56",);
+      "files" = ("4EDDBF67C98E395BCD256FFF", "3D51C3AD62305391D934F3FF", "A1A0614E2BB36523ED25FFF6", "EAF5029F434F62D65EA47A56",);
       "runOnlyForDeploymentPostprocessing" = 0;
     };
     "6AEA91B3ED7C8BDAF5C2FDA9" = {

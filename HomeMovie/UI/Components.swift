@@ -97,6 +97,17 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     var onFocus: ((CGPoint, Bool) -> Bool)?
     var onExposure: ((Float) -> Void)?
+    // Rectangles measured from SwiftUI controls in this viewfinder’s coordinate space.
+    var protectedRegions: [CGRect] = []
+    func permitsPreviewInteraction(at point: CGPoint) -> Bool {
+        bounds.contains(point) && !protectedRegions.contains { $0.insetBy(dx: -2, dy: -2).contains(point) }
+    }
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        super.point(inside: point, with: event) && permitsPreviewInteraction(at: point)
+    }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        permitsPreviewInteraction(at: touch.location(in: self))
+    }
     var exposureBias: Float = 0
     var exposureRange: ClosedRange<Float> = -2...2
     var locked = false
@@ -176,9 +187,11 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         sun.alpha = 0
         addSubview(sun)
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(focusHeld(_:)))
+        hold.delegate = self
         hold.minimumPressDuration = 0.5
         addGestureRecognizer(hold)
         let tap = UITapGestureRecognizer(target: self, action: #selector(focusTapped(_:)))
+        tap.delegate = self
         tap.require(toFail: hold)
         tap.cancelsTouchesInView = false
         addGestureRecognizer(tap)
@@ -196,6 +209,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         requestFocus(at: gesture.location(in: self), locked: true)
     }
     private func requestFocus(at point: CGPoint, locked: Bool) {
+        guard permitsPreviewInteraction(at: point) else { return }
         let devicePoint = previewLayer.captureDevicePointConverted(fromLayerPoint: point)
         guard onFocus?(devicePoint, locked) == true else { return }
         focusDevicePoint = devicePoint
@@ -258,6 +272,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
         let location = pan.location(in: self)
+        guard permitsPreviewInteraction(at: location) else { return false }
         let velocity = pan.velocity(in: self)
         return focusIndicator.alpha > 0.1 && abs(location.x - focusIndicator.center.x) < 90 &&
             abs(location.y - focusIndicator.center.y) < 120 && abs(velocity.y) > abs(velocity.x)
@@ -279,6 +294,7 @@ struct CameraPreview: UIViewRepresentable {
     let angle: CGFloat
     let front: Bool
     let options: CameraOptions?
+    var protectedRegions: [CGRect] = []
     var liveFrames: LiveFrames? = nil
     var liveCube: ColorCube? = nil
     var liveActive = false
@@ -291,6 +307,7 @@ struct CameraPreview: UIViewRepresentable {
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
         view.onFocus = onFocus; view.onExposure = onExposure
+        view.protectedRegions = protectedRegions
         return view
     }
     static func dismantleUIView(_ view: PreviewUIView, coordinator: ()) {
@@ -298,6 +315,7 @@ struct CameraPreview: UIViewRepresentable {
     }
     func updateUIView(_ view: PreviewUIView, context: Context) {
         view.onFocus = onFocus; view.onExposure = onExposure
+        view.protectedRegions = protectedRegions
         view.fixedFormat = fixedFormat
         view.onLiveLookStatus = onLiveLookStatus
         view.setFront(front)
@@ -342,3 +360,4 @@ struct BackupFilesExporter: UIViewControllerRepresentable {
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finished(false) }
     }
 }
+
