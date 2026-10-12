@@ -370,6 +370,30 @@ final class PipelineTests: XCTestCase {
         preview.configureLiveLook(frames: frames, cube: try ColorCube.filmica.get(), active: false)
         XCTAssertTrue(metal.isHidden); XCTAssertTrue(metal.isPaused); XCTAssertEqual(statuses.last, .inactive)
     }
+    @MainActor func testCinemaPreviewResizesWithoutReplacingItsSessionOrMetalSurface() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal preview is unavailable") }
+        let preview = PreviewUIView(frame: CGRect(x: 0, y: 0, width: 393, height: 698))
+        let session = AVCaptureSession(); preview.previewLayer.session = session
+        let frames = LiveFrames(); frames.push(try makePreviewFrame())
+        preview.configureLiveLook(frames: frames, cube: try ColorCube.filmica.get(), active: true)
+        let metal = try XCTUnwrap(preview.subviews.compactMap { $0 as? MTKView }.first)
+        let delegate = metal.delegate
+        for size in [CGSize(width: 698, height: 393), CGSize(width: 393, height: 698), CGSize(width: 698, height: 393)] {
+            preview.bounds = CGRect(origin: .zero, size: size)
+            preview.setNeedsLayout(); preview.layoutIfNeeded()
+            XCTAssertTrue(preview.previewLayer.session === session)
+            XCTAssertTrue(preview.subviews.compactMap { $0 as? MTKView }.first === metal)
+            XCTAssertTrue(metal.delegate === delegate)
+            XCTAssertEqual(metal.frame, preview.bounds)
+            XCTAssertGreaterThan(metal.drawableSize.width, 0); XCTAssertGreaterThan(metal.drawableSize.height, 0)
+            XCTAssertEqual(metal.drawableSize.width / metal.drawableSize.height, size.width / size.height, accuracy: 0.001)
+            XCTAssertFalse(metal.isHidden); XCTAssertFalse(metal.isPaused)
+            XCTAssertNotNil(frames.latest())
+        }
+        preview.detachPreview()
+        XCTAssertNil(preview.previewLayer.session)
+        XCTAssertTrue(metal.isPaused); XCTAssertTrue(metal.isHidden)
+    }
     func testSceneAudioEdgesFadeAtActualOffsetsAndKeepFullVolumeBetweenCuts() {
         let parameters = AVMutableAudioMixInputParameters()
         MediaAssembler.smoothAudioEdges(parameters, range: CMTimeRange(start: CMTime(seconds: 2.25, preferredTimescale: 48000), duration: CMTime(seconds: 1, preferredTimescale: 48000)))

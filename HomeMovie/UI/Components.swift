@@ -151,6 +151,13 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     }
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var rotationObservation: NSKeyValueObservation?
+    private var lastPreviewAngle: CGFloat = 90
+    func detachPreview() {
+        configureLiveLook(frames: nil, cube: nil, active: false)
+        rotationObservation = nil; rotationCoordinator = nil
+        hideIndicator?.cancel(); hideIndicator = nil
+        previewLayer.session = nil
+    }
     func updatePreviewRotation(fallback: CGFloat) {
         let device = previewLayer.session?.inputs.compactMap { $0 as? AVCaptureDeviceInput }
             .first { $0.device.hasMediaType(.video) }?.device
@@ -169,6 +176,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         let angle = fixedFormat.map { OrientationPolicy.shared.captureAngle(format: $0, observed: fallback) }
             ?? rotationCoordinator?.videoRotationAngleForHorizonLevelPreview ?? fallback
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        lastPreviewAngle = angle
         lookRenderer?.angle = angle
         repositionIndicator()
     }
@@ -228,7 +236,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     }
     override func layoutSubviews() {
         super.layoutSubviews(); resizeLookView()
-        applyPreviewRotation()
+        applyPreviewRotation(fallback: lastPreviewAngle)
         repositionIndicator()
     }
     func setFront(_ front: Bool) {
@@ -311,9 +319,10 @@ struct CameraPreview: UIViewRepresentable {
         return view
     }
     static func dismantleUIView(_ view: PreviewUIView, coordinator: ()) {
-        view.configureLiveLook(frames: nil, cube: nil, active: false)
+        view.detachPreview()
     }
     func updateUIView(_ view: PreviewUIView, context: Context) {
+        if view.previewLayer.session !== session { view.previewLayer.session = session }
         view.onFocus = onFocus; view.onExposure = onExposure
         view.protectedRegions = protectedRegions
         view.fixedFormat = fixedFormat

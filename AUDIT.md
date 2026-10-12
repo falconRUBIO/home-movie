@@ -423,3 +423,10 @@ Film Effects follow-up: playing-preview adjustments swap only the rendering reci
 Initial Film Effects source `177bcdca` compiled and passed **95 native tests with zero failures** in run 38297230863, including eight new settings/kernel tests (2.997 seconds). Total native test time: 231.210 seconds.
 
 Camera lens-touch correction: the user reports lens taps focusing the underlying video with Dolly closed/open. SwiftUI now measures header, lens/Dolly, record and notice rectangles in viewfinder coordinates. Native preview hit testing and tap/hold/exposure gesture admission exclude those rectangles. Lens buttons explicitly claim their full 44-point rectangular hit area. Layout is preserved. Added UIKit routing regressions for closed/expanded bars and rotated geometry. Physical iPhone touch acceptance remains pending.
+
+
+## 2026-10-12 — Dolly delay, stabilization and rotation audit
+
+Native GitHub Actions run 38301358982 validated commit c27912f2b1f4310cfe887d370232135e36df6ac2: 103 XCTest tests, zero failures, TEST SUCCEEDED. This includes automatic recording stabilization / preview mode fallback policy, protected camera-control hit testing, selectable 3/5/7-second countdowns, Off behavior, cancellation/restart, immediate ordinary recording when Dolly is closed, Film Effects settings/cache/rendering and Standard export integration.
+
+Additional landscape fix: keep a single native viewfinder identity instead of replacing it through conditional portrait/landscape stack branches. Reposition controls around the live surface. Disconnect the old preview explicitly on leaving the camera and retain the last preview angle during layout. Add repeated portrait/landscape Metal surface/session resizing regression. Final native validation follows this source update. Physical iPhone validation remains required for actual camera rotation, stabilization steadiness/crop/latency, and glass control hit testing; the simulator cannot establish parity with Apple Camera.
