@@ -129,11 +129,13 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                     self.configuredProfile = profile
                     try self.configure(front: self.device(front: front) == nil ? false : front)
                 }
+                try self.ensureLogCaptureReady()
                 try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .videoRecording, options: [.defaultToSpeaker])
                 try AVAudioSession.sharedInstance().setActive(true)
                 if !self.session.isRunning { self.session.startRunning() }
                 guard self.session.isRunning else { throw HomeMovieError.message("The camera could not start.") }
                 guard !self.session.isInterrupted else { throw HomeMovieError.message("The camera is still interrupted. Try Resume Camera again when it is available.") }
+                try self.ensureLogCaptureReady()
                 self.onEvent?(.ready(try self.options()))
             } catch { self.onEvent?(.failed(error.localizedDescription)) }
         }
@@ -193,7 +195,6 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             }
             guard let format = formats.first else { throw HomeMovieError.message("Apple Log is not available on this camera. Switch back to a supported rear camera.") }
             camera.activeFormat = format
-            camera.activeColorSpace = .appleLog
         } else if camera.activeFormat.supportedColorSpaces.contains(.sRGB) { camera.activeColorSpace = .sRGB }
         if camera.activeFormat.videoSupportedFrameRateRanges.contains(where: { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 }) {
             camera.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
@@ -210,6 +211,30 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         camera.isSubjectAreaChangeMonitoringEnabled = false
         camera.setExposureTargetBias(0, completionHandler: nil)
         focusLocked = false
+        // Select Log last: format, HDR and zoom configuration must not override it.
+        if configuredProfile == .appleLog { camera.activeColorSpace = .appleLog }
+    }
+    private func ensureLogCaptureReady() throws {
+        guard configuredProfile == .appleLog else { return }
+        guard let camera = videoInput?.device, camera.activeFormat.supportedColorSpaces.contains(.appleLog) else {
+            throw HomeMovieError.message("The camera’s active format no longer supports Apple Log. Tap Resume Camera to reconnect.")
+        }
+        if camera.activeColorSpace != .appleLog {
+            try camera.lockForConfiguration()
+            camera.activeColorSpace = .appleLog
+            camera.unlockForConfiguration()
+            liveFrames.clear()
+        }
+        guard camera.activeColorSpace == .appleLog else {
+            throw HomeMovieError.message("Apple Log could not stay enabled on this camera. Tap Resume Camera to reconnect.")
+        }
+        guard let connection = output.connection(with: .video), output.availableVideoCodecTypes.contains(.hevc) else {
+            throw HomeMovieError.message("Apple Log is enabled, but this camera output does not offer HEVC recording.")
+        }
+        output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
+        guard camera.activeColorSpace == .appleLog else {
+            throw HomeMovieError.message("The recording output changed the camera’s Apple Log mode. Tap Resume Camera to reconnect.")
+        }
     }
     private func setCoordinator(_ camera: AVCaptureDevice) {
         coordinator = AVCaptureDevice.RotationCoordinator(device: camera, previewLayer: nil)
@@ -393,10 +418,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 self.onEvent?(.finished(ticket, HomeMovieError.message("This camera rotation is unsupported."))); return
             }
             if self.configuredProfile == .appleLog {
-                guard self.videoInput?.device.activeColorSpace == .appleLog, self.output.availableVideoCodecTypes.contains(.hevc) else {
-                    self.onEvent?(.finished(ticket, HomeMovieError.message("Apple Log recording is unavailable. Your movie was not recorded in Standard mode."))); return
-                }
-                self.output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
+                do { try self.ensureLogCaptureReady() }
+                catch { self.onEvent?(.finished(ticket, error)); return }
             }
             connection.videoRotationAngle = angle
             self.ticket = ticket; self.recordingURL = url.standardizedFileURL; self.stopRequested = false

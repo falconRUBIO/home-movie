@@ -126,7 +126,15 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 state = active && interruption == nil ? .ready : .interrupted
                 message = interruption
-            } catch { state = .failed; message = "\(error.localizedDescription) Any recording file has been preserved for recovery." }
+            } catch {
+                state = .failed
+                let hasFile = app.map {
+                    FileManager.default.fileExists(atPath: $0.store.root.appendingPathComponent(ticket.staging).path) ||
+                    FileManager.default.fileExists(atPath: $0.store.root.appendingPathComponent(ticket.source).path)
+                } ?? false
+                if !hasFile { try? await app?.store.abandonUnstarted(ticket) }
+                message = error.localizedDescription + (hasFile ? " Any recording file has been preserved for recovery." : "")
+            }
         case .interrupted(let text):
             interruption = text; message = text; startCancelled = true
             if busy { state = .finalizing; beginBackgroundTime() } else { state = .interrupted }
