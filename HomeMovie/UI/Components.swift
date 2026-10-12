@@ -102,8 +102,14 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     func permitsPreviewInteraction(at point: CGPoint) -> Bool {
         bounds.contains(point) && !protectedRegions.contains { $0.insetBy(dx: -2, dy: -2).contains(point) }
     }
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        super.point(inside: point, with: event) && permitsPreviewInteraction(at: point)
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        guard !permitsPreviewInteraction(at: point) else { return hit }
+        // Preserve controls if the platform bridges an overlay into this native view.
+        // Only the camera surface itself yields the protected area to sibling controls.
+        guard let hit, hit !== self else { return nil }
+        if let lookView, hit === lookView || hit.isDescendant(of: lookView) { return nil }
+        return hit
     }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         permitsPreviewInteraction(at: touch.location(in: self))
