@@ -119,6 +119,24 @@ final class PictureInPictureTests: XCTestCase {
         try await store.setPiPLayout(movieID: movie.id, layout: layout)
         try await store.setDualCameraCapture(movieID: movie.id, enabled: true)
         do { try await store.setDualCameraCapture(movieID: log.id, enabled: true); XCTFail("Log must not silently downgrade") } catch { }
+        // Project backups require recorded footage, not an empty movie catalog.
+        let ticket = try await store.begin(movieID: movie.id, format: .landscape, profile: .standard)
+        let writer = try ContinuousTakeWriter(url: try await store.url(ticket.staging), angle: 0)
+        let fixture = try frame(red: 0, green: 0, blue: 220)
+        for index in 0..<12 {
+            let time = CMTime(value: Int64(index), timescale: 30)
+            var accepted = false
+            for _ in 0..<100 {
+                if writer.appendVideo(fixture, at: time) { accepted = true; break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(accepted)
+            writer.appendAudio(try audio(at: time))
+        }
+        let finished = expectation(description: "Backup fixture recording finishes")
+        writer.finish { error in XCTAssertNil(error); finished.fulfill() }
+        await fulfillment(of: [finished], timeout: 30)
+        try await store.commit(ticket)
         let reopened = ProjectStore(root: root); _ = try await reopened.load()
         let values = await reopened.snapshot()
         XCTAssertEqual(values.first { $0.id == movie.id }?.preferredPiPLayout, layout)
