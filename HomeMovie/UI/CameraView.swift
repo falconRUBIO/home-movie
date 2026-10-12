@@ -21,6 +21,7 @@ struct CameraView: View {
     @State private var smoothZoomOpen = false
     @State private var smoothPosition = 0.0
     @State private var zoomDragging = false
+    @AppStorage("dollyZoomSeconds") private var dollySeconds = 3
     @AppStorage("smoothZoomSpeed") private var zoomSpeed = SmoothZoomSpeed.normal.rawValue
     @AppStorage("smoothStayOnLens") private var stayOnLens = false
     @Environment(\.dismiss) private var dismiss
@@ -119,7 +120,7 @@ struct CameraView: View {
             if smoothZoomOpen, state == .ready { camera.beginSmoothZoom() }
         }
         .onChange(of: camera.options?.zoom) { _, _ in
-            if !zoomDragging, camera.options?.smoothMoving != true { syncSmoothPosition() }
+            if !zoomDragging { syncSmoothPosition() }
         }
         .onDisappear { zoomDragging = false; camera.suspend() }
         .onChange(of: scenePhase) { _, phase in
@@ -227,7 +228,7 @@ struct CameraView: View {
             ForEach(options.lenses) { lens in
                 let selected = abs(lens.factor - options.zoom) < 0.06
                 Button {
-                    if smoothZoomOpen { camera.dollyZoom(to: lens.factor) }
+                    if smoothZoomOpen { camera.dollyZoom(to: lens.factor, seconds: DollyZoomDuration.validated(dollySeconds)) }
                     else { camera.zoom(lens.factor) }
                 } label: {
                     Text(lens.label).font(.caption.weight(.medium)).monospacedDigit()
@@ -281,6 +282,19 @@ struct CameraView: View {
                     let factor = Double(options.zoom) * pow(2, direction == .increment ? 0.25 : -0.25)
                     setSmoothPosition(SmoothZoomFilter.position(factor, minimum: Double(options.minimum), maximum: Double(options.maximum)), options: options)
                 }
+            Menu {
+                Picker("Dolly duration", selection: $dollySeconds) {
+                    ForEach(DollyZoomDuration.choices, id: \.self) { seconds in
+                        Text("\(seconds) seconds").tag(seconds)
+                    }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text("\(DollyZoomDuration.validated(dollySeconds))s").monospacedDigit()
+                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                }.font(.caption.weight(.medium)).frame(minWidth: 44, minHeight: 44)
+            }.accessibilityLabel("Dolly duration")
+                .accessibilityValue("\(DollyZoomDuration.validated(dollySeconds)) seconds")
         }.padding(.horizontal, 12).padding(.vertical, 5)
             .contentShape(Rectangle()).onTapGesture { }
             .frame(maxWidth: 360).disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum)

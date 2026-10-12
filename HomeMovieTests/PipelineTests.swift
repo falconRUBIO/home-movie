@@ -86,6 +86,35 @@ final class PipelineTests: XCTestCase {
         }
         XCTAssertEqual(fast.value, 1, accuracy: 0.001)
     }
+    func testDollyDurationControlsFullMoveInBothDirections() throws {
+        XCTAssertEqual(DollyZoomDuration.validated(99), 3)
+        for duration in DollyZoomDuration.choices {
+            for (start, end) in [(1.0, 8.0), (8.0, 1.0), (1.0, 4.0), (4.0, 1.0)] {
+                var filter = try XCTUnwrap(SmoothZoomFilter(current: start, minimum: 1, maximum: 16))
+                filter.setTarget(end, duration: Double(duration))
+                XCTAssertTrue(filter.isTimed)
+                let tick = Double(duration) / 200
+                var steps: [Double] = []
+                for frame in 0..<200 {
+                    let previous = filter.value
+                    let next = filter.advance(seconds: tick, rate: 0.35)
+                    steps.append(abs(log2(next / previous)))
+                    XCTAssertGreaterThanOrEqual(next, min(start, end))
+                    XCTAssertLessThanOrEqual(next, max(start, end))
+                    if frame == 99 { XCTAssertEqual(next, sqrt(start * end), accuracy: 0.0001) }
+                    if frame == 149 { XCTAssertGreaterThan(abs(next - end), 0.01) }
+                }
+                XCTAssertEqual(filter.value, end, accuracy: 0.0001)
+                XCTAssertLessThan(steps[0], steps[99])
+                XCTAssertLessThan(steps[199], steps[99])
+                // Dragging takes over smoothly from the reached position, without a timed move.
+                filter.setTarget(start)
+                XCTAssertFalse(filter.isTimed)
+                XCTAssertEqual(filter.value, end, accuracy: 0.0001)
+                XCTAssertNotEqual(filter.advance(seconds: 0.05, rate: 0.75), end)
+            }
+        }
+    }
     func testDollyLensTargetsEaseInAndOutInBothDirections() throws {
         for (start, end) in [(1.0, 8.0), (8.0, 1.0), (1.0, 4.0), (4.0, 1.0)] {
             var filter = try XCTUnwrap(SmoothZoomFilter(current: start, minimum: 1, maximum: 16))
