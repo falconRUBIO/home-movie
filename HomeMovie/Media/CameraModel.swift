@@ -123,7 +123,10 @@ enum CameraState: Equatable {
     func zoom(_ factor: CGFloat) { if active, [.ready, .recording].contains(state) { service.zoom(factor) } }
     func configureSmoothZoom(speed: SmoothZoomSpeed, stayOnLens: Bool) { service.configureSmoothZoom(speed: speed, stayOnLens: stayOnLens) }
     func beginSmoothZoom() { if active, [.ready, .recording].contains(state) { service.beginSmoothZoom() } }
-    func smoothZoom(to factor: CGFloat) { if active, [.ready, .recording].contains(state) { service.smoothZoom(to: factor) } }
+    func smoothZoom(to factor: CGFloat, inputTime: Double? = nil, inputEnded: Bool = false) {
+        if active, [.ready, .recording].contains(state) { service.smoothZoom(to: factor, inputTime: inputTime, inputEnded: inputEnded) }
+    }
+    func endSmoothInput() { service.endSmoothInput() }
     func dollyZoom(to factor: CGFloat, seconds: Int) { if active, [.ready, .recording].contains(state) { service.dollyZoom(to: factor, seconds: seconds) } }
     func endSmoothZoom() { service.endSmoothZoom() }
     func focus(at point: CGPoint, locked: Bool = false) -> Bool {

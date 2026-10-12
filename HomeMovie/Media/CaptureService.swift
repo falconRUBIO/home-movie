@@ -89,6 +89,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private var smoothTimer: DispatchSourceTimer?
     private var smoothGeneration = UUID()
     private var smoothClock = SmoothZoomClock()
+    private var smoothInput = SmoothZoomInput()
     private var smoothOpen = false
     private var smoothSpeed = SmoothZoomSpeed.normal
     private var stayOnLens = false
@@ -437,6 +438,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     func configureSmoothZoom(speed: SmoothZoomSpeed, stayOnLens: Bool) {
         queue.async {
             let changedLock = self.stayOnLens != stayOnLens
+            if self.smoothSpeed != speed { self.smoothInput.reset() }
             self.smoothSpeed = speed; self.stayOnLens = stayOnLens
             if changedLock, self.smoothOpen {
                 var previous = self.smoothFilter
@@ -494,13 +496,20 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             self.setSmoothTargetOnQueue(factor, duration: Double(DollyZoomDuration.validated(seconds)))
         }
     }
-    func smoothZoom(to factor: CGFloat) {
+    func smoothZoom(to factor: CGFloat, inputTime: Double? = nil, inputEnded: Bool = false) {
         guard factor.isFinite, factor > 0 else { return }
-        queue.async { self.setSmoothTargetOnQueue(factor) }
+        queue.async {
+            if let time = inputTime { self.smoothInput.observe(factor: Double(factor), at: time) }
+            else { self.smoothInput.reset() }
+            self.setSmoothTargetOnQueue(factor)
+            if inputEnded { self.smoothInput.end() }
+        }
     }
+    func endSmoothInput() { queue.async { self.smoothInput.end() } }
     private func setSmoothTargetOnQueue(_ factor: CGFloat, duration: Double? = nil) {
         if !smoothOpen { beginSmoothZoomOnQueue() }
         guard smoothOpen, smoothFilter != nil, session.isRunning, !session.isInterrupted else { return }
+        if duration != nil { smoothInput.reset() }
         if (duration != nil || smoothFilter?.isTimed == true), let camera = videoInput?.device {
             // Rebase to actual zoom without throwing away incoming motion on a takeover.
             _ = smoothFilter?.reconfigure(current: Double(camera.videoZoomFactor),
@@ -532,7 +541,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             let now = ProcessInfo.processInfo.systemUptime
             let seconds = smoothClock.step(at: now)
             guard seconds > 0 else { return }
-            let next = filter.advance(seconds: seconds, rate: smoothSpeed.rate); smoothFilter = filter
+            let next = filter.advance(seconds: seconds, rate: smoothInput.rate(baseline: smoothSpeed.rate)); smoothFilter = filter
             try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
             let target = min(camera.maxAvailableVideoZoomFactor, max(camera.minAvailableVideoZoomFactor, CGFloat(next)))
             // One trajectory owns zoom. Restarting native ramps on every sample caused stepping.
@@ -540,6 +549,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             if filter.isSettled,
                abs(log2(Double(camera.videoZoomFactor) / filter.target)) < 0.001 {
                 smoothTimer?.cancel(); smoothTimer = nil; smoothGeneration = UUID(); smoothClock.reset()
+                smoothInput.reset()
                 if let options = try? options() { onEvent?(.ready(options)) }
             }
         } catch {
@@ -551,6 +561,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private func stopSmoothZoomOnQueue() {
         smoothTimer?.cancel(); smoothTimer = nil; smoothGeneration = UUID(); smoothClock.reset()
         smoothFilter = nil; smoothOpen = false
+        smoothInput.reset()
         guard let camera = videoInput?.device else { return }
         do {
             try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }

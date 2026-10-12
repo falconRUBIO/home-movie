@@ -330,9 +330,9 @@ struct CameraView: View {
                 }.frame(height: 34).contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 0).onChanged { value in
                         zoomDragging = true
-                        setSmoothPosition(Double((value.location.x - 8) / width), options: options)
+                        setSmoothPosition(Double((value.location.x - 8) / width), options: options, inputTime: value.time.timeIntervalSinceReferenceDate)
                     }.onEnded { value in
-                        setSmoothPosition(Double((value.location.x - 8) / width), options: options)
+                        setSmoothPosition(Double((value.location.x - 8) / width), options: options, inputTime: value.time.timeIntervalSinceReferenceDate, inputEnded: true)
                         zoomDragging = false
                     })
             }.frame(height: 34)
@@ -359,12 +359,12 @@ struct CameraView: View {
             .contentShape(Rectangle()).onTapGesture { }
             .frame(maxWidth: 360).disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum || countdown != nil)
     }
-    private func setSmoothPosition(_ position: Double, options: CameraOptions) {
+    private func setSmoothPosition(_ position: Double, options: CameraOptions, inputTime: Double? = nil, inputEnded: Bool = false) {
         guard smoothZoomOpen, countdown == nil, position.isFinite else { return }
         preparedDollyStart = nil; preparedDollyTarget = nil
         smoothPosition = min(1, max(0, position))
         manualZoomTargetShown = true
-        camera.smoothZoom(to: CGFloat(SmoothZoomFilter.factor(smoothPosition, minimum: Double(options.minimum), maximum: Double(options.maximum))))
+        camera.smoothZoom(to: CGFloat(SmoothZoomFilter.factor(smoothPosition, minimum: Double(options.minimum), maximum: Double(options.maximum))), inputTime: inputTime, inputEnded: inputEnded)
     }
     private func syncSmoothPosition() {
         guard let options = camera.options else { return }
@@ -431,11 +431,11 @@ struct CameraView: View {
                         if smoothZoomOpen {
                             manualZoomTargetShown = false
                             preparedDollyStart = nil; preparedDollyTarget = nil
-                            camera.smoothZoom(to: target)
+                            camera.smoothZoom(to: target, inputTime: Date().timeIntervalSinceReferenceDate)
                         } else { camera.zoom(target) }
                         lastZoomAt = Date()
                     }
-                }.onEnded { _ in pinchBase = nil })
+                }.onEnded { _ in pinchBase = nil; if smoothZoomOpen { camera.endSmoothInput() } })
             if let countdown {
                 Text("\(countdown)").font(.system(size: 64, weight: .light, design: .rounded))
                     .foregroundStyle(.white).shadow(color: .black.opacity(0.5), radius: 8)

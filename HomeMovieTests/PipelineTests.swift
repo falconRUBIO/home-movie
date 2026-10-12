@@ -5,6 +5,55 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    func testManualDragVelocityControlsZoomAtEveryBaseSpeed() throws {
+        for speed in SmoothZoomSpeed.allCases {
+            var values: [Double] = [], rates: [Float] = []
+            for handSpeed in [0.05, 3.0] {
+                var input = SmoothZoomInput(), filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 0.5, maximum: 128))
+                input.observe(factor: 1, at: 0)
+                for frame in 1...120 {
+                    let time = Double(frame) / 60, target = exp2(handSpeed * time)
+                    input.observe(factor: target, at: time); filter.setTarget(target)
+                    _ = filter.advance(seconds: 1.0 / 60, rate: input.rate(baseline: speed.rate))
+                }
+                values.append(filter.value); rates.append(input.rate(baseline: speed.rate))
+            }
+            XCTAssertLessThan(values[0], 1.1, "A slow hand must stay slow even with the Fast setting")
+            XCTAssertGreaterThan(values[1], values[0] * 8, "A fast hand must not remain stuck at the base Slow/Normal limit")
+            XCTAssertGreaterThan(rates[1], rates[0])
+        }
+    }
+    func testDragVelocityFilteringReleaseAndInvalidSamples() {
+        var input = SmoothZoomInput()
+        input.observe(factor: 1, at: 0); input.observe(factor: 2, at: 1.0 / 60)
+        let fast = input.rate(baseline: 0.35)
+        XCTAssertGreaterThan(fast, 0.35); XCTAssertLessThan(fast, 8)
+        input.observe(factor: 2, at: 2.0 / 60)
+        let slowing = input.rate(baseline: 0.35)
+        XCTAssertLessThan(slowing, fast); XCTAssertGreaterThan(slowing, 0.35)
+        input.observe(factor: .nan, at: 1); input.observe(factor: 4, at: .nan); input.observe(factor: 4, at: 0)
+        XCTAssertEqual(input.rate(baseline: 0.35), slowing)
+        input.end(); XCTAssertEqual(input.rate(baseline: 0.35), slowing, "Release keeps the final catch-up smooth")
+        input.observe(factor: 4, at: 100)
+        XCTAssertEqual(input.rate(baseline: 0.35), 0.35, "The next gesture starts a fresh speed measurement")
+        input.observe(factor: 8, at: 101)
+        XCTAssertEqual(input.rate(baseline: 0.35), 0.35, "A stale timestamp gap must not produce a speed burst")
+    }
+    func testSameManualHandSpeedRemainsConsistentAcrossGestureCadences() throws {
+        var results: [Double] = []
+        for cadence in [30, 60, 120] {
+            var input = SmoothZoomInput(), filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 0.5, maximum: 16))
+            input.observe(factor: 1, at: 0)
+            for frame in 1...(cadence * 2) {
+                let time = Double(frame) / Double(cadence), target = exp2(time)
+                input.observe(factor: target, at: time); filter.setTarget(target)
+                _ = filter.advance(seconds: 1 / Double(cadence), rate: input.rate(baseline: 0.75))
+            }
+            results.append(filter.value)
+        }
+        XCTAssertLessThan(abs(log2(results[0] / results[1])), 0.04)
+        XCTAssertLessThan(abs(log2(results[1] / results[2])), 0.04)
+    }
     func testLongDurationRetargetToNearbyLensDoesNotAmplifyMomentum() throws {
         var filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 0.5, maximum: 32))
         filter.setTarget(8, duration: 3); _ = filter.advance(seconds: 1.5, rate: 0.75)

@@ -134,3 +134,27 @@ struct SmoothZoomClock: Sendable {
         return min(1.0 / 30, time - previous)
     }
 }
+
+struct SmoothZoomInput: Sendable {
+    private var lastFactor: Double?
+    private var lastTime: Double?
+    private var motionRate = 0.0
+    func rate(baseline: Float) -> Float { max(baseline, Float(motionRate)) }
+    mutating func reset() { lastFactor = nil; lastTime = nil; motionRate = 0 }
+    mutating func end() { lastFactor = nil; lastTime = nil }
+    mutating func observe(factor: Double, at time: Double) {
+        guard factor.isFinite, factor > 0, time.isFinite else { return }
+        guard let previousFactor = lastFactor, let previousTime = lastTime else {
+            lastFactor = factor; lastTime = time; motionRate = 0; return
+        }
+        let elapsed = time - previousTime
+        guard elapsed > 0 else { return }
+        lastFactor = factor; lastTime = time
+        guard elapsed <= 0.25 else { motionRate = 0; return }
+        // Measure hand speed in perceived zoom units. Headroom avoids lagging a fast drag;
+        // a short low-pass filter removes gesture-timestamp noise without a speed snap.
+        let measured = min(8, abs(log2(factor / previousFactor)) / max(1.0 / 240, elapsed) * 1.4)
+        let response = 1 - exp(-elapsed / 0.06)
+        motionRate += (measured - motionRate) * response
+    }
+}
