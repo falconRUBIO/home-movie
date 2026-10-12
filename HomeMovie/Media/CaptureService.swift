@@ -76,6 +76,7 @@ struct CameraOptions: Sendable {
 }
 enum CaptureEvent {
     case ready(CameraOptions)
+    case cameraChanged(CameraOptions)
     case started(UUID)
     case finished(CaptureTicket, Error?)
     case interrupted(String)
@@ -662,13 +663,13 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                     throw error
                 }
                 self.setCoordinator(camera); self.configureVideoConnection()
-                self.onEvent?(.ready(try self.options()))
+                self.onEvent?(.cameraChanged(try self.options()))
             } catch {
                 if self.videoInput?.device.uniqueID == old.device.uniqueID,
                    self.session.inputs.contains(where: { $0 === old }), let options = try? self.options() {
                     self.setCoordinator(old.device); self.configureVideoConnection()
                     self.onEvent?(.notice("Camera could not be switched. The current camera is still available."))
-                    self.onEvent?(.ready(options))
+                    self.onEvent?(.cameraChanged(options))
                 } else {
                     self.configured = false
                     self.onEvent?(.failed("Camera could not be switched. Tap Resume Camera to reconnect."))

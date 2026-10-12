@@ -4,6 +4,34 @@ import AVFoundation
 @testable import HomeMovie
 
 final class CameraTouchTests: XCTestCase {
+    func testRecordingFlipCannotResumeUntilFootageIsSavedAndCameraIsAvailable() {
+        let movieID = UUID(), elapsed = CMTime(seconds: 12, preferredTimescale: 600)
+        var handoff = RecordingFlipHandoff(movieID: movieID, elapsed: elapsed)
+        XCTAssertFalse(handoff.mayResume(active: true, interrupted: false))
+        handoff.footageSaved()
+        XCTAssertTrue(handoff.mayResume(active: true, interrupted: false))
+        XCTAssertFalse(handoff.mayResume(active: false, interrupted: false))
+        XCTAssertFalse(handoff.mayResume(active: true, interrupted: true))
+        XCTAssertEqual(handoff.movieID, movieID); XCTAssertEqual(handoff.elapsed, elapsed)
+    }
+    @MainActor func testLateCameraSwitchCallbacksCannotResetAnActiveOrInterruptedRecording() async {
+        let app = AppModel(), model = CameraModel(app: app)
+        let options = CameraOptions(lenses: [], zoom: 1, minimum: 1, maximum: 8, multiplier: 1,
+            isFront: true, angle: 90, profile: .standard, canMeter: false, canLock: false,
+            focusLocked: false, exposureBias: 0, minimumExposureBias: -2, maximumExposureBias: 2,
+            canFlip: true, hasTorch: false, torchOn: false, canStayOnLens: false,
+            smoothMoving: false, recordingFormat: "Standard")
+        model.state = .recording
+        await model.receive(.cameraChanged(options))
+        XCTAssertEqual(model.state, .recording)
+        model.state = .preparing
+        await model.receive(.cameraChanged(options))
+        XCTAssertEqual(model.state, .ready)
+        await model.receive(.interrupted("Test interruption"))
+        await model.receive(.cameraChanged(options))
+        XCTAssertEqual(model.state, .interrupted)
+        XCTAssertNil(model.recordingFlip)
+    }
     func testRecordingLeavesDeviceAndFormatNegotiationToApple() {
         for supported in [[AVCaptureVideoStabilizationMode.previewOptimized], [.standard], []] {
             XCTAssertEqual(CameraStabilization.preferredMode(preview: false, supports: { supported.contains($0) }), .auto)

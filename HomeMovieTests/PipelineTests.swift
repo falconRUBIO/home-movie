@@ -374,7 +374,7 @@ final class PipelineTests: XCTestCase {
         guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal preview is unavailable") }
         let preview = PreviewUIView(frame: CGRect(x: 0, y: 0, width: 393, height: 698))
         let session = AVCaptureSession(); preview.previewLayer.session = session
-        let frames = LiveFrames(); frames.push(try livePreviewFrame())
+        let frames = LiveFrames(); frames.push(try makePreviewFrame())
         preview.configureLiveLook(frames: frames, cube: try ColorCube.filmica.get(), active: true)
         let metal = try XCTUnwrap(preview.subviews.compactMap { $0 as? MTKView }.first)
         let delegate = metal.delegate
@@ -1347,6 +1347,20 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(info.size.width, 1080, accuracy: 1)
         XCTAssertEqual(info.size.height, 1920, accuracy: 1)
         XCTAssertFalse(info.hasAudio)
+    }
+    func testRotatedClipsRetainOriginalGeometryInsideAnEstablishedMovieCanvas() async throws {
+        let store = try await makeStore(), movie = try await store.create(name: "Rotate between takes", format: .portrait)
+        _ = try await record(movie, into: store, rotated: true)
+        _ = try await record(movie, into: store, rotated: false)
+        let movies = await store.snapshot()
+        let snapshot = try XCTUnwrap(movies.first)
+        XCTAssertEqual(snapshot.recordingFormat, .portrait)
+        XCTAssertEqual(snapshot.activeScenes.count, 2)
+        XCTAssertLessThan(snapshot.activeScenes[0].width, snapshot.activeScenes[0].height)
+        XCTAssertGreaterThan(snapshot.activeScenes[1].width, snapshot.activeScenes[1].height)
+        let bundle = try await MediaAssembler().build(movie: snapshot, root: store.root)
+        XCTAssertEqual(bundle.videoComposition.renderSize, MovieFormat.portrait.canvas)
+        XCTAssertEqual(bundle.duration.seconds, snapshot.duration.seconds, accuracy: 0.001)
     }
     func testDamagedCatalogIsNeverReplacedWithAnEmptyLibrary() async throws {
         let store = try await makeStore()

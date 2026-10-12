@@ -13,6 +13,15 @@ enum DollyStartDelay {
     static func effective(_ seconds: Int, dollyOpen: Bool) -> Int { dollyOpen ? validated(seconds) : 0 }
 }
 
+struct RecordingFlipHandoff {
+    enum Phase: Equatable { case saving, switching }
+    let movieID: UUID
+    let elapsed: CMTime
+    private(set) var phase = Phase.saving
+    mutating func footageSaved() { phase = .switching }
+    func mayResume(active: Bool, interrupted: Bool) -> Bool { phase == .switching && active && !interrupted }
+}
+
 @MainActor final class RecordingCountdown: ObservableObject {
     @Published private(set) var remaining: Int?
     private var task: Task<Void, Never>?
@@ -54,6 +63,7 @@ enum DollyStartDelay {
     @Published var savedScene = false
     @Published private(set) var hasRecoverableTake = false
     @Published var takeFormat: MovieFormat?
+    @Published private(set) var recordingFlip: RecordingFlipHandoff?
     private var timer: Timer?
     private var beganAt: TimeInterval?
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -64,9 +74,13 @@ enum DollyStartDelay {
     private var operation: Task<Void, Never>?
     private var startCancelled = false
     private var activeSceneID: UUID?
+    private var activeMovieID: UUID?
+    private var elapsedBeforeSegment = CMTime.zero
+    private var continuingRecording = false
     private var preparationID = UUID()
     @AppStorage("frontCamera") var rememberedFront = false
-    var busy: Bool { [.starting, .recording, .finalizing].contains(state) }
+    var busy: Bool { recordingFlip != nil || [.starting, .recording, .finalizing].contains(state) }
+    var recordingSessionActive: Bool { state == .recording || recordingFlip != nil || state == .starting && continuingRecording }
 
     init(app: AppModel) {
         self.app = app
@@ -81,13 +95,15 @@ enum DollyStartDelay {
         guard granted else { state = .denied; return }
         service.prepare(front: rememberedFront, profile: profile)
     }
-    func record(movieID: UUID) {
+    func record(movieID: UUID, continuingAt elapsed: CMTime? = nil) {
         guard state == .ready, active, let app else { return }
         guard let observed = options?.angle, let automatic = MovieFormat.captureFormat(angle: observed),
               let movie = app.movie(movieID), options?.profile == movie.captureProfile else { return }
         let format = movie.recordingFormat ?? automatic
-        let angle = movie.recordingFormat == nil ? format.recordingAngle(observed: observed) : OrientationPolicy.shared.captureAngle(format: format, observed: observed)
-        takeFormat = format
+        let angle = automatic.recordingAngle(observed: observed)
+        takeFormat = automatic
+        activeMovieID = movieID; elapsedBeforeSegment = elapsed ?? .zero
+        continuingRecording = elapsed != nil
         state = .starting; savedScene = false; hasRecoverableTake = false; message = nil; startCancelled = false
         operation = Task {
             var pendingTicket: CaptureTicket?
@@ -113,11 +129,16 @@ enum DollyStartDelay {
         }
     }
     func stop() {
+        if recordingFlip != nil {
+            recordingFlip = nil; startCancelled = true; timer?.invalidate()
+            service.stop(); return
+        }
         guard state == .recording || state == .starting else { return }
         startCancelled = true
         state = .finalizing; timer?.invalidate(); beginBackgroundTime(); service.stop()
     }
     func suspend() {
+        recordingFlip = nil
         active = false; startCancelled = true; preparationID = UUID()
         if busy { beginBackgroundTime(); state = .finalizing; timer?.invalidate() }
         service.suspend()
@@ -145,22 +166,39 @@ enum DollyStartDelay {
     }
     func exposure(_ bias: Float) { if active, [.ready, .recording].contains(state) { service.exposure(bias) } }
     func toggleTorch() { if active, [.ready, .recording].contains(state) { service.toggleTorch() } }
-    func flip() { guard active, state == .ready else { return }; state = .preparing; service.flip() }
+    func flip() {
+        guard active, recordingFlip == nil, options?.canFlip == true else { return }
+        if state == .recording, let movieID = activeMovieID {
+            let current = beganAt.map { CMTimeAdd(elapsedBeforeSegment, CMTime(seconds: max(0, ProcessInfo.processInfo.systemUptime - $0), preferredTimescale: 600)) } ?? elapsed
+            elapsed = current
+            recordingFlip = RecordingFlipHandoff(movieID: movieID, elapsed: current)
+            state = .finalizing; timer?.invalidate(); beginBackgroundTime(); service.stop()
+        } else if state == .ready { state = .preparing; service.flip() }
+    }
     func receive(_ event: CaptureEvent) async {
         switch event {
         case .ready(let options):
             self.options = options; rememberedFront = options.isFront
-            if (state == .preparing || state == .ready), active, interruption == nil { state = .ready }
+            if (state == .preparing || state == .ready), recordingFlip == nil, active, interruption == nil { state = .ready }
+        case .cameraChanged(let options):
+            self.options = options; rememberedFront = options.isFront
+            guard active, interruption == nil else { recordingFlip = nil; state = .interrupted; return }
+            guard state == .preparing else { return }
+            state = .ready
+            if let handoff = recordingFlip, handoff.mayResume(active: active, interrupted: interruption != nil) {
+                recordingFlip = nil
+                record(movieID: handoff.movieID, continuingAt: handoff.elapsed)
+            }
         case .started(let sceneID):
             guard activeSceneID == sceneID else { return }
             if state == .recording { return }
             guard active, !startCancelled, state == .starting, interruption == nil else { service.stop(); return }
-            state = .recording; beganAt = ProcessInfo.processInfo.systemUptime; elapsed = .zero
+            state = .recording; beganAt = ProcessInfo.processInfo.systemUptime; elapsed = elapsedBeforeSegment
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self, let date = self.beganAt else { return }
-                    self.elapsed = CMTime(seconds: max(0, ProcessInfo.processInfo.systemUptime - date), preferredTimescale: 600)
+                    self.elapsed = CMTimeAdd(self.elapsedBeforeSegment, CMTime(seconds: max(0, ProcessInfo.processInfo.systemUptime - date), preferredTimescale: 600))
                 }
             }
         case .finished(let ticket, let error):
@@ -172,11 +210,18 @@ enum DollyStartDelay {
                 guard let app else { throw HomeMovieError.message("The project is unavailable.") }
                 try await app.store.commit(ticket); await app.refresh()
                 app.copySceneToPhotos(ticket.sceneID)
+                if recordingFlip != nil, active, interruption == nil {
+                    recordingFlip?.footageSaved()
+                    state = .preparing; service.flip()
+                    return
+                }
+                recordingFlip = nil
                 savedScene = true
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 state = active && interruption == nil ? .ready : .interrupted
                 message = interruption
             } catch {
+                recordingFlip = nil
                 state = .failed
                 let hasFile = app.map {
                     FileManager.default.fileExists(atPath: $0.store.root.appendingPathComponent(ticket.staging).path) ||
@@ -187,9 +232,11 @@ enum DollyStartDelay {
                 message = error.localizedDescription
             }
         case .interrupted(let text):
+            recordingFlip = nil
             interruption = text; message = text; startCancelled = true
             if busy { state = .finalizing; beginBackgroundTime() } else { state = .interrupted }
         case .failed(let text):
+            recordingFlip = nil
             message = text
             if busy { interruption = text; stop() } else { state = .failed }
         case .notice(let text):

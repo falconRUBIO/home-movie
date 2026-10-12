@@ -87,7 +87,7 @@ struct CameraView: View {
     private var startDelay: Int { DollyStartDelay.effective(handsFreeStart ? dollyStartDelaySeconds : 0, dollyOpen: smoothZoomOpen) }
     private var dollyDelayedStart: Bool { startDelay > 0 }
     private var movie: Movie? { app.movie(movieID) }
-    private var establishedFormat: MovieFormat? { movie?.recordingFormat ?? (camera.busy ? camera.takeFormat : nil) }
+    private var activeTakeFormat: MovieFormat? { camera.busy ? camera.takeFormat : nil }
     private var cameraSurface: some View {
         GeometryReader { geometry in
             let landscape = geometry.size.width > geometry.size.height
@@ -117,7 +117,7 @@ struct CameraView: View {
 
             } else { ContentUnavailableView("Movie unavailable", systemImage: "film") }
         }
-        .background(MovieOrientation(format: establishedFormat).frame(width: 0, height: 0))
+        .background(MovieOrientation(format: activeTakeFormat).frame(width: 0, height: 0))
         .background(.black).foregroundStyle(.white)
         .toolbar(.hidden, for: .navigationBar).navigationBarBackButtonHidden()
         .preferredColorScheme(.dark)
@@ -310,7 +310,7 @@ struct CameraView: View {
                 Text("AE/AF LOCK").font(.caption2.weight(.semibold)).foregroundStyle(.black)
                     .padding(.horizontal, 8).padding(.vertical, 4).background(.yellow, in: RoundedRectangle(cornerRadius: 3))
             }
-            if camera.state == .recording {
+            if camera.recordingSessionActive {
                 Text("● \(durationLabel(camera.elapsed))")
                     .font(.caption.monospacedDigit()).padding(.horizontal, 10).padding(.vertical, 5)
                     .background(.red, in: RoundedRectangle(cornerRadius: 5))
@@ -683,7 +683,7 @@ struct CameraView: View {
                 onLiveLookStatus: { status in
                     Task { @MainActor in liveLookStatus = status }
                 },
-                fixedFormat: establishedFormat,
+                fixedFormat: activeTakeFormat,
                 onFocus: { camera.focus(at: $0, locked: $1) }, onExposure: { camera.exposure($0) })
                 .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
                 .allowsHitTesting(countdown == nil).accessibilityHidden(countdown != nil)
@@ -728,7 +728,7 @@ struct CameraView: View {
     private var recordControl: some View {
         Button {
             if countdown != nil { cancelCountdown() }
-            else if camera.state == .recording { camera.stop() }
+            else if camera.recordingSessionActive { camera.stop() }
             else { startRecording() }
         } label: {
             ZStack {
@@ -737,14 +737,14 @@ struct CameraView: View {
                 if countdown != nil {
                     Image(systemName: "xmark").font(.system(size: 24, weight: .medium)).foregroundStyle(.white)
                 } else {
-                    RoundedRectangle(cornerRadius: camera.state == .recording ? 5 : 32)
-                        .fill(.red).frame(width: camera.state == .recording ? 29 : 62, height: camera.state == .recording ? 29 : 62)
+                    RoundedRectangle(cornerRadius: camera.recordingSessionActive ? 5 : 32)
+                        .fill(.red).frame(width: camera.recordingSessionActive ? 29 : 62, height: camera.recordingSessionActive ? 29 : 62)
                 }
             }
         }.buttonStyle(.plain)
-            .disabled(undoingTake || camera.state != .recording && camera.state != .ready)
-            .opacity(camera.state != .recording && camera.state != .ready ? 0.4 : 1)
-            .accessibilityLabel(countdown != nil ? "Cancel countdown" : camera.state == .recording ? "Stop recording" : "Record next scene")
+            .disabled(undoingTake || !camera.recordingSessionActive && camera.state != .ready)
+            .opacity(!camera.recordingSessionActive && camera.state != .ready ? 0.4 : 1)
+            .accessibilityLabel(countdown != nil ? "Cancel countdown" : camera.recordingSessionActive ? "Stop recording" : "Record next scene")
     }
     @ViewBuilder private func reviewControls(movie: Movie, landscape: Bool) -> some View {
         let recent = Button { openWatch(sceneID: movie.activeScenes.last?.id) } label: {
@@ -752,9 +752,13 @@ struct CameraView: View {
                 .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
         }.accessibilityLabel("Review recent scene").disabled(camera.busy || movie.activeScenes.isEmpty)
         let flip = Button { camera.flip() } label: {
-            MovieControlIcon(systemName: "arrow.triangle.2.circlepath.camera")
-                .background(.white.opacity(0.15), in: Circle())
-        }.accessibilityLabel("Switch camera").disabled(camera.state != .ready || camera.options?.canFlip != true)
+            ZStack {
+                MovieControlIcon(systemName: "arrow.triangle.2.circlepath.camera")
+                    .opacity(camera.recordingFlip == nil ? 1 : 0)
+                if camera.recordingFlip != nil { ProgressView().tint(.white) }
+            }.background(.white.opacity(0.15), in: Circle())
+        }.accessibilityLabel(camera.recordingFlip == nil ? "Switch camera" : "Switching camera")
+            .disabled(camera.recordingFlip != nil || camera.state != .ready && camera.state != .recording || camera.options?.canFlip != true)
         let watch = VStack(spacing: 0) {
             Button { openWatch() } label: {
                 Label("Watch Movie", systemImage: "play.fill")
