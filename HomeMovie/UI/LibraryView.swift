@@ -16,6 +16,10 @@ struct LibraryView: View {
     @State private var playingMovie: Movie?
     @AppStorage("openLastMovie") private var openLastMovie = false
     @AppStorage("lastMovieID") private var lastMovieID = ""
+    private var movieColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(minimum: 0), spacing: 16, alignment: .top),
+              count: app.activeMovies.count >= 4 ? 2 : 1)
+    }
     var body: some View {
         NavigationStack(path: $path) {
             Group {
@@ -38,7 +42,7 @@ struct LibraryView: View {
                     }
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 24) {
+                        LazyVGrid(columns: movieColumns, alignment: .leading, spacing: 24) {
                             ForEach(app.activeMovies) { movie in
                                 VStack(alignment: .leading, spacing: 9) {
                                     ZStack(alignment: .bottomLeading) {
