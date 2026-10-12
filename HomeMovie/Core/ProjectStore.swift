@@ -78,12 +78,10 @@ actor ProjectStore {
         guard !loaded else { return [] }
         try ensureDirectories()
         // Install exact supplied samples into durable storage so backups remain self-contained.
-        for reference in LUTReference.bundled {
-            let destination = root.appendingPathComponent(reference.path)
-            if !fm.fileExists(atPath: destination.path) {
-                let cube = try ColorCube.bundledCube(for: reference)
-                try encoder.encode(cube).write(to: destination, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            }
+        let filmica = try ColorCube.filmica.get()
+        let filmicaURL = root.appendingPathComponent(LUTReference.filmica.path)
+        if !fm.fileExists(atPath: filmicaURL.path) {
+            try encoder.encode(filmica).write(to: filmicaURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         }
         if !cleanedTransfers {
             // These are app-owned temporary copies, never the source recordings.
