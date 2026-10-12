@@ -121,9 +121,11 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     private var showingFront = false
     private var lookView: MTKView?
     private var lookRenderer: LiveLookRenderer?
+    private var samplePreview = false
     var onLiveLookStatus: ((LiveLookStatus) -> Void)?
-    func configureLiveLook(frames: LiveFrames?, cube: ColorCube?, active: Bool) {
-        if lookView == nil, active, cube != nil, let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) {
+    func configureLiveLook(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false) {
+        samplePreview = passthrough
+        if lookView == nil, active, cube != nil || passthrough, let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) {
             let view = MTKView(frame: bounds, device: device)
             view.isUserInteractionEnabled = false; view.framebufferOnly = false
             view.colorPixelFormat = .bgra8Unorm; (view.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: CGColorSpace.itur_709)
@@ -137,10 +139,10 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         // The Metal display loop reads only the latest frame. Keep its layer visible at full
         // opacity so drawable acquisition never depends on a first-render alpha handshake.
         lookRenderer?.frames?.setListener(nil)
-        lookRenderer?.configure(frames: frames, cube: cube, active: active)
+        lookRenderer?.configure(frames: frames, cube: cube, active: active, passthrough: passthrough)
         lookRenderer?.front = showingFront
         resizeLookView()
-        let enabled = active && cube != nil && frames != nil
+        let enabled = active && (cube != nil || passthrough) && frames != nil
         lookView?.alpha = 1; lookView?.isHidden = !enabled; lookView?.isPaused = !enabled
         if enabled, lookRenderer == nil { onLiveLookStatus?(.unavailable) }
     }
@@ -172,10 +174,9 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         applyPreviewRotation(fallback: fallback)
     }
     private func applyPreviewRotation(fallback: CGFloat = 90) {
-        guard let connection = previewLayer.connection else { return }
         let angle = fixedFormat.map { OrientationPolicy.shared.captureAngle(format: $0, observed: fallback) }
             ?? rotationCoordinator?.videoRotationAngleForHorizonLevelPreview ?? fallback
-        if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        if let connection = previewLayer.connection, connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
         lastPreviewAngle = angle
         lookRenderer?.angle = angle
         repositionIndicator()
@@ -218,7 +219,13 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     }
     private func requestFocus(at point: CGPoint, locked: Bool) {
         guard permitsPreviewInteraction(at: point) else { return }
-        let devicePoint = previewLayer.captureDevicePointConverted(fromLayerPoint: point)
+        let devicePoint: CGPoint
+        if samplePreview {
+            let size = CGSize(width: 1920, height: 1080)
+            let inverse = LiveLookGeometry.transform(source: size, target: bounds.size, angle: lastPreviewAngle, front: showingFront).inverted()
+            let source = CGPoint(x: point.x, y: bounds.height - point.y).applying(inverse)
+            devicePoint = CGPoint(x: min(1, max(0, source.x / size.width)), y: min(1, max(0, 1 - source.y / size.height)))
+        } else { devicePoint = previewLayer.captureDevicePointConverted(fromLayerPoint: point) }
         guard onFocus?(devicePoint, locked) == true else { return }
         focusDevicePoint = devicePoint
         self.locked = locked
@@ -248,7 +255,13 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     }
     func repositionIndicator() {
         guard let focusDevicePoint else { return }
-        let point = previewLayer.layerPointConverted(fromCaptureDevicePoint: focusDevicePoint)
+        let point: CGPoint
+        if samplePreview {
+            let size = CGSize(width: 1920, height: 1080)
+            let source = CGPoint(x: focusDevicePoint.x * size.width, y: (1 - focusDevicePoint.y) * size.height)
+            let rendered = source.applying(LiveLookGeometry.transform(source: size, target: bounds.size, angle: lastPreviewAngle, front: showingFront))
+            point = CGPoint(x: rendered.x, y: bounds.height - rendered.y)
+        } else { point = previewLayer.layerPointConverted(fromCaptureDevicePoint: focusDevicePoint) }
         guard point.x.isFinite, point.y.isFinite else { return }
         focusIndicator.center = CGPoint(x: min(max(36, point.x), max(36, bounds.width - 36)),
                                         y: min(max(36, point.y), max(36, bounds.height - 36)))
@@ -306,13 +319,14 @@ struct CameraPreview: UIViewRepresentable {
     var liveFrames: LiveFrames? = nil
     var liveCube: ColorCube? = nil
     var liveActive = false
+    var samplePreview = false
     var onLiveLookStatus: ((LiveLookStatus) -> Void)? = nil
     var fixedFormat: MovieFormat? = nil
     let onFocus: (CGPoint, Bool) -> Bool
     let onExposure: (Float) -> Void
     func makeUIView(context: Context) -> PreviewUIView {
         let view = PreviewUIView(); view.backgroundColor = .black
-        view.previewLayer.session = session
+        if !samplePreview { view.previewLayer.session = session }
         view.previewLayer.videoGravity = .resizeAspectFill
         view.onFocus = onFocus; view.onExposure = onExposure
         view.protectedRegions = protectedRegions
@@ -322,16 +336,17 @@ struct CameraPreview: UIViewRepresentable {
         view.detachPreview()
     }
     func updateUIView(_ view: PreviewUIView, context: Context) {
-        if view.previewLayer.session !== session { view.previewLayer.session = session }
+        let nativeSession = samplePreview ? nil : session
+        if view.previewLayer.session !== nativeSession { view.previewLayer.session = nativeSession }
         view.onFocus = onFocus; view.onExposure = onExposure
         view.protectedRegions = protectedRegions
         view.fixedFormat = fixedFormat
         view.onLiveLookStatus = onLiveLookStatus
         view.setFront(front)
-        view.configureLiveLook(frames: liveFrames, cube: liveCube, active: liveActive)
+        view.configureLiveLook(frames: liveFrames, cube: liveCube, active: liveActive || samplePreview, passthrough: samplePreview)
         if let options { view.updateMetering(options) }
-        guard let connection = view.previewLayer.connection else { return }
         view.updatePreviewRotation(fallback: angle)
+        guard let connection = view.previewLayer.connection else { return }
         let device = session.inputs.compactMap { $0 as? AVCaptureDeviceInput }
             .first { $0.device.hasMediaType(.video) }?.device
         CameraStabilization.configure(connection, format: device?.activeFormat, preview: true)
@@ -372,4 +387,5 @@ struct BackupFilesExporter: UIViewControllerRepresentable {
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finished(false) }
     }
 }
+
 

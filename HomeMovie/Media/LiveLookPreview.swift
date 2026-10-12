@@ -47,23 +47,24 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
     private(set) var cube: ColorCube?
     private(set) var presentationID = UUID()
     private(set) var status = LiveLookStatus.inactive
+    private var passthrough = false
     var onStatusChanged: ((LiveLookStatus) -> Void)?
     private func report(_ status: LiveLookStatus) {
         guard self.status != status else { return }
         self.status = status; onStatusChanged?(status)
     }
-    func configure(frames: LiveFrames?, cube: ColorCube?, active: Bool) {
-        let nextFrames = active && cube != nil ? frames : nil
+    func configure(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false) {
+        let nextFrames = active && (cube != nil || passthrough) ? frames : nil
         let nextCube = active ? cube : nil
-        if self.frames !== nextFrames || self.cube?.rgba != nextCube?.rgba ||
+        if self.frames !== nextFrames || self.passthrough != passthrough || self.cube?.rgba != nextCube?.rgba ||
             self.cube?.dimension != nextCube?.dimension || self.cube?.minimum != nextCube?.minimum ||
             self.cube?.maximum != nextCube?.maximum {
             presentationID = UUID()
             report(nextFrames == nil ? .inactive : .preparing)
         }
-        self.frames = nextFrames; self.cube = nextCube
+        self.frames = nextFrames; self.cube = nextCube; self.passthrough = passthrough
     }
-    func canPresent(_ id: UUID) -> Bool { id == presentationID && frames != nil && cube != nil }
+    func canPresent(_ id: UUID) -> Bool { id == presentationID && frames != nil && (cube != nil || passthrough) }
     var angle: CGFloat = 90
     var front = false
     private var rendering = false
@@ -75,9 +76,11 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
     func encode(_ source: CVPixelBuffer, to texture: MTLTexture, command: MTLCommandBuffer) throws {
-        guard let cube else { throw HomeMovieError.message("No live look is selected.") }
         let target = CGSize(width: texture.width, height: texture.height)
-        var image = try cube.apply(to: CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()]))
+        var image: CIImage
+        if passthrough { image = CIImage(cvPixelBuffer: source) }
+        else if let cube { image = try cube.apply(to: CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()])) }
+        else { throw HomeMovieError.message("No live look is selected.") }
         image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: angle, front: front))
             .cropped(to: CGRect(origin: .zero, size: target))
         let destination = CIRenderDestination(mtlTexture: texture, commandBuffer: command)
@@ -85,7 +88,7 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         _ = try context.startTask(toRender: image, to: destination)
     }
     func draw(in view: MTKView) {
-        guard !rendering, cube != nil, let source = frames?.latest(), let drawable = view.currentDrawable,
+        guard !rendering, cube != nil || passthrough, let source = frames?.latest(), let drawable = view.currentDrawable,
               let command = queue.makeCommandBuffer() else { return }
         do {
             try encode(source, to: drawable.texture, command: command)
@@ -105,3 +108,4 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         }
     }
 }
+

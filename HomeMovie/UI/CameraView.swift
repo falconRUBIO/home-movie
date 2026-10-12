@@ -680,6 +680,7 @@ struct CameraView: View {
                 options: camera.options, protectedRegions: previewControlRegions, liveFrames: camera.service.liveFrames,
                 liveCube: liveOriginal ? nil : liveCube,
                 liveActive: movie?.captureProfile == .appleLog && camera.state.showsLiveLook,
+                samplePreview: camera.options?.samplePreview == true,
                 onLiveLookStatus: { status in
                     Task { @MainActor in liveLookStatus = status }
                 },
@@ -853,3 +854,4 @@ struct CameraView: View {
         Task { await camera.pauseForPlayback(); initialReviewID = sceneID; watching = true }
     }
 }
+

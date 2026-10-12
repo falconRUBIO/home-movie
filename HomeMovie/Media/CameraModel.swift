@@ -168,6 +168,7 @@ struct RecordingFlipHandoff {
     func toggleTorch() { if active, [.ready, .recording].contains(state) { service.toggleTorch() } }
     func flip() {
         guard active, recordingFlip == nil, options?.canFlip == true else { return }
+        if state == .recording, options?.canFlipWhileRecording == true { service.flip(); return }
         if state == .recording, let movieID = activeMovieID {
             let current = beganAt.map { CMTimeAdd(elapsedBeforeSegment, CMTime(seconds: max(0, ProcessInfo.processInfo.systemUptime - $0), preferredTimescale: 600)) } ?? elapsed
             elapsed = current
@@ -254,3 +255,4 @@ struct RecordingFlipHandoff {
         UIApplication.shared.endBackgroundTask(backgroundTask); backgroundTask = .invalid
     }
 }
+

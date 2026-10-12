@@ -73,6 +73,8 @@ struct CameraOptions: Sendable {
     var canStayOnLens: Bool
     var smoothMoving: Bool
     var recordingFormat: String
+    var samplePreview = false
+    var canFlipWhileRecording = false
 }
 enum CaptureEvent {
     case ready(CameraOptions)
@@ -86,7 +88,9 @@ enum CaptureEvent {
 
 // All capture mutation is confined to one serial queue. The preview observes the session only.
 final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
-    let session = AVCaptureSession()
+    private let singleSession = AVCaptureSession()
+    private var seamless: SeamlessCapture?
+    var session: AVCaptureSession { seamless?.session ?? singleSession }
     private let queue = DispatchQueue(label: "HomeMovie.Capture", qos: .userInitiated)
     private let output = AVCaptureMovieFileOutput()
     let liveFrames = LiveFrames()
@@ -130,8 +134,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                    let options = try? self.options() { self.onEvent?(.ready(options)) }
             }
         })
-        observers.append(center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] _ in
-            guard let self else { return }
+        observers.append(center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: nil, queue: nil) { [weak self] notification in
+            guard let self, notification.object as? AVCaptureSession === self.session else { return }
             self.queue.async {
                 self.stopSmoothZoomOnQueue()
                 self.requestStop()
@@ -139,10 +143,10 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 self.onEvent?(.interrupted("Camera interrupted. Your saved scenes are safe. Tap Resume Camera when ready."))
             }
         })
-        observers.append(center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] notification in
+        observers.append(center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: nil, queue: nil) { [weak self] notification in
+            guard let self, notification.object as? AVCaptureSession === self.session else { return }
             let text = (notification.userInfo?[AVCaptureSessionErrorKey] as? Error)?.localizedDescription ?? "Camera unavailable. Try resuming the camera."
-            self?.queue.async {
-                guard let self else { return }
+            self.queue.async {
                 self.stopSmoothZoomOnQueue(); self.requestStop(); self.turnOffTorch(); self.configured = false
                 self.onEvent?(.failed(text))
             }
@@ -203,6 +207,28 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private func configure(front: Bool) throws {
         stopSmoothZoomOnQueue()
         liveFrames.clear()
+        if session.isRunning { session.stopRunning() }
+        seamless = nil
+        singleSession.beginConfiguration()
+        singleSession.inputs.forEach { singleSession.removeInput($0) }
+        singleSession.outputs.forEach { singleSession.removeOutput($0) }
+        singleSession.commitConfiguration()
+        if front, configuredProfile == .standard, let dual = SeamlessCapture(queue: queue, frames: liveFrames) {
+            seamless = dual; videoInput = dual.activeInput; isFront = true
+            dual.onStarted = { [weak self] id in self?.onEvent?(.started(id)) }
+            dual.onFinished = { [weak self] ticket, error in
+                guard let self else { return }
+                self.ticket = nil; self.recordingURL = nil; self.stopRequested = false
+                self.onEvent?(.finished(ticket, error))
+                if let options = try? self.options() { self.onEvent?(.ready(options)) }
+            }
+            dual.onReady = { [weak self] in
+                guard let self, let options = try? self.options() else { return }
+                self.onEvent?(.ready(options))
+            }
+            setCoordinator(dual.activeInput.device); configured = true
+            return
+        }
         session.beginConfiguration(); defer { session.commitConfiguration() }
         guard session.canSetSessionPreset(.hd1920x1080) else { throw HomeMovieError.message("1080p recording is not available on this device.") }
         session.inputs.forEach { session.removeInput($0) }; session.outputs.forEach { session.removeOutput($0) }
@@ -358,6 +384,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         let multiplier = camera.displayVideoZoomFactorMultiplier
         let switches = camera.virtualDeviceSwitchOverVideoZoomFactors.map { CGFloat(truncating: $0) }
         var secondary = camera.activeFormat.secondaryNativeResolutionZoomFactors
+        if seamless != nil, !isFront { secondary += [2, 4, 8].map { CGFloat($0) / multiplier } }
         // Constituent formats report zoom relative to their own physical camera.
         // Convert those factors into the virtual device's zoom coordinates.
         for (index, constituent) in camera.constituentDevices.enumerated() {
@@ -380,7 +407,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             canFlip: device(front: !isFront) != nil, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on,
             canStayOnLens: camera.isVirtualDevice && camera.activePrimaryConstituent != nil && camera.primaryConstituentDeviceSwitchingBehavior != .unsupported,
             smoothMoving: smoothTimer != nil,
-            recordingFormat: configuredProfile == .appleLog ? LogRecordingCodec.label(LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)) : "Standard · H.264")
+            recordingFormat: configuredProfile == .appleLog ? LogRecordingCodec.label(LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)) : "Standard · H.264",
+            samplePreview: seamless != nil, canFlipWhileRecording: seamless?.readyToFlip == true)
     }
     func focus(at point: CGPoint, locked: Bool = false) {
         guard point.x.isFinite, point.y.isFinite, (0...1).contains(point.x), (0...1).contains(point.y) else { return }
@@ -643,7 +671,27 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     }
     func flip() {
         queue.async {
+            if let dual = self.seamless {
+                guard self.ticket == nil || !self.stopRequested, dual.flip() else {
+                    self.onEvent?(.notice("Both cameras are still preparing. Your recording continues."))
+                    if let options = try? self.options() { self.onEvent?(.cameraChanged(options)) }
+                    return
+                }
+                self.stopSmoothZoomOnQueue(); self.turnOffTorch()
+                self.videoInput = dual.activeInput; self.isFront = dual.front; self.focusLocked = false
+                self.setCoordinator(dual.activeInput.device)
+                if let options = try? self.options() { self.onEvent?(.cameraChanged(options)) }
+                return
+            }
             guard self.ticket == nil, let old = self.videoInput else { return }
+            if !self.isFront, self.configuredProfile == .standard, AVCaptureMultiCamSession.isMultiCamSupported {
+                do {
+                    try self.configure(front: true)
+                    self.session.startRunning()
+                    self.onEvent?(.cameraChanged(try self.options()))
+                } catch { self.configured = false; self.onEvent?(.failed(error.localizedDescription)) }
+                return
+            }
             self.stopSmoothZoomOnQueue()
             self.liveFrames.clear()
             let oldFront = self.isFront
@@ -682,6 +730,13 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             guard self.ticket == nil, self.session.isRunning, !self.session.isInterrupted else {
                 self.onEvent?(.finished(ticket, HomeMovieError.message("The camera is not ready."))); return
             }
+            if let dual = self.seamless {
+                do {
+                    try dual.record(ticket: ticket, url: url, angle: angle)
+                    self.ticket = ticket; self.recordingURL = url.standardizedFileURL; self.stopRequested = false
+                } catch { self.onEvent?(.finished(ticket, error)) }
+                return
+            }
             guard let connection = self.output.connection(with: .video) else {
                 self.onEvent?(.finished(ticket, HomeMovieError.message("The camera connection is unavailable."))); return
             }
@@ -699,6 +754,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     }
     private func requestStop() {
         if ticket != nil { stopRequested = true }
+        if let seamless { seamless.stop(); return }
         if output.isRecording { output.stopRecording() }
     }
     func stop() { queue.async { self.requestStop() } }
@@ -730,3 +786,4 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         }
     }
 }
+
