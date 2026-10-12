@@ -233,7 +233,8 @@ struct SceneReviewView: View {
                     }.disabled(saving)
                 }
             }
-            .confirmationDialog("Remove this scene?", isPresented: $confirmRemove, titleVisibility: .visible) {
+            .alert("Remove this scene?", isPresented: $confirmRemove) {
+                Button("Cancel", role: .cancel) { confirmRemove = false }
                 Button("Move to Recently Deleted", role: .destructive) {
                     saving = true
                     Task {

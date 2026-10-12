@@ -115,7 +115,8 @@ struct LibraryView: View {
                     renameMovie = nil
                 }
             }
-            .confirmationDialog("Delete this movie?", isPresented: Binding(get: { deleteMovie != nil }, set: { if !$0 { deleteMovie = nil } }), titleVisibility: .visible) {
+            .alert("Delete this movie?", isPresented: Binding(get: { deleteMovie != nil }, set: { if !$0 { deleteMovie = nil } })) {
+                Button("Cancel", role: .cancel) { deleteMovie = nil }
                 Button("Move to Recently Deleted", role: .destructive) {
                     if let movie = deleteMovie { Task { await app.run { try await app.store.setMovieDeleted(movie.id, deleted: true) } } }
                     deleteMovie = nil
