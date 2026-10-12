@@ -417,3 +417,5 @@ The original Metal-based Core Image kernels synthesize jittered elliptical densi
 Preview and export use the same custom compositor and full 1080p movie canvas. Effects apply only inside picture bounds before black canvas padding. Metal kernels compile at build time. Disabled effects leave normal playback/export composition selection unchanged.
 
 Native compilation/rendering regressions and physical-device acceptance are pending at implementation time. UI and texture quality have not yet been visually accepted on an iPhone.
+
+Film Effects follow-up: playing-preview adjustments swap only the rendering recipe without deliberate pause/resume; paused previews refresh at the same timestamp. Fullscreen comparison has its own update task, and Detail uses an uncluttered player layer rather than enlarging playback controls. Split effect sections bound SwiftUI type checking. Grain instructions declare time-varying rendering. Added a Standard-source integration regression comparing exact preview/export frames, producing an MP4 and confirming ordinary Watch Movie/original scene paths are unchanged. Final native validation remains pending.

@@ -1,5 +1,5 @@
 {
-  "status": "SOURCE CHECKS PENDING",
+  "status": "SOURCE CHECKS PASS; NATIVE VALIDATION PENDING",
   "checks": [
     "Permission purpose strings present",
     "No broad Photos read permission requested",
@@ -52,7 +52,7 @@
     "Physical iPhone Film Effects visual calibration, encoded grain preservation, sustained GPU/thermal and accessibility acceptance."
   ],
   "date": "2026-10-12",
-  "native_tests_supplied": 95,
+  "native_tests_supplied": 96,
   "native_tests_run": 87,
   "native_build_status": "Film Effects implementation added; previous Dolly source passed 87 tests. Current effects source awaits native compilation and renderer regression tests.",
   "previous_cloud_build": {
@@ -116,5 +116,5 @@
   "physical_device_live_look_status": "User reports flat live preview despite LOG Cinema, while graded playback works. Visible Metal overlay/display-loop fix and render-status badge pass native GPU/presentation tests; corrected-source iPhone confirmation and TestFlight upload pending.",
   "physical_device_dolly_status": "User reports jerky Dolly. Repeated 20 Hz native ramps replaced with one 60 Hz trajectory; adaptive drag speed, response, retargeting, clock and range tests pass. Physical lens handoffs and saved-frame smoothness across actual device speeds/lighting/thermal states remain unverified.",
   "physical_device_dolly_ui_status": "NOT RUN: final rounded glass, narrow layouts, accessibility text, touch targets, VoiceOver endpoint guidance, route reset and hands-free flow need physical iPhone acceptance. Final presentation-only follow-up was source/grammar checked, not separately natively recompiled.",
-  "film_effects_status": "Implementation pending native validation: independent procedural particle grain, warm local halation and multiscale colored bloom; Export-only editing/preview."
+  "film_effects_status": "Implementation and Swift grammar checks pass. Final responsive preview/fullscreen controls, renderer regressions and actual Standard-video export integration await native validation."
 }

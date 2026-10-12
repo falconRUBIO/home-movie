@@ -5,6 +5,50 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    func testFilmEffectsStandardPreviewAndExportShareRenderingWhileWatchStaysClean() async throws {
+        let store = try await makeStore()
+        let original = try await store.create(name: "Effects integration", format: .landscape)
+        _ = try await record(original, into: store)
+        let sourceMovies = await store.snapshot()
+        let originalSources = sourceMovies.first?.scenes.map(\.source) ?? []
+        var settings = FilmEffectsSettings.off
+        settings.grainEnabled = true; settings.grainAmount = 0.7
+        settings.halationEnabled = true; settings.bloomEnabled = true
+        try await store.setFilmEffects(movieID: original.id, settings: settings)
+        let movies = await store.snapshot()
+        let movie = try XCTUnwrap(movies.first)
+        let assembler = MediaAssembler()
+        let watch = try await assembler.build(movie: movie, root: store.root)
+        XCTAssertNil(watch.videoComposition.customVideoCompositorClass)
+        let preview = try await assembler.build(movie: movie, root: store.root, filmEffects: settings, forFilmEffectsPreview: true)
+        let export = try await assembler.build(movie: movie, root: store.root, filmEffects: movie.exportEffects)
+        let a = try XCTUnwrap(preview.videoComposition.instructions.first as? ColorInstruction)
+        let b = try XCTUnwrap(export.videoComposition.instructions.first as? ColorInstruction)
+        XCTAssertEqual(a.filmEffects, b.filmEffects)
+        XCTAssertEqual(a.transform, b.transform)
+        XCTAssertNil(a.cube); XCTAssertNil(b.cube)
+        let time = CMTime(value: 10, timescale: 30)
+        let previewGenerator = AVAssetImageGenerator(asset: preview.asset)
+        previewGenerator.videoComposition = preview.videoComposition
+        previewGenerator.requestedTimeToleranceBefore = .zero; previewGenerator.requestedTimeToleranceAfter = .zero
+        let exportGenerator = AVAssetImageGenerator(asset: export.asset)
+        exportGenerator.videoComposition = export.videoComposition
+        exportGenerator.requestedTimeToleranceBefore = .zero; exportGenerator.requestedTimeToleranceAfter = .zero
+        let previewImage = try await previewGenerator.image(at: time).image
+        let exportImage = try await exportGenerator.image(at: time).image
+        XCTAssertEqual(previewImage.width, 1920); XCTAssertEqual(previewImage.height, 1080)
+        let previewBytes = try XCTUnwrap(previewImage.dataProvider?.data)
+        let exportBytes = try XCTUnwrap(exportImage.dataProvider?.data)
+        XCTAssertEqual(previewBytes as Data, exportBytes as Data)
+        let destination = store.root.appendingPathComponent("effects-export.mp4")
+        let session = try XCTUnwrap(AVAssetExportSession(asset: export.asset, presetName: AVAssetExportPresetHighestQuality))
+        session.videoComposition = export.videoComposition; session.audioMix = export.audioMix
+        try await session.export(to: destination, as: .mp4)
+        let info = try await MediaInspector.inspect(destination)
+        XCTAssertEqual(info.duration.seconds, movie.duration.seconds, accuracy: 0.05)
+        XCTAssertEqual(info.size.width, 1920); XCTAssertEqual(info.size.height, 1080)
+        XCTAssertEqual(movie.scenes.map(\.source), originalSources)
+    }
     func testDollyClosePreservesMotionAndSettlesPromptlyInBothDirections() throws {
         for speed in SmoothZoomSpeed.allCases {
             for timed in [false, true] {
@@ -1268,3 +1312,4 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(fitted.midY, canvas.height / 2, accuracy: 0.01)
     }
 }
+

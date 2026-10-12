@@ -6,9 +6,9 @@ import AVKit
     @Published var loading = false
     @Published var error: String?
     private var template: AVMutableVideoComposition?
+    private var statusObservation: NSKeyValueObservation?
     private var requestID = UUID()
     private var updateID = UUID()
-    private var resumeAfterUpdate = false
     func prepare(movie: Movie, app: AppModel, settings: FilmEffectsSettings) async {
         let id = UUID(); requestID = id; loading = true; error = nil
         defer { if requestID == id { loading = false } }
@@ -22,6 +22,11 @@ import AVKit
             let item = AVPlayerItem(asset: bundle.asset)
             item.videoComposition = bundle.videoComposition; item.audioMix = bundle.audioMix
             player = AVPlayer(playerItem: item)
+            statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+                guard item.status == .failed else { return }
+                let message = item.error?.localizedDescription ?? "This preview could not render. Your original recordings are safe."
+                Task { @MainActor in self?.error = message; self?.player?.pause() }
+            }
         } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
     }
     func update(settings: FilmEffectsSettings) async {
@@ -29,19 +34,19 @@ import AVKit
               let composition = template.mutableCopy() as? AVMutableVideoComposition else { return }
         let id = UUID(); updateID = id
         let position = player.currentTime()
-        resumeAfterUpdate = resumeAfterUpdate || player.timeControlStatus != .paused
-        player.pause()
+        let playing = player.timeControlStatus != .paused
         composition.instructions = template.instructions.map { instruction in
             guard let source = instruction as? ColorInstruction else { return instruction }
             return ColorInstruction(range: source.timeRange, trackID: source.trackID, transform: source.transform,
                                     cube: source.cube, filmEffects: settings)
         }
         item.videoComposition = composition
-        if position.isNumeric { _ = await player.seek(to: position, toleranceBefore: .zero, toleranceAfter: .zero) }
+        // Running playback picks up the new recipe without pausing or replacing its item.
+        // A paused frame needs an exact seek to redraw; timeline-seeded grain stays fixed.
+        if !playing, position.isNumeric { _ = await player.seek(to: position, toleranceBefore: .zero, toleranceAfter: .zero) }
         guard updateID == id, !Task.isCancelled else { return }
-        if resumeAfterUpdate { player.play() }; resumeAfterUpdate = false
     }
-    func stop() { requestID = UUID(); updateID = UUID(); resumeAfterUpdate = false; player?.pause() }
+    func stop() { requestID = UUID(); updateID = UUID(); loading = false; player?.pause() }
 }
 
 struct FilmEffectsView: View {
@@ -86,15 +91,14 @@ struct FilmEffectsView: View {
         }
         .task(id: shownSettings) {
             do {
-                if !comparing { try await Task.sleep(for: .milliseconds(120)) }
                 try Task.checkCancellation()
                 await preview.update(settings: shownSettings)
             } catch { }
         }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { comparing = false; preview.player?.pause() } }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { comparing = false; preview.stop() } }
         .onDisappear { if !fullscreen { preview.stop() } }
         .fullScreenCover(isPresented: $fullscreen) {
-            FilmEffectsFullscreen(player: preview.player, aspect: movie.format.aspect, comparing: $comparing)
+            FilmEffectsFullscreen(preview: preview, aspect: movie.format.aspect, comparing: $comparing, settings: settings)
         }
         .alert("Settings could not be saved", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
             Button("OK") { saveError = nil }
@@ -128,45 +132,54 @@ struct FilmEffectsView: View {
     }
     private var controls: some View {
         Form {
-            Section {
-                Toggle("Grain", isOn: $settings.grainEnabled)
-                if settings.grainEnabled {
-                    amountSlider("Amount", value: $settings.grainAmount)
-                    DisclosureGroup("Adjustments", isExpanded: $showGrainDetails) {
-                        Picker("Texture", selection: $settings.grainTexture) {
-                            ForEach(FilmGrainTexture.allCases) { texture in Text(texture.label).tag(texture) }
-                        }
-                        amountSlider("Size", value: $settings.grainSize, range: 0.5...2, percent: false)
-                        Button("Reset Grain") { settings.grainAmount = 0.25; settings.grainSize = 1; settings.grainTexture = .fine35 }
-                    }
-                }
-            } footer: { Text("Adds fine, moving film texture. Pause to inspect the detail.") }
-            Section {
-                Toggle("Halation", isOn: $settings.halationEnabled)
-                if settings.halationEnabled {
-                    amountSlider("Amount", value: $settings.halationAmount)
-                    DisclosureGroup("Adjustments", isExpanded: $showHalationDetails) {
-                        amountSlider("Spread", value: $settings.halationSpread)
-                        amountSlider("Highlight Sensitivity", value: $settings.halationSensitivity)
-                        Button("Reset Halation") { settings.halationAmount = 0.2; settings.halationSpread = 0.35; settings.halationSensitivity = 0.25 }
-                    }
-                }
-            } footer: { Text("Adds a warm halo around bright edges. Higher sensitivity includes more highlights.") }
-            Section {
-                Toggle("Bloom", isOn: $settings.bloomEnabled)
-                if settings.bloomEnabled {
-                    amountSlider("Amount", value: $settings.bloomAmount)
-                    DisclosureGroup("Adjustments", isExpanded: $showBloomDetails) {
-                        amountSlider("Spread", value: $settings.bloomSpread)
-                        amountSlider("Highlight Sensitivity", value: $settings.bloomSensitivity)
-                        Button("Reset Bloom") { settings.bloomAmount = 0.15; settings.bloomSpread = 0.35; settings.bloomSensitivity = 0.25 }
-                    }
-                }
-            } footer: { Text("Softens the glow around bright lights while keeping their color.") }
+            grainControls
+            halationControls
+            bloomControls
             Section {
                 Button("Reset All") { settings = .off; comparing = false }
             } footer: { Text("These effects appear in this preview and your exported copy. Original recordings and your selected color look are preserved.") }
         }.disabled(saving)
+    }
+    private var grainControls: some View {
+        Section {
+            Toggle("Grain", isOn: $settings.grainEnabled)
+            if settings.grainEnabled {
+                amountSlider("Amount", value: $settings.grainAmount)
+                DisclosureGroup("Adjustments", isExpanded: $showGrainDetails) {
+                    Picker("Texture", selection: $settings.grainTexture) {
+                        ForEach(FilmGrainTexture.allCases) { texture in Text(texture.label).tag(texture) }
+                    }
+                    amountSlider("Size", value: $settings.grainSize, range: 0.5...2, percent: false)
+                    Button("Reset Grain") { settings.grainAmount = 0.25; settings.grainSize = 1; settings.grainTexture = .fine35 }
+                }
+            }
+        } footer: { Text("Adds fine, moving film texture. Pause to inspect the detail.") }
+    }
+    private var halationControls: some View {
+        Section {
+            Toggle("Halation", isOn: $settings.halationEnabled)
+            if settings.halationEnabled {
+                amountSlider("Amount", value: $settings.halationAmount)
+                DisclosureGroup("Adjustments", isExpanded: $showHalationDetails) {
+                    amountSlider("Spread", value: $settings.halationSpread)
+                    amountSlider("Highlight Sensitivity", value: $settings.halationSensitivity)
+                    Button("Reset Halation") { settings.halationAmount = 0.2; settings.halationSpread = 0.35; settings.halationSensitivity = 0.25 }
+                }
+            }
+        } footer: { Text("Adds a warm halo around bright edges. Higher sensitivity includes more highlights.") }
+    }
+    private var bloomControls: some View {
+        Section {
+            Toggle("Bloom", isOn: $settings.bloomEnabled)
+            if settings.bloomEnabled {
+                amountSlider("Amount", value: $settings.bloomAmount)
+                DisclosureGroup("Adjustments", isExpanded: $showBloomDetails) {
+                    amountSlider("Spread", value: $settings.bloomSpread)
+                    amountSlider("Highlight Sensitivity", value: $settings.bloomSensitivity)
+                    Button("Reset Bloom") { settings.bloomAmount = 0.15; settings.bloomSpread = 0.35; settings.bloomSensitivity = 0.25 }
+                }
+            }
+        } footer: { Text("Softens the glow around bright lights while keeping their color.") }
     }
     private func amountSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double> = 0...1, percent: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -196,7 +209,7 @@ struct FilmEffectsCompareButton: View {
     var body: some View {
         Text(comparing ? "Without Effects" : "Hold to Compare")
             .font(.subheadline.weight(.medium)).frame(minWidth: 150, minHeight: 44)
-            .background(.regularMaterial, in: Capsule())
+            .homeGlass()
             .gesture(DragGesture(minimumDistance: 0).onChanged { _ in comparing = true }.onEnded { _ in comparing = false })
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel("Compare without Film Effects")
@@ -208,9 +221,11 @@ struct FilmEffectsCompareButton: View {
 
 private struct FilmEffectsFullscreen: View {
     @Environment(\.dismiss) private var dismiss
-    let player: AVPlayer?
+    @ObservedObject var preview: FilmEffectsPreviewModel
+    private var player: AVPlayer? { preview.player }
     let aspect: CGFloat
     @Binding var comparing: Bool
+    let settings: FilmEffectsSettings
     @State private var detail = false
     @State private var offset = CGSize.zero
     @State private var dragStart = CGSize.zero
@@ -222,8 +237,12 @@ private struct FilmEffectsFullscreen: View {
                     ZStack {
                         Color.black
                         if let player {
-                            VideoPlayer(player: player).frame(width: width, height: width / aspect)
-                                .scaleEffect(detail ? 2 : 1).offset(detail ? offset : .zero)
+                            if detail {
+                                FilmEffectsDetailPlayer(player: player).frame(width: width, height: width / aspect)
+                                    .scaleEffect(2).offset(offset).allowsHitTesting(false)
+                            } else {
+                                VideoPlayer(player: player).frame(width: width, height: width / aspect)
+                            }
                         }
                     }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
                         .gesture(DragGesture().onChanged { value in
@@ -241,5 +260,18 @@ private struct FilmEffectsFullscreen: View {
                 .navigationTitle("Export Preview").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { comparing = false; dismiss() } } }
         }.preferredColorScheme(.dark)
+            .task(id: comparing) { await preview.update(settings: comparing ? .off : settings) }
+    }
+}
+
+private struct FilmEffectsDetailPlayer: UIViewRepresentable {
+    let player: AVPlayer
+    final class PlayerView: UIView {
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+    }
+    func makeUIView(context: Context) -> PlayerView { PlayerView() }
+    func updateUIView(_ view: PlayerView, context: Context) {
+        guard let layer = view.layer as? AVPlayerLayer else { return }
+        layer.player = player; layer.videoGravity = .resizeAspect
     }
 }

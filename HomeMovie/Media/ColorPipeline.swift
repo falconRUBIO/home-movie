@@ -120,7 +120,7 @@ struct ColorCube: Codable, Sendable {
 final class ColorInstruction: NSObject, AVVideoCompositionInstructionProtocol, @unchecked Sendable {
     let timeRange: CMTimeRange
     let enablePostProcessing = true
-    let containsTweening = false
+    var containsTweening: Bool { filmEffects.grainEnabled && filmEffects.grainAmount > 0 }
     let requiredSourceTrackIDs: [NSValue]?
     let passthroughTrackID = kCMPersistentTrackID_Invalid
     let trackID: CMPersistentTrackID
