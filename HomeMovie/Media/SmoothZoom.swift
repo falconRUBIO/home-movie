@@ -4,12 +4,38 @@ enum SmoothZoomSpeed: String, CaseIterable, Identifiable, Sendable {
     case slow, normal, fast
     var id: Self { self }
     var label: String { rawValue.capitalized }
+    var responseDescription: String {
+        switch self {
+        case .slow: "Gentler response to your drag."
+        case .normal: "Balanced response to your drag."
+        case .fast: "Quicker response to your drag."
+        }
+    }
     // Perceived motion speed in log2 zoom units per second, independent of direction.
     var rate: Float { switch self { case .slow: 0.35; case .normal: 0.75; case .fast: 1.5 } }
 }
 enum DollyZoomDuration {
     static let choices = [1, 2, 3, 5, 8, 10]
     static func validated(_ seconds: Int) -> Int { choices.contains(seconds) ? seconds : 3 }
+}
+// Presentation follows measured zoom, never a separate timer or pretend animation.
+struct DollyZoomRoute: Equatable {
+    let start: Double
+    let destination: Double
+    let seconds: Int
+    init?(start: Double, destination: Double, seconds: Int) {
+        guard start.isFinite, destination.isFinite, start > 0, destination > 0,
+              abs(log2(destination / start)) > 0.00001 else { return nil }
+        self.start = start; self.destination = destination
+        self.seconds = DollyZoomDuration.validated(seconds)
+    }
+    func progress(at zoom: Double) -> Double {
+        guard zoom.isFinite, zoom > 0 else { return 0 }
+        return min(1, max(0, log2(zoom / start) / log2(destination / start)))
+    }
+    func hasArrived(at zoom: Double) -> Bool {
+        zoom.isFinite && zoom > 0 && abs(log2(zoom / destination)) < 0.005
+    }
 }
 struct SmoothZoomFilter: Sendable {
     private(set) var value: Double

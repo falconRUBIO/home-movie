@@ -5,6 +5,38 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    func testDollyGuidanceFollowsActualZoomInBothDirections() throws {
+        for (start, end) in [(1.0, 8.0), (8.0, 1.0)] {
+            let route = try XCTUnwrap(DollyZoomRoute(start: start, destination: end, seconds: 3))
+            var filter = try XCTUnwrap(SmoothZoomFilter(current: start, minimum: 1, maximum: 8))
+            filter.setTarget(end, duration: 3)
+            XCTAssertEqual(route.progress(at: start), 0)
+            XCTAssertFalse(route.hasArrived(at: start))
+            for _ in 0..<60 { _ = filter.advance(seconds: 1.0 / 60, rate: 0.75) }
+            XCTAssertGreaterThan(route.progress(at: filter.value), 0)
+            XCTAssertLessThan(route.progress(at: filter.value), 1)
+            XCTAssertFalse(route.hasArrived(at: filter.value))
+            for _ in 0..<120 { _ = filter.advance(seconds: 1.0 / 60, rate: 0.75) }
+            XCTAssertEqual(route.progress(at: filter.value), 1, accuracy: 0.00001)
+            XCTAssertTrue(route.hasArrived(at: filter.value))
+        }
+    }
+    func testDollyGuidanceCannotReportAnUnreachedOrInvalidDestination() throws {
+        XCTAssertNil(DollyZoomRoute(start: 1, destination: 1, seconds: 3))
+        XCTAssertNil(DollyZoomRoute(start: 0, destination: 8, seconds: 3))
+        XCTAssertNil(DollyZoomRoute(start: 1, destination: .infinity, seconds: 3))
+        let route = try XCTUnwrap(DollyZoomRoute(start: 1, destination: 8, seconds: 99))
+        XCTAssertEqual(route.seconds, 3)
+        XCTAssertEqual(route.progress(at: 0.5), 0)
+        XCTAssertEqual(route.progress(at: 16), 1)
+        XCTAssertEqual(route.progress(at: .nan), 0)
+        XCTAssertFalse(route.hasArrived(at: 4)) // Temporary hardware limit, not the requested 8x.
+        XCTAssertFalse(route.hasArrived(at: .nan))
+        let retargeted = try XCTUnwrap(DollyZoomRoute(start: 4, destination: 1, seconds: 5))
+        XCTAssertEqual(retargeted.progress(at: 4), 0)
+        XCTAssertEqual(retargeted.progress(at: 2), 0.5)
+        XCTAssertFalse(retargeted.hasArrived(at: 2))
+    }
     func testDollyRetainsRequestedLensWhenTemporaryHardwareRangeWidens() throws {
         var filter = try XCTUnwrap(SmoothZoomFilter(current: 2, minimum: 1, maximum: 4))
         filter.setTarget(16, duration: 3)
