@@ -119,3 +119,8 @@ Status: NOT RUN. Simulator cannot exercise capture codec negotiation.
 ## Camera preview proportions follow-up
 
 Compare against IMG_5438.PNG on the same iPhone: tall 9:16 portrait preview; header, lens buttons and Record overlay the picture; thumbnail and Watch Movie occupy the small lower black strip; total runtime sits below Watch Movie. Landscape preview must retain 16:9 with a compact side review rail. Opening/closing Smooth Zoom must not change the preview frame. Check taps/pinch/metering around the overlays, hardware orientation, smaller screens and accessibility text. Verify elapsed take time appears during recording and total duration updates below Watch Movie after durable save. Status/errors must remain readable above the controls. Status: NOT RUN.
+
+
+## Library cover Play (NOT RUN)
+
+Tap the circular Play control for a multi-scene movie: open full-screen playback, start from the beginning, play every active scene/trim in sequence with sound and the selected look. Pause/scrub using native controls; change looks while paused and while playing; background during loading/playback; Done must stop audio and return to the same library. The rest of the cover opens recording and the three-dot export still works. Empty movies must not offer Play. Check both orientations, accessibility labels and a bright cover for button contrast. Existing camera Watch must still show the timeline.

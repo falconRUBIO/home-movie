@@ -12,6 +12,7 @@ struct LibraryView: View {
     @State private var renameText = ""
     @State private var deleteMovie: Movie?
     @State private var exportMovie: Movie?
+    @State private var playingMovie: Movie?
     @AppStorage("openLastMovie") private var openLastMovie = false
     @AppStorage("lastMovieID") private var lastMovieID = ""
     var body: some View {
@@ -39,14 +40,27 @@ struct LibraryView: View {
                         LazyVStack(spacing: 24) {
                             ForEach(app.activeMovies) { movie in
                                 VStack(alignment: .leading, spacing: 9) {
-                                    Button { lastMovieID = movie.id.uuidString; path.append(movie.id) } label: {
-                                        SceneThumbnail(scene: movie.activeScenes.first, root: app.store.root)
-                                            .frame(height: 210).clipShape(RoundedRectangle(cornerRadius: 22))
-                                            .overlay(alignment: .bottomTrailing) {
-                                                Text(durationLabel(movie.duration)).font(.caption.monospacedDigit())
-                                                    .padding(.horizontal, 9).padding(.vertical, 5).homeGlass(interactive: false).padding(12)
-                                            }
-                                    }.buttonStyle(.plain).accessibilityLabel("Record into \(movie.name), \(durationLabel(movie.duration))")
+                                    ZStack(alignment: .bottomLeading) {
+                                        Button { lastMovieID = movie.id.uuidString; path.append(movie.id) } label: {
+                                            SceneThumbnail(scene: movie.activeScenes.first, root: app.store.root)
+                                                .frame(height: 210).clipShape(RoundedRectangle(cornerRadius: 22))
+                                                .overlay(alignment: .bottomTrailing) {
+                                                    Text(durationLabel(movie.duration)).font(.caption.monospacedDigit())
+                                                        .padding(.horizontal, 9).padding(.vertical, 5).homeGlass(interactive: false).padding(12)
+                                                }
+                                        }.buttonStyle(.plain).accessibilityLabel("Record into \(movie.name), \(durationLabel(movie.duration))")
+                                            .accessibilityHint("Opens the camera to add scenes")
+                                        if !movie.activeScenes.isEmpty {
+                                            Button { playingMovie = movie } label: {
+                                                Image(systemName: "play.fill").font(.system(size: 18, weight: .semibold))
+                                                    .foregroundStyle(.white).frame(width: 48, height: 48)
+                                                    .background(.black.opacity(0.4), in: Circle()).homeGlass()
+                                                    .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+                                            }.buttonStyle(.plain).padding(14)
+                                                .accessibilityLabel("Play \(movie.name)")
+                                                .accessibilityHint("Plays the full movie from the beginning")
+                                        }
+                                    }
                                     HStack(alignment: .top) {
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(movie.name).font(.headline)
@@ -82,6 +96,9 @@ struct LibraryView: View {
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $backups) { BackupView() }
             .sheet(isPresented: $recovery) { RecordingRecoveryView() }
+            .fullScreenCover(item: $playingMovie) { movie in
+                WatchMovieView(movieID: movie.id, playbackOnly: true, autoplay: true).environmentObject(app)
+            }
             .sheet(item: $exportMovie) { movie in ExportView(movie: movie).environmentObject(app) }
             .alert("Rename Movie", isPresented: Binding(get: { renameMovie != nil }, set: { if !$0 { renameMovie = nil } })) {
                 TextField("Movie name", text: $renameText)

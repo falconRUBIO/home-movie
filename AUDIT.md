@@ -318,3 +318,12 @@ User screenshots IMG_5437.PNG / IMG_5438.PNG show our separate header and tall r
 - Portrait review strip contains thumbnail, Watch Movie with total runtime directly below, and camera switch. Landscape uses a compact review rail. Accessibility text receives more review-strip space.
 - Live take elapsed time remains visible while recording; idle total runtime no longer overlays the picture. Opening Smooth Zoom does not resize the stage. Capture settings, originals, recording rotation and export geometry are unchanged.
 - Portable source/project/grammar checks pass. New native compilation and device framing/touch/layout acceptance are pending; no rendered SwiftUI camera screenshot was produced on Linux.
+
+Camera-layout native verification: source 72921223ac7c6ffb241dceccf554b2fb3a146844 passed all 43 tests in run 38198100101, with zero failures, 85.409 seconds test execution and no Swift source warnings. Phone layout acceptance remains pending.
+
+## Library movie-cover Play — 2026-10-12
+
+- Added a 48-point circular glass Play control at the lower-left of covers with recorded scenes, opposite the duration badge. It is a sibling of the recording-navigation button, so tapping Play does not open the camera. Empty movies have no Play control.
+- Opens a full-screen presentation of the existing movie player, with timeline hidden and the complete assembled/trimmed scene sequence. Reuses the composition/LUT pipeline and native AVKit controls. Done returns to the library.
+- Starts at the beginning after composition loads. Initial autoplay is consumed once; subsequent look/revision changes preserve play/pause state and position. Backgrounding pauses playback; a completed initial request starts when active without resuming a previously paused movie.
+- Existing camera Watch/scene review remains available through its default presentation. Portable checks pass; native build and physical UI/playback acceptance are pending.

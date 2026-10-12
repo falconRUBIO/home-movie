@@ -6,8 +6,12 @@ struct WatchMovieView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
     let movieID: UUID
     var initialSceneID: UUID? = nil
+    var playbackOnly = false
+    var autoplay = false
+    @State private var initialPlaybackStarted = false
     @State private var presentedInitialReview = false
     @State private var player: AVPlayer?
     @State private var loading = false
@@ -41,8 +45,10 @@ struct WatchMovieView: View {
                             }
                         }.frame(width: geometry.size.width, height: geometry.size.height)
                     }.frame(minHeight: 0, maxHeight: .infinity).layoutPriority(-1)
-                    Divider()
-                    sceneTimeline(movie: movie)
+                    if !playbackOnly {
+                        Divider()
+                        sceneTimeline(movie: movie)
+                    }
                 }
                 .navigationTitle(movie.name).navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -108,7 +114,9 @@ struct WatchMovieView: View {
                             _ = await player?.seek(to: CMTimeMinimum(position, bundle.duration), toleranceBefore: .zero, toleranceAfter: .zero)
                         }
                         guard !Task.isCancelled else { return }
-                        if wasPlaying { player?.play() }
+                        if scenePhase == .active, wasPlaying || (autoplay && !initialPlaybackStarted) {
+                            player?.play(); initialPlaybackStarted = true
+                        }
                         if !presentedInitialReview {
                             presentedInitialReview = true
                             if let initialSceneID { review = movie.activeScenes.first { $0.id == initialSceneID } }
@@ -120,6 +128,13 @@ struct WatchMovieView: View {
             } else { ContentUnavailableView("Movie unavailable", systemImage: "film") }
         }
         .background(MovieOrientation(format: movie?.recordingFormat).frame(width: 0, height: 0))
+        .preferredColorScheme(playbackOnly ? .dark : nil)
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { player?.pause() }
+            else if autoplay, !initialPlaybackStarted, !loading, player != nil {
+                player?.play(); initialPlaybackStarted = true
+            }
+        }
         .onDisappear { player?.pause() }
         .alert("Look unavailable", isPresented: Binding(get: { app.error != nil }, set: { if !$0 { app.error = nil } })) {
             Button("OK") { app.error = nil }

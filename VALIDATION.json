@@ -49,12 +49,13 @@
     "Physical-device live Metal LUT preview, high-bit-depth simultaneous capture, established UIKit geometry and metering alignment",
     "Signed archive/upload and physical-device acceptance of current preview-handoff audit revision",
     "Physical-device capture-time Smooth Zoom filtering, native ease-out/held zoom, primary-lens lock/range, persistent overlay/touch/VoiceOver layout and uninterrupted audio/video",
-    "Physical-device native 9:16/16:9 preview proportions, overlaid capture controls, review strip/runtime, focus alignment and accessibility layout"
+    "Physical-device native 9:16/16:9 preview proportions, overlaid capture controls, review strip/runtime, focus alignment and accessibility layout",
+    "Physical-device library Play hit target, full-screen whole-movie autoplay, pause/background/dismiss and library return"
   ],
   "date": "2026-10-12",
   "native_tests_supplied": 43,
   "native_tests_run": 43,
-  "native_build_status": "Camera preview proportions and runtime placement pass portable checks; native compilation/tests pending. Previous source 785eae90 passed 43 tests.",
+  "native_build_status": "Native camera layout passed all 43 tests. Library cover Play / full-screen autoplay passes portable checks; native build pending.",
   "previous_cloud_build": {
     "commit": "6750e2065d3790e3d14da2bc999e33183a0110e9",
     "provider": "GitHub Actions",
@@ -82,14 +83,14 @@
   },
   "current_revision_testflight_uploaded": false,
   "latest_cloud_build": {
-    "commit": "785eae9015bf5e5af36b63a928722ccf653ee4df",
+    "commit": "72921223ac7c6ffb241dceccf554b2fb3a146844",
     "provider": "GitHub Actions",
-    "run_id": 38193140949,
+    "run_id": 38198100101,
     "status": "PASS",
     "tests_run": 43,
     "tests_passed": 43,
     "tests_failed": 0,
-    "test_execution_seconds": 209.997,
+    "test_execution_seconds": 85.409,
     "application_source_warnings": 0
   },
   "audit_initial_cloud_build": {
