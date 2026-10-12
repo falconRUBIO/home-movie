@@ -77,6 +77,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private var smoothTimer: DispatchSourceTimer?
     private var smoothGeneration = UUID()
     private var smoothOpen = false
+    private var smoothRampTarget: CGFloat?
+    private var smoothRampRate: Float?
     private var smoothSpeed = SmoothZoomSpeed.normal
     private var stayOnLens = false
     private var smoothLensLocked = false
@@ -446,7 +448,10 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             let next = filter.advance(seconds: 0.05, rate: smoothSpeed.rate); smoothFilter = filter
             try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
             let target = min(camera.maxAvailableVideoZoomFactor, max(camera.minAvailableVideoZoomFactor, CGFloat(next)))
-            camera.ramp(toVideoZoomFactor: target, withRate: smoothSpeed.rate)
+            if smoothRampTarget != target || smoothRampRate != smoothSpeed.rate {
+                camera.ramp(toVideoZoomFactor: target, withRate: smoothSpeed.rate)
+                smoothRampTarget = target; smoothRampRate = smoothSpeed.rate
+            }
             if abs(log2(filter.value / filter.target)) < 0.0002,
                abs(log2(Double(camera.videoZoomFactor) / filter.target)) < 0.001 {
                 smoothTimer?.cancel(); smoothTimer = nil; smoothGeneration = UUID()
@@ -460,7 +465,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     func endSmoothZoom() { queue.async { self.stopSmoothZoomOnQueue(); if let options = try? self.options() { self.onEvent?(.ready(options)) } } }
     private func stopSmoothZoomOnQueue() {
         smoothTimer?.cancel(); smoothTimer = nil; smoothGeneration = UUID()
-        smoothFilter = nil; smoothOpen = false
+        smoothFilter = nil; smoothOpen = false; smoothRampTarget = nil; smoothRampRate = nil
         guard let camera = videoInput?.device else { return }
         do {
             try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
