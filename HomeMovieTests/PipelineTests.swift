@@ -34,7 +34,7 @@ final class PipelineTests: XCTestCase {
         let store = try await makeStore(), movie = try await store.create(name: "Audio cuts", format: .landscape)
         _ = try await record(movie, into: store)
         let ticket = try await store.begin(movieID: movie.id), target = try await store.url(ticket.staging)
-        let video = store.root.appendingPathComponent("tone-video.mov"), wave = store.root.appendingPathComponent("tone.caf")
+        let video = store.root.appendingPathComponent("tone-video.mov"), wave = store.root.appendingPathComponent("tone.m4a")
         try await footage(video)
         let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 96000))
@@ -42,18 +42,25 @@ final class PipelineTests: XCTestCase {
         let samples = try XCTUnwrap(buffer.floatChannelData)[0]
         for frame in 0..<96000 { samples[frame] = Float(sin(Double(frame) * 2 * .pi * 440 / 48000) * 0.5) }
         do {
-            let audioFile = try AVAudioFile(forWriting: wave, settings: format.settings)
+            let audioFile = try AVAudioFile(forWriting: wave, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 48000, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 128000],
+                commonFormat: .pcmFormatFloat32, interleaved: false)
             try audioFile.write(from: buffer)
         }
         let composition = AVMutableComposition()
         let videoTracks = try await AVURLAsset(url: video).loadTracks(withMediaType: .video)
-        let audioTracks = try await AVURLAsset(url: wave).loadTracks(withMediaType: .audio)
+        let audioTracks: [AVAssetTrack]
+        do { audioTracks = try await AVURLAsset(url: wave).loadTracks(withMediaType: .audio) }
+        catch { XCTFail("AAC fixture load failed: \(error)"); throw error }
         let sourceVideo = try XCTUnwrap(videoTracks.first), sourceAudio = try XCTUnwrap(audioTracks.first)
         let videoTrack = try XCTUnwrap(composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
         let audioTrack = try XCTUnwrap(composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid))
         let full = CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 48000))
-        try videoTrack.insertTimeRange(full, of: sourceVideo, at: .zero)
-        try audioTrack.insertTimeRange(full, of: sourceAudio, at: .zero)
+        let videoRange = try await sourceVideo.load(.timeRange), audioRange = try await sourceAudio.load(.timeRange)
+        do {
+            try videoTrack.insertTimeRange(CMTimeRangeGetIntersection(full, otherRange: videoRange), of: sourceVideo, at: .zero)
+            try audioTrack.insertTimeRange(CMTimeRangeGetIntersection(full, otherRange: audioRange), of: sourceAudio, at: .zero)
+        } catch { XCTFail("Audio fixture track assembly failed: \(error)"); throw error }
         let fixture = try XCTUnwrap(AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality))
         do { try await fixture.export(to: target, as: .mov) }
         catch { XCTFail("Audio fixture mux failed: \(error)"); throw error }
