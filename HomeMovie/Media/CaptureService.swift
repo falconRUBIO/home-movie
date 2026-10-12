@@ -42,6 +42,8 @@ struct CameraOptions: Sendable {
     var canFlip: Bool
     var hasTorch: Bool
     var torchOn: Bool
+    var canStayOnLens: Bool
+    var smoothMoving: Bool
 }
 enum CaptureEvent {
     case ready(CameraOptions)
@@ -71,6 +73,15 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private var configured = false
     private var isFront = false
     private var focusLocked = false
+    private var smoothFilter: SmoothZoomFilter?
+    private var smoothTimer: DispatchSourceTimer?
+    private var smoothGeneration = UUID()
+    private var smoothOpen = false
+    private var smoothSpeed = SmoothZoomSpeed.normal
+    private var stayOnLens = false
+    private var smoothLensLocked = false
+    private var zoomObservation: NSKeyValueObservation?
+    private var zoomNotificationPending = false
     var onEvent: (@Sendable (CaptureEvent) -> Void)?
 
     override init() {
@@ -87,6 +98,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         observers.append(center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] _ in
             guard let self else { return }
             self.queue.async {
+                self.stopSmoothZoomOnQueue()
                 self.requestStop()
                 self.turnOffTorch()
                 self.onEvent?(.interrupted("Camera interrupted. Your saved scenes are safe. Tap Resume Camera when ready."))
@@ -96,7 +108,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             let text = (notification.userInfo?[AVCaptureSessionErrorKey] as? Error)?.localizedDescription ?? "Camera unavailable. Try resuming the camera."
             self?.queue.async {
                 guard let self else { return }
-                self.requestStop(); self.turnOffTorch(); self.configured = false
+                self.stopSmoothZoomOnQueue(); self.requestStop(); self.turnOffTorch(); self.configured = false
                 self.onEvent?(.failed(text))
             }
         })
@@ -105,13 +117,14 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                   value == AVAudioSession.InterruptionType.began.rawValue else { return }
             self?.queue.async {
                 guard let self else { return }
+                self.stopSmoothZoomOnQueue()
                 self.requestStop()
                 self.turnOffTorch()
                 self.onEvent?(.interrupted("Audio interrupted. Resume the camera before recording again."))
             }
         })
     }
-    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+    deinit { smoothTimer?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
 
     static func permissions() async -> Bool {
         let camera = AVCaptureDevice.authorizationStatus(for: .video) == .authorized ? true : await AVCaptureDevice.requestAccess(for: .video)
@@ -153,6 +166,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         } }.first
     }
     private func configure(front: Bool) throws {
+        stopSmoothZoomOnQueue()
         liveFrames.clear()
         session.beginConfiguration(); defer { session.commitConfiguration() }
         guard session.canSetSessionPreset(.hd1920x1080) else { throw HomeMovieError.message("1080p recording is not available on this device.") }
@@ -245,6 +259,16 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         }
     }
     private func setCoordinator(_ camera: AVCaptureDevice) {
+        zoomObservation = camera.observe(\.videoZoomFactor, options: [.new]) { [weak self] _, _ in
+            self?.queue.async { [weak self] in
+                guard let self, !self.zoomNotificationPending else { return }
+                self.zoomNotificationPending = true
+                self.queue.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                    guard let self else { return }; self.zoomNotificationPending = false
+                    if self.session.isRunning, let options = try? self.options() { self.onEvent?(.ready(options)) }
+                }
+            }
+        }
         coordinator = AVCaptureDevice.RotationCoordinator(device: camera, previewLayer: nil)
         rotationObservation = coordinator?.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.new]) { [weak self] _, _ in
             self?.queue.async {
@@ -275,7 +299,9 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 (!camera.isFocusPointOfInterestSupported || camera.isFocusModeSupported(.autoFocus)),
             focusLocked: focusLocked, exposureBias: camera.exposureTargetBias,
             minimumExposureBias: camera.minExposureTargetBias, maximumExposureBias: camera.maxExposureTargetBias,
-            canFlip: device(front: !isFront) != nil, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on)
+            canFlip: device(front: !isFront) != nil, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on,
+            canStayOnLens: camera.isVirtualDevice && camera.activePrimaryConstituent != nil && camera.primaryConstituentDeviceSwitchingBehavior != .unsupported,
+            smoothMoving: smoothTimer != nil)
     }
     func focus(at point: CGPoint, locked: Bool = false) {
         guard point.x.isFinite, point.y.isFinite, (0...1).contains(point.x), (0...1).contains(point.y) else { return }
@@ -345,6 +371,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         guard factor.isFinite, factor > 0 else { return }
         queue.async {
             guard self.session.isRunning, !self.session.isInterrupted, let camera = self.videoInput?.device else { return }
+            self.stopSmoothZoomOnQueue()
             do {
                 try camera.lockForConfiguration()
                 camera.videoZoomFactor = min(max(factor, camera.minAvailableVideoZoomFactor), camera.maxAvailableVideoZoomFactor)
@@ -352,6 +379,93 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 self.onEvent?(.ready(try self.options()))
             } catch { self.onEvent?(.notice("Zoom could not be adjusted. Try again.")) }
         }
+    }
+    func configureSmoothZoom(speed: SmoothZoomSpeed, stayOnLens: Bool) {
+        queue.async {
+            let changedLock = self.stayOnLens != stayOnLens
+            self.smoothSpeed = speed; self.stayOnLens = stayOnLens
+            if changedLock, self.smoothOpen {
+                let target = self.smoothFilter?.target
+                self.stopSmoothZoomOnQueue()
+                self.beginSmoothZoomOnQueue()
+                if let target { self.setSmoothTargetOnQueue(CGFloat(target)) }
+            }
+        }
+    }
+    func beginSmoothZoom() { queue.async { self.beginSmoothZoomOnQueue() } }
+    private func beginSmoothZoomOnQueue() {
+        guard !smoothOpen, session.isRunning, !session.isInterrupted, let camera = videoInput?.device else { return }
+        do {
+            try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
+            // .locked holds the current primary camera and narrows its hardware zoom range.
+            if stayOnLens, camera.isVirtualDevice, camera.activePrimaryConstituent != nil,
+               camera.primaryConstituentDeviceSwitchingBehavior != .unsupported {
+                camera.setPrimaryConstituentDeviceSwitchingBehavior(.locked, restrictedSwitchingBehaviorConditions: [])
+                smoothLensLocked = true
+            }
+            smoothFilter = SmoothZoomFilter(current: Double(camera.videoZoomFactor), minimum: Double(camera.minAvailableVideoZoomFactor), maximum: Double(camera.maxAvailableVideoZoomFactor))
+            smoothOpen = smoothFilter != nil
+            if !smoothOpen, smoothLensLocked {
+                camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
+                smoothLensLocked = false
+            }
+            if let options = try? options() { onEvent?(.ready(options)) }
+        } catch { onEvent?(.notice("Smooth Zoom could not be enabled. Your recording continues.")) }
+    }
+    func smoothZoom(to factor: CGFloat) {
+        guard factor.isFinite, factor > 0 else { return }
+        queue.async { self.setSmoothTargetOnQueue(factor) }
+    }
+    private func setSmoothTargetOnQueue(_ factor: CGFloat) {
+        if !smoothOpen { beginSmoothZoomOnQueue() }
+        guard smoothOpen, smoothFilter != nil, session.isRunning, !session.isInterrupted else { return }
+        smoothFilter?.setTarget(Double(factor))
+        guard smoothTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        let generation = UUID(); smoothGeneration = generation
+        timer.schedule(deadline: .now(), repeating: .milliseconds(50), leeway: .milliseconds(5))
+        timer.setEventHandler { [weak self] in
+            guard let self, self.smoothGeneration == generation else { return }
+            self.advanceSmoothZoom()
+        }
+        smoothTimer = timer; timer.resume()
+        if let options = try? options() { onEvent?(.ready(options)) }
+    }
+    private func advanceSmoothZoom() {
+        guard smoothOpen, session.isRunning, !session.isInterrupted, let camera = videoInput?.device,
+              var filter = smoothFilter else { stopSmoothZoomOnQueue(); return }
+        if filter.minimum != Double(camera.minAvailableVideoZoomFactor) || filter.maximum != Double(camera.maxAvailableVideoZoomFactor) {
+            guard var updated = SmoothZoomFilter(current: Double(camera.videoZoomFactor), minimum: Double(camera.minAvailableVideoZoomFactor), maximum: Double(camera.maxAvailableVideoZoomFactor)) else { stopSmoothZoomOnQueue(); return }
+            updated.setTarget(filter.target); filter = updated
+        }
+        do {
+            let next = filter.advance(seconds: 0.05, rate: smoothSpeed.rate); smoothFilter = filter
+            try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
+            let target = min(camera.maxAvailableVideoZoomFactor, max(camera.minAvailableVideoZoomFactor, CGFloat(next)))
+            camera.ramp(toVideoZoomFactor: target, withRate: smoothSpeed.rate)
+            if abs(log2(filter.value / filter.target)) < 0.0002,
+               abs(log2(Double(camera.videoZoomFactor) / filter.target)) < 0.001 {
+                smoothTimer?.cancel(); smoothTimer = nil; smoothGeneration = UUID()
+                if let options = try? options() { onEvent?(.ready(options)) }
+            }
+        } catch {
+            stopSmoothZoomOnQueue()
+            onEvent?(.notice("Smooth Zoom paused. Your recording continues."))
+        }
+    }
+    func endSmoothZoom() { queue.async { self.stopSmoothZoomOnQueue(); if let options = try? self.options() { self.onEvent?(.ready(options)) } } }
+    private func stopSmoothZoomOnQueue() {
+        smoothTimer?.cancel(); smoothTimer = nil; smoothGeneration = UUID()
+        smoothFilter = nil; smoothOpen = false
+        guard let camera = videoInput?.device else { return }
+        do {
+            try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
+            camera.cancelVideoZoomRamp()
+            if smoothLensLocked, camera.primaryConstituentDeviceSwitchingBehavior != .unsupported {
+                camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
+            }
+            smoothLensLocked = false
+        } catch { onEvent?(.notice("Zoom could not be paused. Try again.")) }
     }
     private func replaceInput(_ old: AVCaptureDeviceInput, with next: AVCaptureDeviceInput) throws {
         session.beginConfiguration(); defer { session.commitConfiguration() }
@@ -385,6 +499,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     func flip() {
         queue.async {
             guard self.ticket == nil, let old = self.videoInput else { return }
+            self.stopSmoothZoomOnQueue()
             self.liveFrames.clear()
             let oldFront = self.isFront
             do {
@@ -443,6 +558,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     func stop() { queue.async { self.requestStop() } }
     func suspend(completion: (@Sendable () -> Void)? = nil) {
         queue.async {
+            self.stopSmoothZoomOnQueue()
             self.requestStop()
             self.liveFrames.clear()
             self.turnOffTorch()

@@ -15,6 +15,11 @@ struct CameraView: View {
     @State private var looks: [LUTReference] = []
     @State private var addingLook = false
     @State private var changingLook = false
+    @State private var smoothZoomOpen = false
+    @State private var smoothPosition = 0.0
+    @State private var zoomDragging = false
+    @AppStorage("smoothZoomSpeed") private var zoomSpeed = SmoothZoomSpeed.normal.rawValue
+    @AppStorage("smoothStayOnLens") private var stayOnLens = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     init(app: AppModel, movieID: UUID) {
@@ -57,6 +62,7 @@ struct CameraView: View {
         .preferredColorScheme(.dark)
         .task(id: movieID) {
             liveOriginal = false
+            updateZoomSettings()
             await camera.prepare(profile: movie?.captureProfile ?? .standard)
             looks = await app.store.availableLooks()
         }
@@ -87,9 +93,20 @@ struct CameraView: View {
                 await camera.prepare(profile: movie?.captureProfile ?? .standard)
             }
         }
-        .onDisappear { camera.suspend() }
+        .onChange(of: zoomSpeed) { _, _ in updateZoomSettings() }
+        .onChange(of: stayOnLens) { _, _ in updateZoomSettings() }
+        .onChange(of: camera.options?.minimum) { _, _ in if !zoomDragging { syncSmoothPosition() } }
+        .onChange(of: camera.options?.maximum) { _, _ in if !zoomDragging { syncSmoothPosition() } }
+        .onChange(of: camera.state) { _, state in
+            zoomDragging = false
+            if smoothZoomOpen, state == .ready { camera.beginSmoothZoom() }
+        }
+        .onChange(of: camera.options?.zoom) { _, _ in
+            if !zoomDragging, camera.options?.smoothMoving != true { syncSmoothPosition() }
+        }
+        .onDisappear { zoomDragging = false; camera.suspend() }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { camera.suspend() }
+            if phase != .active { zoomDragging = false; camera.suspend() }
             else if !watching && !camera.busy { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }
         }
         .fullScreenCover(isPresented: $watching, onDismiss: { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }) {
@@ -116,6 +133,14 @@ struct CameraView: View {
                     .accessibilityLabel("Live look: \(liveOriginal ? "Original Log" : movie.lookName)")
                     .disabled(changingLook)
             }
+            Menu {
+                Picker("Smoothing Speed", selection: $zoomSpeed) {
+                    ForEach(SmoothZoomSpeed.allCases) { speed in Text(speed.label).tag(speed.rawValue) }
+                }
+                Toggle("Stay on This Lens", isOn: $stayOnLens)
+                    .disabled(camera.options?.canStayOnLens != true)
+            } label: { Image(systemName: "gearshape").frame(width: 44, height: 44).homeGlass() }
+                .accessibilityLabel("Camera settings")
             if let options = camera.options, options.hasTorch {
                 Button { camera.toggleTorch() } label: {
                     Image(systemName: options.torchOn ? "bolt.fill" : "bolt.slash")
@@ -132,9 +157,14 @@ struct CameraView: View {
             VStack {
                 timer(movie: movie).padding(.top, 8)
                 Spacer(minLength: 12)
-                status(movie: movie).padding(.horizontal, 20).padding(.bottom, 12)
+                status(movie: movie).padding(.horizontal, 20).padding(.bottom, smoothZoomOpen ? 64 : 12)
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+            .overlay(alignment: .bottom) {
+                if smoothZoomOpen, let options = camera.options {
+                    smoothZoomBar(options: options).padding(.horizontal, 12).padding(.bottom, 2)
+                }
+            }
     }
     private func timer(movie: Movie) -> some View {
         VStack(spacing: 6) {
@@ -149,20 +179,87 @@ struct CameraView: View {
         }
     }
     @ViewBuilder private var lenses: some View {
-        if let options = camera.options, options.lenses.count > 1 {
-            HStack(spacing: 6) {
-                ForEach(options.lenses) { lens in
-                    let selected = abs(lens.factor - options.zoom) < 0.06
-                    Button { camera.zoom(lens.factor) } label: {
-                        Text(lens.label).font(.caption.weight(.medium)).monospacedDigit()
-                            .foregroundStyle(selected ? .yellow : .white)
-                            .frame(minWidth: 44, minHeight: 44)
-                            .background(selected ? Color.white.opacity(0.15) : .clear, in: Circle())
-                    }.disabled(camera.state != .ready && camera.state != .recording)
-                        .accessibilityLabel("\(lens.label) lens").accessibilityAddTraits(selected ? .isSelected : [])
-                }
-            }.padding(4).homeGlass()
+        if let options = camera.options, !options.lenses.isEmpty {
+            VStack(spacing: 0) {
+                ViewThatFits(in: .horizontal) {
+                    lensButtons(options: options)
+                    ScrollView(.horizontal) { lensButtons(options: options) }
+                        .scrollIndicators(.hidden).frame(height: 44)
+                }.padding(4).homeGlass()
+            }
         }
+    }
+    private func lensButtons(options: CameraOptions) -> some View {
+        HStack(spacing: 6) {
+            ForEach(options.lenses) { lens in
+                let selected = abs(lens.factor - options.zoom) < 0.06
+                Button { camera.zoom(lens.factor) } label: {
+                    Text(lens.label).font(.caption.weight(.medium)).monospacedDigit()
+                        .foregroundStyle(selected ? .yellow : .white)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .background(selected ? Color.white.opacity(0.15) : .clear, in: Circle())
+                }.disabled(camera.state != .ready && camera.state != .recording)
+                    .accessibilityLabel("\(lens.label) lens").accessibilityAddTraits(selected ? .isSelected : [])
+            }
+            if options.maximum > options.minimum || smoothZoomOpen {
+                Button {
+                    if smoothZoomOpen { camera.endSmoothZoom(); smoothZoomOpen = false }
+                    else { syncSmoothPosition(); smoothZoomOpen = true; camera.beginSmoothZoom() }
+                } label: {
+                    Image(systemName: "waveform.path").font(.caption.weight(.medium))
+                        .foregroundStyle(smoothZoomOpen ? .yellow : .white)
+                        .frame(width: 44, height: 44)
+                        .background(smoothZoomOpen ? Color.white.opacity(0.15) : .clear, in: Circle())
+                }.accessibilityLabel("Smooth Zoom").accessibilityValue(smoothZoomOpen ? "Open" : "Closed")
+                    .accessibilityAddTraits(smoothZoomOpen ? .isSelected : [])
+                    .disabled(!smoothZoomOpen && camera.state != .ready && camera.state != .recording)
+            }
+        }
+    }
+    private func smoothZoomBar(options: CameraOptions) -> some View {
+        HStack(spacing: 12) {
+            Text(String(format: "%g×", Double((options.zoom * options.multiplier * 10).rounded() / 10)))
+                .font(.caption.monospacedDigit()).frame(minWidth: 42)
+            GeometryReader { geometry in
+                let width = max(1, geometry.size.width - 16)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.3)).frame(height: 2).padding(.horizontal, 8)
+                    ForEach(options.lenses.filter { $0.factor >= options.minimum && $0.factor <= options.maximum }) { lens in
+                        Rectangle().fill(.white.opacity(0.45)).frame(width: 1, height: 6)
+                            .offset(x: 8 + CGFloat(SmoothZoomFilter.position(Double(lens.factor), minimum: Double(options.minimum), maximum: Double(options.maximum))) * width)
+                    }
+                    Circle().fill(.white).frame(width: 14, height: 14)
+                        .offset(x: 1 + CGFloat(smoothPosition) * width)
+                }.frame(height: 34).contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                        zoomDragging = true
+                        setSmoothPosition(Double((value.location.x - 8) / width), options: options)
+                    }.onEnded { value in
+                        setSmoothPosition(Double((value.location.x - 8) / width), options: options)
+                        zoomDragging = false
+                    })
+            }.frame(height: 34)
+                .accessibilityElement(children: .ignore).accessibilityLabel("Zoom")
+                .accessibilityValue(String(format: "%.1f times", Double(options.zoom * options.multiplier)))
+                .accessibilityAdjustableAction { direction in
+                    let factor = Double(options.zoom) * pow(2, direction == .increment ? 0.25 : -0.25)
+                    setSmoothPosition(SmoothZoomFilter.position(factor, minimum: Double(options.minimum), maximum: Double(options.maximum)), options: options)
+                }
+        }.padding(.horizontal, 12).padding(.vertical, 5).homeGlass(interactive: false)
+            .contentShape(Rectangle()).onTapGesture { }
+            .frame(maxWidth: 360).disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum)
+    }
+    private func setSmoothPosition(_ position: Double, options: CameraOptions) {
+        guard smoothZoomOpen, position.isFinite else { return }
+        smoothPosition = min(1, max(0, position))
+        camera.smoothZoom(to: CGFloat(SmoothZoomFilter.factor(smoothPosition, minimum: Double(options.minimum), maximum: Double(options.maximum))))
+    }
+    private func syncSmoothPosition() {
+        guard let options = camera.options else { return }
+        smoothPosition = SmoothZoomFilter.position(Double(options.zoom), minimum: Double(options.minimum), maximum: Double(options.maximum))
+    }
+    private func updateZoomSettings() {
+        camera.configureSmoothZoom(speed: SmoothZoomSpeed(rawValue: zoomSpeed) ?? .normal, stayOnLens: stayOnLens)
     }
     @ViewBuilder private func status(movie: Movie) -> some View {
         VStack(spacing: 8) {

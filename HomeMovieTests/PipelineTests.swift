@@ -39,6 +39,65 @@ final class PipelineTests: XCTestCase {
         renderer.configure(frames: LiveFrames(), cube: changed, active: true)
         XCTAssertFalse(renderer.canPresent(current), "A different capture source must invalidate the previous frame")
     }
+    func testSmoothZoomOpeningDoesNotMoveAndInvalidTargetsAreIgnored() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 3.2, minimum: 1, maximum: 16))
+        XCTAssertEqual(filter.value, 3.2); XCTAssertEqual(filter.target, 3.2)
+        XCTAssertEqual(filter.advance(seconds: 0.05, rate: 0.75), 3.2, accuracy: 0.0001)
+        filter.setTarget(.nan); filter.setTarget(.infinity); filter.setTarget(-2)
+        XCTAssertEqual(filter.target, 3.2)
+        XCTAssertNil(SmoothZoomFilter(current: .infinity, minimum: 1, maximum: 8))
+        XCTAssertNil(SmoothZoomFilter(current: 1, minimum: 0, maximum: 8))
+        XCTAssertNil(SmoothZoomFilter(current: 1, minimum: 8, maximum: 8))
+    }
+    func testSmoothZoomTargetFollowsRateLimitWithoutOvershootAndSettlesAfterRelease() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 1, maximum: 16))
+        filter.setTarget(8)
+        var previous = filter.value
+        for _ in 0..<240 {
+            let value = filter.advance(seconds: 0.05, rate: 0.75)
+            XCTAssertGreaterThanOrEqual(value, previous)
+            XCTAssertLessThanOrEqual(value, 8)
+            XCTAssertLessThanOrEqual(log2(value / previous), 0.75 * 0.05 + 0.0002)
+            previous = value
+        }
+        XCTAssertEqual(filter.value, 8, accuracy: 0.001)
+        XCTAssertEqual(filter.target, 8, "Releasing input must retain the target while the controller settles")
+    }
+    func testSmoothZoomReversalAndSpeedAreDirectionIndependent() throws {
+        var slow = try XCTUnwrap(SmoothZoomFilter(current: 4, minimum: 1, maximum: 16))
+        var fast = slow; slow.setTarget(16); fast.setTarget(16)
+        for _ in 0..<20 { _ = slow.advance(seconds: 0.05, rate: SmoothZoomSpeed.slow.rate); _ = fast.advance(seconds: 0.05, rate: SmoothZoomSpeed.fast.rate) }
+        XCTAssertGreaterThan(fast.value, slow.value)
+        fast.setTarget(1)
+        var previous = fast.value
+        for _ in 0..<200 {
+            let value = fast.advance(seconds: 0.05, rate: SmoothZoomSpeed.fast.rate)
+            XCTAssertLessThanOrEqual(value, previous); XCTAssertGreaterThanOrEqual(value, 1)
+            XCTAssertLessThanOrEqual(log2(previous / value), Double(SmoothZoomSpeed.fast.rate) * 0.05 + 0.0002)
+            previous = value
+        }
+        XCTAssertEqual(fast.value, 1, accuracy: 0.001)
+    }
+    func testSmoothZoomRangeChangesClampTargetsAndCoordinatesRoundTrip() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 8, minimum: 4, maximum: 12))
+        filter.setTarget(1); XCTAssertEqual(filter.target, 4)
+        filter.setTarget(16); XCTAssertEqual(filter.target, 12)
+        for factor in [1.0, 2, 4, 8, 16] {
+            let position = SmoothZoomFilter.position(factor, minimum: 1, maximum: 16)
+            XCTAssertEqual(SmoothZoomFilter.factor(position, minimum: 1, maximum: 16), factor, accuracy: 0.0001)
+        }
+        XCTAssertEqual(SmoothZoomFilter.factor(-1, minimum: 4, maximum: 12), 4, accuracy: 0.0001)
+        XCTAssertEqual(SmoothZoomFilter.factor(2, minimum: 4, maximum: 12), 12, accuracy: 0.0001)
+        XCTAssertEqual(SmoothZoomFilter.factor(.nan, minimum: 1, maximum: 16), 1)
+    }
+    func testSmoothZoomDelayedTicksCannotJumpAndInvalidTimeDoesNotMove() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 1, maximum: 16)); filter.setTarget(16)
+        let value = filter.advance(seconds: 10, rate: 0.75)
+        XCTAssertLessThanOrEqual(log2(value), 0.075 + 0.0001, "A stalled capture queue must not jump to the target")
+        XCTAssertEqual(filter.advance(seconds: .nan, rate: 0.75), value)
+        XCTAssertEqual(filter.advance(seconds: -1, rate: 0.75), value)
+        XCTAssertEqual(filter.advance(seconds: 0.05, rate: .infinity), value)
+    }
     func testCaptureFormatUsesCameraAngleInBothDirections() {
         for angle in [CGFloat(0), 180, 360, -180] {
             XCTAssertEqual(MovieFormat.captureFormat(angle: angle), .landscape)

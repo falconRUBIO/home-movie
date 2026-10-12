@@ -37,7 +37,7 @@
     "Swift grammar: HomeMovie/Core/AppModel.swift",
     "Swift grammar: HomeMovie/Core/ProjectStore.swift"
   ],
-  "swift_files": 21,
+  "swift_files": 22,
   "not_performed": [
     "Physical-device full-screen layout, 8x zoom, tap focus, AE/AF lock, exposure drag, torch and accessibility verification",
     "complete real device acceptance tests",
@@ -47,12 +47,13 @@
     "Physical-device automatic first-scene orientation, locked later scenes and independent preview rotation",
     "Physical-device genuine Apple Log bit depth/codec/lenses; long LUT rendering; Cinema match against guide/Resolve reference",
     "Physical-device live Metal LUT preview, high-bit-depth simultaneous capture, established UIKit geometry and metering alignment",
-    "Signed archive/upload and physical-device acceptance of current preview-handoff audit revision"
+    "Signed archive/upload and physical-device acceptance of current preview-handoff audit revision",
+    "Physical-device capture-time Smooth Zoom filtering, native ease-out/held zoom, primary-lens lock/range, persistent overlay/touch/VoiceOver layout and uninterrupted audio/video"
   ],
   "date": "2026-10-12",
-  "native_tests_supplied": 37,
+  "native_tests_supplied": 42,
   "native_tests_run": 37,
-  "native_build_status": "Source revision 9b4efe10 compiled on Xcode 26.6 and passed all 37 native simulator tests with no application-source warnings.",
+  "native_build_status": "Smooth Zoom passes portable source/grammar/project checks; 42-test native run pending. Previous 9b4efe10 passed 37 tests.",
   "previous_cloud_build": {
     "commit": "6750e2065d3790e3d14da2bc999e33183a0110e9",
     "provider": "GitHub Actions",
