@@ -679,4 +679,173 @@ struct CameraView: View {
             CameraPreview(session: camera.service.session, angle: camera.options?.angle ?? 90, front: camera.options?.isFront ?? false,
                 options: camera.options, protectedRegions: previewControlRegions, liveFrames: camera.service.liveFrames,
                 liveCube: liveOriginal ? nil : liveCube,
-                
+                liveActive: movie?.captureProfile == .appleLog && camera.state.showsLiveLook,
+                onLiveLookStatus: { status in
+                    Task { @MainActor in liveLookStatus = status }
+                },
+                fixedFormat: establishedFormat,
+                onFocus: { camera.focus(at: $0, locked: $1) }, onExposure: { camera.exposure($0) })
+                .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+                .allowsHitTesting(countdown == nil).accessibilityHidden(countdown != nil)
+                .accessibilityLabel("Camera viewfinder")
+                .accessibilityAction(named: "Focus at center") { _ = camera.focus(at: CGPoint(x: 0.5, y: 0.5)) }
+                .accessibilityAction(named: "Lock focus and exposure at center") { _ = camera.focus(at: CGPoint(x: 0.5, y: 0.5), locked: true) }
+                .accessibilityAction(named: "Increase brightness") { camera.exposure((camera.options?.exposureBias ?? 0) + 0.5) }
+                .accessibilityAction(named: "Decrease brightness") { camera.exposure((camera.options?.exposureBias ?? 0) - 0.5) }
+                .gesture(MagnificationGesture().onChanged { value in
+                    guard countdown == nil, camera.state == .ready || camera.state == .recording, let options = camera.options else { return }
+                    if pinchBase == nil { pinchBase = options.zoom }
+                    if Date().timeIntervalSince(lastZoomAt) > 0.05 {
+                        let target = (pinchBase ?? options.zoom) * value
+                        if smoothZoomOpen {
+                            manualZoomTargetShown = false
+                            preparedDollyStart = nil; preparedDollyTarget = nil; activeDolly = nil
+                            camera.smoothZoom(to: target, inputTime: Date().timeIntervalSinceReferenceDate)
+                        } else { camera.zoom(target) }
+                        lastZoomAt = Date()
+                    }
+                }.onEnded { _ in pinchBase = nil; if smoothZoomOpen { camera.endSmoothInput() } })
+            if let countdown {
+                Text("\(countdown)").font(.system(size: 64, weight: .light, design: .rounded))
+                    .foregroundStyle(.white).shadow(color: .black.opacity(0.5), radius: 8)
+                    .contentTransition(.numericText()).allowsHitTesting(false)
+                    .accessibilityLabel("Recording in \(countdown) seconds")
+            }
+            if camera.state == .preparing {
+                ProgressView("Preparing camera…").padding().background(.black.opacity(0.8), in: Capsule())
+            }
+            if camera.state == .denied {
+                VStack(spacing: 12) {
+                    Text("Camera and microphone access are needed to record.").multilineTextAlignment(.center)
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                }.padding(20).background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 14))
+                    .padding(24)
+            }
+        }
+    }
+    private var recordControl: some View {
+        Button {
+            if countdown != nil { cancelCountdown() }
+            else if camera.state == .recording { camera.stop() }
+            else { startRecording() }
+        } label: {
+            ZStack {
+                Circle().fill(.black.opacity(0.25)).frame(width: 78, height: 78)
+                Circle().strokeBorder(.white, lineWidth: 3).frame(width: 78, height: 78)
+                if countdown != nil {
+                    Image(systemName: "xmark").font(.system(size: 24, weight: .medium)).foregroundStyle(.white)
+                } else {
+                    RoundedRectangle(cornerRadius: camera.state == .recording ? 5 : 32)
+                        .fill(.red).frame(width: camera.state == .recording ? 29 : 62, height: camera.state == .recording ? 29 : 62)
+                }
+            }
+        }.buttonStyle(.plain)
+            .disabled(undoingTake || camera.state != .recording && camera.state != .ready)
+            .opacity(camera.state != .recording && camera.state != .ready ? 0.4 : 1)
+            .accessibilityLabel(countdown != nil ? "Cancel countdown" : camera.state == .recording ? "Stop recording" : "Record next scene")
+    }
+    @ViewBuilder private func reviewControls(movie: Movie, landscape: Bool) -> some View {
+        let recent = Button { openWatch(sceneID: movie.activeScenes.last?.id) } label: {
+            SceneThumbnail(scene: movie.activeScenes.last, root: app.store.root, movie: movie)
+                .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
+        }.accessibilityLabel("Review recent scene").disabled(camera.busy || movie.activeScenes.isEmpty)
+        let flip = Button { camera.flip() } label: {
+            MovieControlIcon(systemName: "arrow.triangle.2.circlepath.camera")
+                .background(.white.opacity(0.15), in: Circle())
+        }.accessibilityLabel("Switch camera").disabled(camera.state != .ready || camera.options?.canFlip != true)
+        let watch = VStack(spacing: 0) {
+            Button { openWatch() } label: {
+                Label("Watch Movie", systemImage: "play.fill")
+                    .font(.footnote).frame(minHeight: 44)
+            }.disabled(camera.busy || movie.activeScenes.isEmpty)
+                .accessibilityLabel("Watch movie")
+            Text("\(durationLabel(movie.duration)) total")
+                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                .accessibilityLabel("Total movie runtime, \(durationLabel(movie.duration))")
+        }
+        if landscape {
+            VStack(spacing: 12) {
+                VStack(spacing: 0) { recent; recentTakeFeedback(movie: movie) }
+                watch
+                flip
+            }.padding(.horizontal, 8)
+        } else {
+            HStack(spacing: 8) {
+                HStack(spacing: 4) { recent; recentTakeFeedback(movie: movie) }
+                Spacer(minLength: 0)
+                watch
+                Spacer(minLength: 0)
+                flip
+            }
+        }
+    }
+    @ViewBuilder private func recentTakeFeedback(movie: Movie) -> some View {
+        VStack(spacing: 0) {
+            if camera.state == .finalizing {
+                VStack(spacing: 4) {
+                    ProgressView().controlSize(.small).tint(.white)
+                    Text("Saving…").font(.caption2)
+                }.frame(minWidth: 44, minHeight: 44)
+                    .accessibilityElement(children: .ignore).accessibilityLabel("Saving scene")
+                    .transition(.opacity)
+            } else if let id = addedSceneID, movie.activeScenes.last?.id == id, !camera.busy {
+                VStack(spacing: 0) {
+                    Label("Saved", systemImage: "checkmark").font(.caption2).foregroundStyle(.secondary)
+                    Button("Undo") { undoLastTake(id) }
+                        .font(.caption.weight(.medium)).frame(minWidth: 44, minHeight: 44)
+                        .disabled(undoingTake).accessibilityLabel("Undo last take")
+                        .accessibilityHint("Moves the latest scene to Recently Deleted. You can restore it in Settings.")
+                }.transition(.opacity)
+            }
+        }.animation(.easeInOut(duration: 0.2), value: camera.state == .finalizing)
+            .animation(.easeInOut(duration: 0.2), value: addedSceneID)
+    }
+    private func undoLastTake(_ sceneID: UUID) {
+        guard !camera.busy, !undoingTake else { return }
+        undoingTake = true
+        let destination = movieID
+        Task {
+            defer { undoingTake = false }
+            do {
+                try await app.store.undoLastTake(movieID: destination, expectedSceneID: sceneID)
+                await app.refresh()
+                addedSceneID = nil; camera.savedScene = false
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            } catch { camera.message = error.localizedDescription }
+        }
+    }
+    private func changeLiveLook(_ look: LUTReference?) {
+        guard !changingLook else { return }
+        changingLook = true; liveOriginal = false
+        Task {
+            defer { changingLook = false }
+            await app.run { try await app.store.setLook(movieID: movieID, look: look) }
+        }
+    }
+    private func zoomLabel(_ factor: CGFloat, multiplier: CGFloat) -> String {
+        String(format: "%g×", Double((factor * multiplier * 10).rounded() / 10))
+    }
+    private func startRecording() {
+        guard camera.state == .ready, countdown == nil, scenePhase == .active else { return }
+        guard dollyDelayedStart else { camera.record(movieID: movieID); return }
+        if smoothZoomOpen, let start = preparedDollyStart, let target = preparedDollyTarget {
+            camera.zoom(start)
+            queuedDolly = (target, DollyZoomDuration.validated(dollySeconds))
+        } else { camera.endSmoothZoom(); queuedDolly = nil }
+        recordingCountdown.start(seconds: startDelay, canStart: {
+            camera.state == .ready && scenePhase == .active
+        }, onStart: {
+            camera.record(movieID: movieID)
+            if camera.state != .starting { queuedDolly = nil }
+        })
+    }
+    private func cancelCountdown() {
+        recordingCountdown.cancel(); queuedDolly = nil
+    }
+    private func openWatch(sceneID: UUID? = nil) {
+        guard !camera.busy else { return }
+        Task { await camera.pauseForPlayback(); initialReviewID = sceneID; watching = true }
+    }
+}
