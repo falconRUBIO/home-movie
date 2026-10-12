@@ -125,6 +125,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     var onLiveLookStatus: ((LiveLookStatus) -> Void)?
     func configureLiveLook(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false) {
         samplePreview = passthrough
+        if passthrough { rotationObservation = nil; rotationCoordinator = nil }
         if lookView == nil, active, cube != nil || passthrough, let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) {
             let view = MTKView(frame: bounds, device: device)
             view.isUserInteractionEnabled = false; view.framebufferOnly = false
