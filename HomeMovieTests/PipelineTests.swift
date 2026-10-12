@@ -1,9 +1,44 @@
 import XCTest
 import AVFoundation
 import CoreImage
+import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    @MainActor func testLiveLookCompletionCannotRevealOriginalOrInactivePreview() throws {
+        guard let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) else {
+            throw XCTSkip("Metal preview is unavailable on this simulator")
+        }
+        let frames = LiveFrames(), cube = try ColorCube.appleStandard.get()
+        renderer.configure(frames: frames, cube: cube, active: true)
+        let graded = renderer.presentationID
+        XCTAssertTrue(renderer.canPresent(graded))
+        renderer.configure(frames: frames, cube: nil, active: true)
+        XCTAssertFalse(renderer.canPresent(graded), "A finishing GPU frame must not reveal a look after Show Original")
+        renderer.configure(frames: frames, cube: cube, active: true)
+        let resumed = renderer.presentationID
+        XCTAssertFalse(renderer.canPresent(graded))
+        XCTAssertTrue(renderer.canPresent(resumed))
+        renderer.configure(frames: frames, cube: cube, active: false)
+        XCTAssertFalse(renderer.canPresent(resumed), "Leaving capture must invalidate in-flight presentation")
+    }
+    @MainActor func testLiveLookSwitchRejectsPreviousFrameWithoutInvalidatingSameLook() throws {
+        guard let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) else {
+            throw XCTSkip("Metal preview is unavailable on this simulator")
+        }
+        let frames = LiveFrames(), cube = try ColorCube.appleStandard.get()
+        renderer.configure(frames: frames, cube: cube, active: true)
+        let initial = renderer.presentationID
+        renderer.configure(frames: frames, cube: cube, active: true)
+        XCTAssertTrue(renderer.canPresent(initial), "Timer and metering updates must not invalidate an unchanged look")
+        var changed = cube; changed.minimum = [-1, -1, -1]
+        renderer.configure(frames: frames, cube: changed, active: true)
+        XCTAssertFalse(renderer.canPresent(initial), "Switching looks must reject an old frame even with identical samples")
+        XCTAssertTrue(renderer.canPresent(renderer.presentationID))
+        let current = renderer.presentationID
+        renderer.configure(frames: LiveFrames(), cube: changed, active: true)
+        XCTAssertFalse(renderer.canPresent(current), "A different capture source must invalidate the previous frame")
+    }
     func testCaptureFormatUsesCameraAngleInBothDirections() {
         for angle in [CGFloat(0), 180, 360, -180] {
             XCTAssertEqual(MovieFormat.captureFormat(angle: angle), .landscape)

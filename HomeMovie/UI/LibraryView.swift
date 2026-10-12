@@ -160,7 +160,7 @@ struct NewMovieView: View {
                         }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).count > 80 || saving || loadingLook)
                     }
                 }
-        }.presentationDetents([.medium]).interactiveDismissDisabled(saving)
+        }.presentationDetents([.medium, .large]).interactiveDismissDisabled(saving || loadingLook)
             .fileImporter(isPresented: $importingLook, allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data], allowsMultipleSelection: false) { result in
                 switch result {
                 case .success(let urls):

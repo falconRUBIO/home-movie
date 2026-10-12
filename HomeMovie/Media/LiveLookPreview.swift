@@ -41,8 +41,20 @@ enum LiveLookGeometry {
 @MainActor final class LiveLookRenderer: NSObject, MTKViewDelegate {
     private let queue: MTLCommandQueue
     private let context: CIContext
-    var frames: LiveFrames?
-    var cube: ColorCube?
+    private(set) var frames: LiveFrames?
+    private(set) var cube: ColorCube?
+    private(set) var presentationID = UUID()
+    func configure(frames: LiveFrames?, cube: ColorCube?, active: Bool) {
+        let nextFrames = active && cube != nil ? frames : nil
+        let nextCube = active ? cube : nil
+        if self.frames !== nextFrames || self.cube?.rgba != nextCube?.rgba ||
+            self.cube?.dimension != nextCube?.dimension || self.cube?.minimum != nextCube?.minimum ||
+            self.cube?.maximum != nextCube?.maximum {
+            presentationID = UUID()
+        }
+        self.frames = nextFrames; self.cube = nextCube
+    }
+    func canPresent(_ id: UUID) -> Bool { id == presentationID && frames != nil && cube != nil }
     var angle: CGFloat = 90
     var front = false
     private var rendering = false
@@ -64,10 +76,11 @@ enum LiveLookGeometry {
             destination.colorSpace = nil; destination.isFlipped = true
             _ = try context.startTask(toRender: image, to: destination)
             rendering = true
+            let presentationID = self.presentationID
             command.addCompletedHandler { [weak self, weak view] buffer in
                 Task { @MainActor in
                     self?.rendering = false
-                    if buffer.status == .completed, self?.cube != nil { view?.alpha = 1 }
+                    if buffer.status == .completed, self?.canPresent(presentationID) == true { view?.alpha = 1 }
                 }
             }
             command.present(drawable); command.commit()

@@ -86,14 +86,16 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         let monitoredFrames = active && cube != nil ? frames : nil
         if lookRenderer?.frames !== monitoredFrames {
             lookRenderer?.frames?.setListener(nil)
-            lookRenderer?.frames = monitoredFrames
             if let frames = monitoredFrames, let view = lookView {
                 frames.setListener { [weak frames, weak view] in
                     DispatchQueue.main.async { frames?.notificationHandled(); view?.draw() }
                 }
             }
         }
-        lookRenderer?.cube = cube; lookRenderer?.front = showingFront
+        let previousPresentation = lookRenderer?.presentationID
+        lookRenderer?.configure(frames: frames, cube: cube, active: active)
+        if previousPresentation != lookRenderer?.presentationID { lookView?.alpha = 0 }
+        lookRenderer?.front = showingFront
         if cube == nil || !active { lookView?.alpha = 0 }
         else if lookView?.alpha == 0 { lookView?.alpha = 0.001 }
         resizeLookView()

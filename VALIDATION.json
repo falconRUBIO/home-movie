@@ -49,10 +49,10 @@
     "Physical-device live Metal LUT preview, high-bit-depth simultaneous capture, established UIKit geometry and metering alignment",
     "Signed archive/upload and physical-device acceptance of current live-look revision"
   ],
-  "date": "2026-10-11",
-  "native_tests_supplied": 34,
+  "date": "2026-10-12",
+  "native_tests_supplied": 36,
   "native_tests_run": 34,
-  "native_build_status": "Source revision 468bb983 compiled on Xcode 26.6 and passed all 34 simulator tests.",
+  "native_build_status": "Current preview handoff audit passes portable validation; 36-test native run pending. Previous source 468bb983 passed all 34 tests.",
   "previous_cloud_build": {
     "commit": "d70fa524028219e806d7853c05ff4f8f9da60643",
     "provider": "GitHub Actions",

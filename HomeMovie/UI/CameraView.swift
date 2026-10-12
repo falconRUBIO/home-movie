@@ -73,6 +73,7 @@ struct CameraView: View {
         }
         .task(id: "\(movieID)-\(movie?.look?.id.uuidString ?? "standard")") {
             guard movie?.captureProfile == .appleLog else { liveCube = nil; return }
+            liveCube = nil
             let reference = movie?.look, root = app.store.root
             do {
                 let loaded = try await Task.detached(priority: .userInitiated) {
