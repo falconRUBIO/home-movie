@@ -52,8 +52,8 @@
   ],
   "date": "2026-10-12",
   "native_tests_supplied": 43,
-  "native_tests_run": 42,
-  "native_build_status": "Smooth Zoom compiled and passed 42 tests. Log format/codec negotiation correction passes portable checks; 43-test native run pending.",
+  "native_tests_run": 43,
+  "native_build_status": "PASS: Apple Log format/codec negotiation and readiness corrections, plus Smooth Zoom, compiled and passed all 43 native simulator tests.",
   "previous_cloud_build": {
     "commit": "6750e2065d3790e3d14da2bc999e33183a0110e9",
     "provider": "GitHub Actions",
@@ -66,7 +66,7 @@
     "application_source_warnings": 0
   },
   "testflight_uploaded": true,
-  "native_tests_passed": 42,
+  "native_tests_passed": 43,
   "native_tests_failed": 0,
   "signed_archive_created": true,
   "apple_package_validation_status": "PASS for build 1041; signed upload succeeded",
@@ -81,14 +81,14 @@
   },
   "current_revision_testflight_uploaded": false,
   "latest_cloud_build": {
-    "commit": "0376b8591e0a5f36d48d32c7e87566b4e2232ab7",
+    "commit": "785eae9015bf5e5af36b63a928722ccf653ee4df",
     "provider": "GitHub Actions",
-    "run_id": 38192138287,
+    "run_id": 38193140949,
     "status": "PASS",
-    "tests_run": 42,
-    "tests_passed": 42,
+    "tests_run": 43,
+    "tests_passed": 43,
     "tests_failed": 0,
-    "test_execution_seconds": 88.714,
+    "test_execution_seconds": 209.997,
     "application_source_warnings": 0
   },
   "audit_initial_cloud_build": {

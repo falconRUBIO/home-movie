@@ -305,3 +305,6 @@ https://developer.apple.com/documentation/avfoundation/avcapturedevice/primaryco
 - Smooth Zoom source 0376b859 passed 42 native tests with no app-source warnings. New codec selection regression makes 43 tests; native correction build pending. Hardware recording/bit depth/metadata remain unverified.
 
 Readiness follow-up: camera option updates now require a configured, running, uninterrupted session and a valid active Log color space/codec. Late zoom/rotation/metering callbacks cannot re-enable Record after failed preparation.
+
+
+Native verification: source 785eae9015bf5e5af36b63a928722ccf653ee4df passed GitHub Actions run 38193140949. All 43 tests passed with zero failures in 209.997 seconds, with no application-source warnings. This supersedes the pending native statuses above. Log capture and Smooth Zoom hardware acceptance remain NOT RUN. Current source requires a new signed TestFlight upload; build 1041 contains the earlier failure.
