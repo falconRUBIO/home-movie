@@ -16,6 +16,13 @@ private struct DollyControlHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 52
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
+private extension View {
+    @ViewBuilder func dollyControlGlass() -> some View {
+        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+        if #available(iOS 26.0, *) { self.glassEffect(.regular.interactive(), in: shape) }
+        else { self.background(.regularMaterial, in: shape) }
+    }
+}
 
 struct CameraView: View {
     @ObservedObject var app: AppModel
@@ -305,9 +312,9 @@ struct CameraView: View {
                 ViewThatFits(in: .horizontal) {
                     lensButtons(options: options)
                     ScrollView(.horizontal) { lensButtons(options: options) }
-                        .scrollIndicators(.hidden).frame(height: 44)
+                        .scrollIndicators(.hidden).frame(height: dynamicTypeSize.isAccessibilitySize ? 64 : 44)
                 }.padding(4)
-            }.homeGlass().frame(maxWidth: 360)
+            }.dollyControlGlass().frame(maxWidth: 360)
         }
     }
     private func lensButtons(options: CameraOptions) -> some View {
@@ -479,6 +486,7 @@ struct CameraView: View {
                 Section("Move between lenses") {
                     Text("Your current zoom is the starting point. Tap another lens to move smoothly to it. The outlined lens is your destination, and the dot follows the camera’s actual zoom.")
                     Text("Tap a different lens during a move to change the destination. Drag the track or pinch the viewfinder to take manual control.")
+                    Text("Opening or closing Dolly does not start or stop recording.")
                 }
                 Section("Automatic duration") {
                     Text("Choose the seconds in the Dolly bar to set how long the next lens-to-lens move takes, including its gentle start and finish.")

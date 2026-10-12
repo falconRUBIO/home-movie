@@ -394,3 +394,15 @@ Camera-layout native verification: source 72921223ac7c6ffb241dceccf554b2fb3a1468
 - Look opens the existing selection menu; Files opens only through Add Apple Log Look. The same Filmica table is used by live preview, playback and export, with untouched Log originals and self-contained backup/restore.
 - The creator describes Filmica as an Apple Log workflow (https://www.julianpapis.com/shop/p/filmica). Cinema.cube has no input-space metadata; direct Apple Log input is an inference from its supplied context and sample response, not a verified node-tree instruction. No extra Apple Standard conversion is stacked. Compare against the creator reference on the physical iPhone before color acceptance.
 - Added native tests for resource integrity, default selection, explicit Standard persistence and exact-sample backup/restore. Portable validation passes; this revision awaits native CI and device acceptance.
+
+## Dolly guidance and UI audit follow-up — October 12
+
+Source `7a65c9c0fca3a93addf2e9cf64cc1917add30b63` compiled and passed **87 native simulator tests with zero failures** in [run 38281869971](https://github.com/falconRUBIO/home-movie/actions/runs/38281869971), taking 312.449 test seconds. The new close-motion regression passes for automatic/manual motion, both directions and all response settings; identical-route request identities are unique.
+
+- Camera settings now opens a grouped Dolly Settings form with readable explanations for manual response, automatic duration, hands-free countdown and physical lens locking. Long instructional text no longer depends on menu wrapping.
+- Normal Dolly starts at measured current zoom. Hands-free setup retains its starting lens when a third tap changes the destination; Reset explicitly clears the prepared route. Countdown and actual recording state remain distinct.
+- Idle-completion callbacks capture a unique route identity before waiting, so an older callback cannot clear a newly selected route. Changes to Hands-Free Start preserve an ongoing move's progress display.
+- Closing Dolly uses a short timed finish that preserves incoming motion before releasing the controller/lens lock. Reopening or new input cancels the pending close. Interruption and suspension still stop immediately.
+- The track has a 44-point touch height and a minimum usable horizontal width; narrow/large-text layouts put the value and duration above a full-width track inside the same glass container. Camera notice spacing follows measured control height.
+
+Presentation-only follow-up after the verified source: the glass container now uses continuous 26-point rounded corners instead of an expanded capsule, the scrolling lens row allows 64-point height at accessibility sizes, and Help states that opening/closing Dolly does not start/stop recording. These changes passed project/source/Swift grammar checks; they were not separately compiled or visually rendered on an iPhone. Physical-device layout, touch, VoiceOver, optical handoffs and saved-frame acceptance remain pending, along with a new TestFlight upload.

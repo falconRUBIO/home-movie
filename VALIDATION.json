@@ -50,9 +50,9 @@
     "Current-source iPhone Dolly: all physical lens pairs/durations, manual drag/pinch speeds, response settings, retargets, Stay on This Lens, focus/exposure and warm/low-light delivered-frame smoothness."
   ],
   "date": "2026-10-12",
-  "native_tests_supplied": 85,
-  "native_tests_run": 85,
-  "native_build_status": "PASS: combined Dolly controller, adaptive manual response and interface source compiled and passed all 85 native simulator tests. Current-source iPhone acceptance pending.",
+  "native_tests_supplied": 87,
+  "native_tests_run": 87,
+  "native_build_status": "PASS: audited Dolly behavior source 7a65c9c compiled and passed 87 native tests. Final presentation-only glass/large-text follow-up passes source and grammar checks; physical iPhone layout acceptance pending.",
   "previous_cloud_build": {
     "commit": "f8294c31719e540c87d42f75eaf90d30b55fe8c9",
     "provider": "GitHub Actions",
@@ -66,7 +66,7 @@
     "application_source_warnings": 0
   },
   "testflight_uploaded": true,
-  "native_tests_passed": 85,
+  "native_tests_passed": 87,
   "native_tests_failed": 0,
   "signed_archive_created": true,
   "apple_package_validation_status": "PASS for build 1041; signed upload succeeded",
@@ -81,15 +81,15 @@
   },
   "current_revision_testflight_uploaded": false,
   "latest_cloud_build": {
-    "commit": "2b287a0ed1bf5f351ac7c3f9b43b966ab3b8a86f",
+    "commit": "7a65c9c0fca3a93addf2e9cf64cc1917add30b63",
     "provider": "GitHub Actions",
-    "run_id": 38279445539,
-    "url": "https://github.com/falconRUBIO/home-movie/actions/runs/38279445539",
+    "run_id": 38281869971,
+    "url": "https://github.com/falconRUBIO/home-movie/actions/runs/38281869971",
     "status": "PASS",
-    "tests_run": 85,
-    "tests_passed": 85,
+    "tests_run": 87,
+    "tests_passed": 87,
     "tests_failed": 0,
-    "test_execution_seconds": 230.053,
+    "test_execution_seconds": 312.449,
     "application_source_warnings": 0
   },
   "audit_initial_cloud_build": {
@@ -112,5 +112,6 @@
   },
   "reported_device": "iPhone 17 family; user reports latest iOS update, exact variant/version unconfirmed",
   "physical_device_live_look_status": "User reports flat live preview despite LOG Cinema, while graded playback works. Visible Metal overlay/display-loop fix and render-status badge pass native GPU/presentation tests; corrected-source iPhone confirmation and TestFlight upload pending.",
-  "physical_device_dolly_status": "User reports jerky Dolly. Repeated 20 Hz native ramps replaced with one 60 Hz trajectory; adaptive drag speed, response, retargeting, clock and range tests pass. Physical lens handoffs and saved-frame smoothness across actual device speeds/lighting/thermal states remain unverified."
+  "physical_device_dolly_status": "User reports jerky Dolly. Repeated 20 Hz native ramps replaced with one 60 Hz trajectory; adaptive drag speed, response, retargeting, clock and range tests pass. Physical lens handoffs and saved-frame smoothness across actual device speeds/lighting/thermal states remain unverified.",
+  "physical_device_dolly_ui_status": "NOT RUN: final rounded glass, narrow layouts, accessibility text, touch targets, VoiceOver endpoint guidance, route reset and hands-free flow need physical iPhone acceptance. Final presentation-only follow-up was source/grammar checked, not separately natively recompiled."
 }
