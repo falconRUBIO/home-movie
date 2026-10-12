@@ -128,7 +128,7 @@ struct CameraView: View {
             else if !watching && !camera.busy { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }
         }
         .fullScreenCover(isPresented: $watching, onDismiss: { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }) {
-            WatchMovieView(movieID: movieID, initialSceneID: initialReviewID).environmentObject(app)
+            WatchMovieView(movieID: movieID, initialSceneID: initialReviewID, autoplay: initialReviewID == nil).environmentObject(app)
         }
     }
     private func header(movie: Movie) -> some View {

@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 struct LibraryView: View {
     @EnvironmentObject private var app: AppModel
@@ -67,14 +68,12 @@ struct LibraryView: View {
                                             Text(movie.activeScenes.count == 1 ? "1 scene" : "\(movie.activeScenes.count) scenes").font(.caption).foregroundStyle(.secondary)
                                         }
                                         Spacer()
-                                        Menu {
-                                            Button("Export", systemImage: "square.and.arrow.up") { exportMovie = movie }
-                                                .disabled(movie.activeScenes.isEmpty)
-                                            Divider()
-                                            Button("Rename", systemImage: "pencil") { renameText = movie.name; renameMovie = movie }
-                                            Button("Delete Movie", systemImage: "trash", role: .destructive) { deleteMovie = movie }
-                                        } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                                        .accessibilityLabel("Manage \(movie.name)")
+                                        MovieOverflowMenu(movieName: movie.name,
+                                            canExport: !movie.activeScenes.isEmpty,
+                                            onExport: { exportMovie = movie },
+                                            onRename: { renameText = movie.name; renameMovie = movie },
+                                            onDelete: { deleteMovie = movie })
+                                            .frame(width: 44, height: 44)
                                     }
                                 }
                             }
@@ -125,6 +124,44 @@ struct LibraryView: View {
         .alert("Recording Recovery", isPresented: Binding(get: { app.recoveryNotice != nil }, set: { if !$0 { app.recoveryNotice = nil } })) {
             Button("OK") { app.recoveryNotice = nil }
         } message: { Text(app.recoveryNotice ?? "") }
+    }
+}
+
+
+// Attach the system menu to the actual, stable 44-point ellipsis button.
+@MainActor private final class MovieOverflowButton: UIButton {
+    override func menuAttachmentPoint(for configuration: UIContextMenuConfiguration) -> CGPoint {
+        CGPoint(x: bounds.midX, y: bounds.maxY)
+    }
+}
+
+@MainActor private struct MovieOverflowMenu: UIViewRepresentable {
+    let movieName: String
+    let canExport: Bool
+    let onExport: () -> Void
+    let onRename: () -> Void
+    let onDelete: () -> Void
+
+    func makeUIView(context: Context) -> MovieOverflowButton {
+        let button = MovieOverflowButton(type: .system)
+        button.setImage(UIImage(systemName: "ellipsis"), for: .normal)
+        button.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 17), forImageIn: .normal)
+        button.tintColor = .label
+        button.showsMenuAsPrimaryAction = true
+        button.preferredMenuElementOrder = .fixed
+        configure(button)
+        return button
+    }
+    func updateUIView(_ button: MovieOverflowButton, context: Context) { configure(button) }
+    private func configure(_ button: MovieOverflowButton) {
+        button.accessibilityLabel = "Manage \(movieName)"
+        button.accessibilityHint = "Opens movie actions"
+        let export = UIAction(title: "Export", image: UIImage(systemName: "square.and.arrow.up"),
+            attributes: canExport ? [] : [.disabled]) { _ in onExport() }
+        let rename = UIAction(title: "Rename", image: UIImage(systemName: "pencil")) { _ in onRename() }
+        let delete = UIAction(title: "Delete Movie", image: UIImage(systemName: "trash"),
+            attributes: [.destructive]) { _ in onDelete() }
+        button.menu = UIMenu(children: [export, UIMenu(options: .displayInline, children: [rename, delete])])
     }
 }
 
