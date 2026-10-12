@@ -101,7 +101,10 @@ struct CameraView: View {
             if let movie {
                 let footerHeight: CGFloat = dynamicTypeSize.isAccessibilitySize ? 100 : 64
                 let railWidth: CGFloat = 112
-                let ratio: CGFloat = camera.options?.dualCameraPrepared == true ? (movie.recordingFormat ?? activeTakeFormat)?.aspect ?? (landscape ? 16 / 9 : 9 / 16) : landscape ? 16 / 9 : 9 / 16
+                let phoneRatio: CGFloat = landscape ? 16.0 / 9.0 : 9.0 / 16.0
+                let canvasFormat = movie.recordingFormat ?? activeTakeFormat
+                let canvasRatio: CGFloat = canvasFormat?.aspect ?? phoneRatio
+                let ratio: CGFloat = camera.options?.dualCameraPrepared == true ? canvasRatio : phoneRatio
                 let availableWidth = max(1, geometry.size.width - (landscape ? railWidth : 0))
                 let availableHeight = max(1, geometry.size.height - (landscape ? 0 : footerHeight))
                 let previewWidth = min(availableWidth, availableHeight * ratio)
