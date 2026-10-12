@@ -281,6 +281,15 @@ actor ProjectStore {
         guard next.movies[m].scenes[c].validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
         next.movies[m].revision += 1; try write(next)
     }
+    func undoLastTake(movieID: UUID, expectedSceneID: UUID) throws {
+        try requireIdle()
+        let m = try index(movieID)
+        guard catalog.movies[m].deletedAt == nil,
+              catalog.movies[m].activeScenes.last?.id == expectedSceneID else {
+            throw HomeMovieError.message("The latest take has changed. Please try again.")
+        }
+        try setSceneDeleted(movieID: movieID, sceneID: expectedSceneID, deleted: true)
+    }
     func setSceneDeleted(movieID: UUID, sceneID: UUID, deleted: Bool) throws {
         try requireIdle()
         let m = try index(movieID)

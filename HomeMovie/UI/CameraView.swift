@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import UIKit
 import UniformTypeIdentifiers
 
 struct CameraView: View {
@@ -15,6 +16,8 @@ struct CameraView: View {
     @State private var looks: [LUTReference] = []
     @State private var addingLook = false
     @State private var changingLook = false
+    @State private var addedSceneID: UUID?
+    @State private var undoingTake = false
     @State private var smoothZoomOpen = false
     @State private var smoothPosition = 0.0
     @State private var zoomDragging = false
@@ -101,7 +104,17 @@ struct CameraView: View {
         .onChange(of: stayOnLens) { _, _ in updateZoomSettings() }
         .onChange(of: camera.options?.minimum) { _, _ in if !zoomDragging { syncSmoothPosition() } }
         .onChange(of: camera.options?.maximum) { _, _ in if !zoomDragging { syncSmoothPosition() } }
+        .onChange(of: camera.savedScene) { _, saved in
+            if saved { addedSceneID = movie?.activeScenes.last?.id }
+        }
+        .task(id: addedSceneID) {
+            guard let id = addedSceneID else { return }
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled, addedSceneID == id else { return }
+            addedSceneID = nil
+        }
         .onChange(of: camera.state) { _, state in
+            if state == .starting { addedSceneID = nil }
             zoomDragging = false
             if smoothZoomOpen, state == .ready { camera.beginSmoothZoom() }
         }
@@ -147,6 +160,11 @@ struct CameraView: View {
                 }
                 Toggle("Stay on This Lens", isOn: $stayOnLens)
                     .disabled(camera.options?.canStayOnLens != true)
+                if let last = movie.activeScenes.last {
+                    Divider()
+                    Button("Undo Last Take", systemImage: "arrow.uturn.backward") { undoLastTake(last.id) }
+                        .disabled(camera.busy || undoingTake)
+                }
             } label: { Image(systemName: "gearshape").frame(width: 44, height: 44).homeGlass() }
                 .accessibilityLabel("Camera settings")
             if let options = camera.options, options.hasTorch {
@@ -281,6 +299,15 @@ struct CameraView: View {
     @ViewBuilder private func status(movie: Movie) -> some View {
         VStack(spacing: 8) {
             if camera.state == .finalizing { ProgressView("Saving scene…").tint(.white) }
+            if let id = addedSceneID, movie.activeScenes.last?.id == id, !camera.busy {
+                HStack(spacing: 16) {
+                    Text("Scene added")
+                    Button("Undo") { undoLastTake(id) }
+                        .fontWeight(.semibold).frame(minWidth: 44, minHeight: 44)
+                        .disabled(undoingTake)
+                        .accessibilityLabel("Undo last take")
+                }.padding(.horizontal, 14).homeGlass(interactive: false)
+            }
             if let message = camera.message { Text(message) }
             if camera.state == .failed || camera.state == .interrupted {
                 Button("Resume Camera") { Task { await camera.prepare(profile: movie.captureProfile) } }.buttonStyle(.bordered)
@@ -334,7 +361,7 @@ struct CameraView: View {
                     .fill(.red).frame(width: camera.state == .recording ? 29 : 62, height: camera.state == .recording ? 29 : 62)
             }
         }.buttonStyle(.plain)
-            .disabled(camera.state != .recording && camera.state != .ready)
+            .disabled(undoingTake || camera.state != .recording && camera.state != .ready)
             .opacity(camera.state != .recording && camera.state != .ready ? 0.4 : 1)
             .accessibilityLabel(camera.state == .recording ? "Stop recording" : "Record next scene")
     }
@@ -349,10 +376,10 @@ struct CameraView: View {
         }.accessibilityLabel("Switch camera").disabled(camera.state != .ready || camera.options?.canFlip != true)
         let watch = VStack(spacing: 0) {
             Button { openWatch() } label: {
-                Label(camera.savedScene ? "Scene Saved · Watch" : "Watch Movie", systemImage: camera.savedScene ? "checkmark" : "play.fill")
+                Label("Watch Movie", systemImage: "play.fill")
                     .font(.footnote).frame(minHeight: 44)
             }.disabled(camera.busy || movie.activeScenes.isEmpty)
-                .accessibilityLabel(camera.savedScene ? "Scene saved. Watch movie" : "Watch movie")
+                .accessibilityLabel("Watch movie")
             Text("\(durationLabel(movie.duration)) total")
                 .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 .accessibilityLabel("Total movie runtime, \(durationLabel(movie.duration))")
@@ -361,6 +388,20 @@ struct CameraView: View {
             VStack(spacing: 12) { recent; watch; flip }.padding(.horizontal, 8)
         } else {
             HStack(spacing: 8) { recent; Spacer(minLength: 0); watch; Spacer(minLength: 0); flip }
+        }
+    }
+    private func undoLastTake(_ sceneID: UUID) {
+        guard !camera.busy, !undoingTake else { return }
+        undoingTake = true
+        let destination = movieID
+        Task {
+            defer { undoingTake = false }
+            do {
+                try await app.store.undoLastTake(movieID: destination, expectedSceneID: sceneID)
+                await app.refresh()
+                addedSceneID = nil; camera.savedScene = false
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            } catch { camera.message = error.localizedDescription }
         }
     }
     private func changeLiveLook(_ look: LUTReference?) {

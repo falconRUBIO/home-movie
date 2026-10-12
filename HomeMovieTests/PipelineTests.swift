@@ -365,6 +365,32 @@ final class PipelineTests: XCTestCase {
         let original = try await ThumbnailService.shared.image(scene: scene, root: store.root, movie: movie)
         XCTAssertNotEqual(filmica.pngData(), original.pngData())
     }
+    func testUndoLastTakeIsRecoverableAndRejectsStaleTargets() async throws {
+        let store = try await makeStore()
+        let movie = try await store.create(name: "Undo", format: .landscape)
+        let first = try await record(movie, into: store)
+        let last = try await record(movie, into: store)
+        let source = store.root.appendingPathComponent(last.source)
+        let original = try Data(contentsOf: source)
+        let before = await store.snapshot().first!
+        do { try await store.undoLastTake(movieID: movie.id, expectedSceneID: first.sceneID); XCTFail("Must not undo an older take") } catch {}
+        try await store.undoLastTake(movieID: movie.id, expectedSceneID: last.sceneID)
+        let undone = await store.snapshot().first!
+        XCTAssertEqual(undone.activeScenes.map(\.id), [first.sceneID])
+        XCTAssertEqual(undone.revision, before.revision + 1)
+        XCTAssertLessThan(undone.duration.seconds, before.duration.seconds)
+        XCTAssertNotNil(undone.scenes.last?.deletedAt)
+        XCTAssertEqual(try Data(contentsOf: source), original)
+        do { try await store.undoLastTake(movieID: movie.id, expectedSceneID: last.sceneID); XCTFail("A second stale tap must not remove another take") } catch {}
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let saved = await reopened.snapshot().first!
+        XCTAssertEqual(saved.activeScenes.map(\.id), [first.sceneID])
+        XCTAssertEqual(saved.recordingFormat, .landscape)
+        try await reopened.setSceneDeleted(movieID: movie.id, sceneID: last.sceneID, deleted: false)
+        let restored = await reopened.snapshot().first!
+        XCTAssertEqual(restored.activeScenes.map(\.id), [first.sceneID, last.sceneID])
+        XCTAssertEqual(try Data(contentsOf: source), original)
+    }
     func testLookSelectionPersistsAndInvalidatesExportRevision() async throws {
         let store = try await makeStore(), movie = try await store.create(name: "Log", format: .landscape, profile: .appleLog)
         do { _ = try await store.begin(movieID: movie.id, profile: .standard); XCTFail("A Log movie must not silently record Standard") } catch {}
