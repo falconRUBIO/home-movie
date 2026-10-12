@@ -1,6 +1,20 @@
 # Implementation audit — 2026-10-12
 
-## Current audit — October 12
+## Full-system re-audit — October 12
+
+Source `07cf94c0efa6fa15ae39c61dc957ecb19f8e81bc` compiled under Xcode 26.6 and passed **66 native simulator tests with zero failures** in [GitHub Actions run 38258797618](https://github.com/falconRUBIO/home-movie/actions/runs/38258797618). Test execution took 186.093 seconds. There were no application-source compiler warnings. Only runner destination/XCTest stripping and AppIntents extraction notices appeared; the Node.js 20 action warning was absent. Portable source/project, Swift grammar and deterministic project-generation checks passed.
+
+This second pass reviewed catalog loading and maintenance, backup integrity and rollback, capture/finalization and recovery, Log/look metadata, composition/export, Photos receipts, playback, countdown/Dolly state and workflow configuration. Eight added regression tests passed:
+
+- Restoring into a healthy unopened library preserves existing names, trims, ordering and identities.
+- Restore refuses to overwrite a newer catalog, even when its contents cannot decode under the current schema.
+- Explicit backup recording profiles must match the inspected media; legacy absent-profile metadata remains compatible.
+- Restored legacy bundled looks display Cinema while retaining identical color samples/domains and leaving the source backup untouched.
+- Photos export clears prior errors on retry, rejects missing save receipts, avoids writes after denied permission and prevents concurrent duplicate writes.
+
+The earlier camera, Dolly, countdown, playback and recovery regressions also passed. The native color tests use generated fixtures; they do not certify genuine camera Log capture or Cinema calibration. Real Photos permission/write behavior, genuine Standard/Log record-stop-save, Cinema/Original comparison, Photos/Files export, interruptions, hardware Dolly timing and iPhone layout/accessibility remain device acceptance gates. The current source has not been signed or uploaded to TestFlight.
+
+## First audit — October 12
 
 Baseline source `d086c06d2e564c5ceec989a9c9f2d660e8d00f00` compiled and passed 51 native tests with zero failures in [GitHub Actions run 38210671928](https://github.com/falconRUBIO/home-movie/actions/runs/38210671928). The logs contain runner/XCTest stripping and AppIntents extraction warnings, with no application-source compiler diagnostics. The Node.js 20 workflow warning is absent.
 
