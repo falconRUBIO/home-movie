@@ -420,7 +420,7 @@ struct CameraView: View {
                 } else if zoomDragging || pinchBase != nil {
                     Text("Manual Dolly").font(.caption).foregroundStyle(.secondary)
                 } else if !dollyGuidanceLearned {
-                    Text(handsFreeStart && camera.state == .ready ? "Choose two lenses, then tap Record." : "Tap a lens, then another to dolly.")
+                    Text(handsFreeStart && camera.state == .ready ? "Choose two lenses, then tap Record." : "Tap another lens to dolly from here.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("Dolly").font(.caption).foregroundStyle(.secondary)
@@ -477,7 +477,7 @@ struct CameraView: View {
         NavigationStack {
             List {
                 Section("Move between lenses") {
-                    Text("Your current lens is the starting point. Tap another lens to move smoothly to it. The outlined lens is your destination, and the dot follows the camera’s actual zoom.")
+                    Text("Your current zoom is the starting point. Tap another lens to move smoothly to it. The outlined lens is your destination, and the dot follows the camera’s actual zoom.")
                     Text("Tap a different lens during a move to change the destination. Drag the track or pinch the viewfinder to take manual control.")
                 }
                 Section("Automatic duration") {
@@ -497,9 +497,29 @@ struct CameraView: View {
         }.preferredColorScheme(.dark).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
     }
     private func smoothZoomBar(options: CameraOptions) -> some View {
-        HStack(spacing: 12) {
-            Text(zoomLabel(options.zoom, multiplier: options.multiplier))
-                .font(.caption.monospacedDigit()).frame(minWidth: 42)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                dollyZoomValue(options: options)
+                dollyTrack(options: options).frame(minWidth: 88)
+                dollyDurationMenu
+            }
+            VStack(spacing: 0) {
+                HStack {
+                    dollyZoomValue(options: options)
+                    Spacer(minLength: 8)
+                    dollyDurationMenu
+                }
+                dollyTrack(options: options)
+            }
+        }.padding(.horizontal, 12).padding(.vertical, 5)
+            .contentShape(Rectangle()).onTapGesture { }
+            .frame(maxWidth: 360).disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum || countdown != nil)
+    }
+    private func dollyZoomValue(options: CameraOptions) -> some View {
+        Text(zoomLabel(options.zoom, multiplier: options.multiplier))
+            .font(.caption.monospacedDigit()).frame(minWidth: 42)
+    }
+    private func dollyTrack(options: CameraOptions) -> some View {
             GeometryReader { geometry in
                 let width = max(1, geometry.size.width - 16)
                 let actualPosition = SmoothZoomFilter.position(Double(options.zoom), minimum: Double(options.minimum), maximum: Double(options.maximum))
@@ -540,6 +560,8 @@ struct CameraView: View {
                     let factor = Double(options.zoom) * pow(2, direction == .increment ? 0.25 : -0.25)
                     setSmoothPosition(SmoothZoomFilter.position(factor, minimum: Double(options.minimum), maximum: Double(options.maximum)), options: options)
                 }
+    }
+    private var dollyDurationMenu: some View {
             Menu {
                 Text("Time to move between lenses")
                 Picker("Dolly duration", selection: $dollySeconds) {
@@ -555,9 +577,6 @@ struct CameraView: View {
             }.accessibilityLabel("Dolly duration")
                 .accessibilityValue("\(DollyZoomDuration.validated(dollySeconds)) seconds")
                 .accessibilityHint("Time for the next automatic move between lenses. Does not change manual dragging.")
-        }.padding(.horizontal, 12).padding(.vertical, 5)
-            .contentShape(Rectangle()).onTapGesture { }
-            .frame(maxWidth: 360).disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum || countdown != nil)
     }
     private func setSmoothPosition(_ position: Double, options: CameraOptions, inputTime: Double? = nil, inputEnded: Bool = false) {
         guard smoothZoomOpen, countdown == nil, position.isFinite else { return }
