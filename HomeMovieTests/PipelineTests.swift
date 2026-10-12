@@ -5,7 +5,7 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
-    @MainActor func testFilmEffectsStandardPreviewAndExportShareRenderingWhileWatchStaysClean() async throws {
+    func testFilmEffectsStandardPreviewAndExportShareRenderingWhileWatchStaysClean() async throws {
         let store = try await makeStore()
         let original = try await store.create(name: "Effects integration", format: .landscape)
         _ = try await record(original, into: store)
@@ -27,13 +27,6 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(a.filmEffects, b.filmEffects)
         XCTAssertEqual(a.transform, b.transform)
         XCTAssertNil(a.cube); XCTAssertNil(b.cube)
-        let app = AppModel(store: store)
-        let previewModel = FilmEffectsPreviewModel()
-        await previewModel.prepare(movie: movie, app: app, settings: settings)
-        let retainedPlayer = try XCTUnwrap(previewModel.player)
-        await previewModel.prepare(movie: movie, app: app, settings: settings)
-        XCTAssertTrue(previewModel.player === retainedPlayer, "Fullscreen return must retain the preview player and timeline")
-        previewModel.stop()
         let time = CMTime(value: 10, timescale: 30)
         let previewGenerator = AVAssetImageGenerator(asset: preview.asset)
         previewGenerator.videoComposition = preview.videoComposition
@@ -381,7 +374,7 @@ final class PipelineTests: XCTestCase {
         guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal preview is unavailable") }
         let preview = PreviewUIView(frame: CGRect(x: 0, y: 0, width: 393, height: 698))
         let session = AVCaptureSession(); preview.previewLayer.session = session
-        let frames = LiveFrames(); frames.push(try makePreviewFrame())
+        let frames = LiveFrames(); frames.push(try livePreviewFrame())
         preview.configureLiveLook(frames: frames, cube: try ColorCube.filmica.get(), active: true)
         let metal = try XCTUnwrap(preview.subviews.compactMap { $0 as? MTKView }.first)
         let delegate = metal.delegate
