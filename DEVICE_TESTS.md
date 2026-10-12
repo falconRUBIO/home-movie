@@ -128,7 +128,9 @@ Tap the circular Play control for a multi-scene movie: open full-screen playback
 
 ## Built-in Filmica (NOT RUN)
 
-On a supported iPhone, New Movie must initially show Apple Log / Filmica without Files. Record; confirm Filmica preview, full-screen playback and export agree with the supplied Cinema reference. Compare skin, neutral gray and highlights to the creator workflow to confirm Apple Log input (cube lacks metadata). Look opens its menu; only Add opens Files. Apple Standard, Original and custom look switches must work and persist. Existing Standard movies retain their original capture profile. Back up and restore a Filmica movie with no external LUT import.
+On a supported iPhone, New Movie initially shows Standard. Choose Apple Log and confirm bundled Cinema is selected without opening Files. Record; confirm Cinema preview, full-screen playback and export agree with the supplied Cinema reference. Compare skin, neutral gray and highlights to the creator workflow to confirm Apple Log input (cube lacks metadata). Look opens its menu; only Add opens Files. Apple Standard, Original and custom look switches must work and persist. Existing Standard movies retain their original capture profile. Back up and restore a Cinema movie with no external LUT import.
+
+Live-preview report follow-up (NOT RUN on corrected source): the user reported flat live video despite LOG · Cinema, with graded playback working. Install the build containing the visible-overlay fix. Compare Cinema and Show Original on the same stationary scene before/during recording, return from Watch Movie, and repeat after backgrounding, lens changes and both orientations. The badge must show the selected look only when a graded frame is presented. Check ten-minute rendering, heat, GPU load and capture continuity; native eight/ten-bit render and onscreen presentation tests do not certify actual camera delivery.
 
 ## Hands-Free Start acceptance — NOT RUN
 

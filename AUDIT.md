@@ -1,5 +1,13 @@
 # Implementation audit — 2026-10-12
 
+## Live Cinema preview follow-up — October 12
+
+The user reports a flat live viewfinder while LOG · Cinema is displayed, with Cinema visible during playback. Source `f8294c31719e540c87d42f75eaf90d30b55fe8c9` compiled and passed **71 native simulator tests with zero failures** in [run 38271464260](https://github.com/falconRUBIO/home-movie/actions/runs/38271464260), taking 252.020 test seconds with no application-source compiler warnings.
+
+The live Metal overlay previously began nearly transparent and depended on a successful first-frame callback to reveal itself. It now remains fully opaque as a view, uses a capped 30 fps display loop, and reads only the latest camera frame with one GPU render in flight. Inactive/Original modes pause and hide the overlay. The live badge names the selected look only after GPU completion; loading and render failures have distinct status. Existing presentation generations reject obsolete completions. Capture and original file writing are unchanged.
+
+Two new tests passed without skips: Cinema GPU output matches the selected LUT for both BGRA and ten-bit bi-planar input, and a real visible Metal preview presents a graded frame before reporting Ready. These tests exercise rendering and presentation, rather than only look selection. Genuine iPhone capture delivery, preview/playback color agreement, orientation/lens changes and sustained GPU/thermal behavior remain device checks. This fix has not been uploaded to TestFlight.
+
 ## Scene audio and library refinements — October 12
 
 Source `117e54864be388c0b997010c27c579200b4d8eb7` compiled and passed **69 native tests with zero failures** in [run 38266938800](https://github.com/falconRUBIO/home-movie/actions/runs/38266938800), taking 224.286 test seconds with no application-source compiler warnings.

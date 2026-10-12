@@ -45,26 +45,27 @@
     "Physical-device Hands-Free cancellation/interruption, Dolly timing/lens transitions, orientations and accessibility.",
     "Signed TestFlight archive/upload and full device acceptance of the current audit source.",
     "Real-device Photos authorization and video write; Photos export unit checks use injected providers.",
-    "Phone listening: verify scene edge treatment is inaudible and suppresses the reported click, comparing original takes with Watch Movie and fresh exports."
+    "Phone listening: verify scene edge treatment is inaudible and suppresses the reported click, comparing original takes with Watch Movie and fresh exports.",
+    "Physical-camera frame delivery, live Cinema versus Original comparison and sustained GPU/thermal acceptance of the visible-overlay fix."
   ],
   "date": "2026-10-12",
-  "native_tests_supplied": 69,
-  "native_tests_run": 69,
-  "native_build_status": "PASS: current audio and library source compiled and passed all 69 native simulator tests. Phone listening and device acceptance pending.",
+  "native_tests_supplied": 71,
+  "native_tests_run": 71,
+  "native_build_status": "PASS: current live-preview source compiled and passed all 71 native simulator tests, including Cinema GPU pixels on eight/ten-bit input and visible graded-frame presentation. Phone acceptance pending.",
   "previous_cloud_build": {
-    "commit": "07cf94c0efa6fa15ae39c61dc957ecb19f8e81bc",
+    "commit": "117e54864be388c0b997010c27c579200b4d8eb7",
     "provider": "GitHub Actions",
-    "run_id": 38258797618,
-    "url": "https://github.com/falconRUBIO/home-movie/actions/runs/38258797618",
+    "run_id": 38266938800,
+    "url": "https://github.com/falconRUBIO/home-movie/actions/runs/38266938800",
     "status": "PASS",
-    "tests_run": 66,
-    "tests_passed": 66,
+    "tests_run": 69,
+    "tests_passed": 69,
     "tests_failed": 0,
-    "test_execution_seconds": 186.093,
+    "test_execution_seconds": 224.286,
     "application_source_warnings": 0
   },
   "testflight_uploaded": true,
-  "native_tests_passed": 69,
+  "native_tests_passed": 71,
   "native_tests_failed": 0,
   "signed_archive_created": true,
   "apple_package_validation_status": "PASS for build 1041; signed upload succeeded",
@@ -80,15 +81,15 @@
   },
   "current_revision_testflight_uploaded": false,
   "latest_cloud_build": {
-    "commit": "117e54864be388c0b997010c27c579200b4d8eb7",
+    "commit": "f8294c31719e540c87d42f75eaf90d30b55fe8c9",
     "provider": "GitHub Actions",
-    "run_id": 38266938800,
-    "url": "https://github.com/falconRUBIO/home-movie/actions/runs/38266938800",
+    "run_id": 38271464260,
+    "url": "https://github.com/falconRUBIO/home-movie/actions/runs/38271464260",
     "status": "PASS",
-    "tests_run": 69,
-    "tests_passed": 69,
+    "tests_run": 71,
+    "tests_passed": 71,
     "tests_failed": 0,
-    "test_execution_seconds": 224.286,
+    "test_execution_seconds": 252.02,
     "application_source_warnings": 0
   },
   "audit_initial_cloud_build": {
@@ -101,7 +102,7 @@
   },
   "uploaded_version": "0.2.0",
   "uploaded_build_number": 1041,
-  "physical_device_log_status": "Prior installed build rejected a take after Stop because its Apple Log metadata identifier was misread. Exact Core Media identifier recognition now passes native regression tests; current-source phone recording and color acceptance are still pending.",
+  "physical_device_log_status": "Prior Stop metadata rejection was corrected. User now reports graded Log-movie playback works but live viewfinder looks flat. Genuine Log source/codec inspection and current-source phone capture/color acceptance remain pending.",
   "log_readiness_cloud_build": {
     "commit": "41e45583a17166c79fdc2068bbb9f88105b51d32",
     "run_id": 38189320304,
@@ -109,5 +110,6 @@
     "tests_run": 36,
     "tests_failed": 0
   },
-  "reported_device": "iPhone 17 family; user reports latest iOS update, exact variant/version unconfirmed"
+  "reported_device": "iPhone 17 family; user reports latest iOS update, exact variant/version unconfirmed",
+  "physical_device_live_look_status": "User reports flat live preview despite LOG Cinema, while graded playback works. Visible Metal overlay/display-loop fix and render-status badge pass native GPU/presentation tests; corrected-source iPhone confirmation and TestFlight upload pending."
 }

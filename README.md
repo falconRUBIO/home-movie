@@ -4,7 +4,9 @@ A SwiftUI iPhone application for recording multiple ongoing movies, scene by sce
 
 ## Status — read this first
 
-Current source `117e5486` compiled and passed all **69 native simulator tests with zero failures** in [GitHub Actions run 38266938800](https://github.com/falconRUBIO/home-movie/actions/runs/38266938800). No application-source compiler warnings were reported. The suite covers Apple Log identifier recognition, Cinema LUT samples/backup, graded thumbnails, playback/export color consistency, Dolly duration math, countdown cancellation/restart, save/recovery, cold-library restore, Photos export receipt/retry/concurrency and scene audio edge mixing/export.
+Current source `f8294c31` compiled and passed all **71 native simulator tests with zero failures** in [GitHub Actions run 38271464260](https://github.com/falconRUBIO/home-movie/actions/runs/38271464260). No application-source compiler warnings were reported. The suite covers Apple Log identifier recognition, Cinema LUT samples/backup, graded thumbnails, playback/export color consistency, Dolly duration math, countdown cancellation/restart, save/recovery, cold-library restore, Photos export receipt/retry/concurrency, scene audio edge mixing/export, live GPU pixels and visible-preview presentation.
+
+The live Cinema preview now uses a visible Metal overlay with a capped 30 fps display loop. The badge reports the look only after successful rendering; Loading look and Preview unavailable describe other states. Native tests verify selected Cinema pixels on eight/ten-bit input and a graded frame reaching the visible preview. Confirmation on the reported iPhone requires a new build; capture originals remain untouched.
 
 Movies stay in one column for one to three titles and switch to two columns at four or more. Movie/scene deletion uses centered native alerts. Assembled playback/export uses five-millisecond audio edges to soften hard-cut clicks, with full volume between edges and unchanged scene timing/originals. Inaudibility and the reported click still require phone listening; old cached exports are rebuilt.
 
