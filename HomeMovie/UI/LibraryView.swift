@@ -135,7 +135,7 @@ struct NewMovieView: View {
     @State private var profile = CaptureProfile.standard
     @State private var supportsLog = false
     @State private var looks: [LUTReference] = []
-    @State private var selectedLook: LUTReference?
+    @State private var selectedLook: LUTReference? = .filmica
     @State private var importingLook = false
     @State private var loadingLook = false
     @State private var saving = false
@@ -162,7 +162,7 @@ struct NewMovieView: View {
                             }.foregroundStyle(.primary).disabled(loadingLook)
                         }
                     }
-                } footer: { Text(profile == .appleLog ? "Keeps a flexible original. ProRes is used when needed and takes more storage. Choose its look after recording." : "Hold your iPhone upright or sideways. Your first recording sets the movie’s orientation. Each recording becomes the next scene.") }
+                } footer: { Text(profile == .appleLog ? "Filmica is applied to preview, playback and export. Your Apple Log original stays intact. ProRes is used when needed and takes more storage." : "Hold your iPhone upright or sideways. Your first recording sets the movie’s orientation. Each recording becomes the next scene.") }
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
             }.navigationTitle("New Movie").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -171,7 +171,7 @@ struct NewMovieView: View {
                         Button("Create") {
                             saving = true
                             Task {
-                                do { let movie = try await app.store.create(name: name, format: .portrait, profile: profile, look: profile == .appleLog ? selectedLook : nil); await app.refresh(); created(movie.id) }
+                                do { let movie = try await app.store.create(name: name, format: .portrait, profile: profile, look: profile == .appleLog ? selectedLook : nil, useDefaultLook: false); await app.refresh(); created(movie.id) }
                                 catch { problem = error.localizedDescription; saving = false }
                             }
                         }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).count > 80 || saving || loadingLook)
@@ -190,7 +190,11 @@ struct NewMovieView: View {
                 case .failure(let error): problem = error.localizedDescription
                 }
             }
-            .task { supportsLog = await Task.detached { CaptureService.supportsAppleLog() }.value; looks = await app.store.availableLooks() }
+            .task {
+                supportsLog = await Task.detached { CaptureService.supportsAppleLog() }.value
+                if supportsLog { profile = .appleLog }
+                looks = await app.store.availableLooks()
+            }
     }
 }
 

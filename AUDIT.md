@@ -327,3 +327,11 @@ Camera-layout native verification: source 72921223ac7c6ffb241dceccf554b2fb3a1468
 - Opens a full-screen presentation of the existing movie player, with timeline hidden and the complete assembled/trimmed scene sequence. Reuses the composition/LUT pipeline and native AVKit controls. Done returns to the library.
 - Starts at the beginning after composition loads. Initial autoplay is consumed once; subsequent look/revision changes preserve play/pause state and position. Backgrounding pauses playback; a completed initial request starts when active without resuming a previously paused movie.
 - Existing camera Watch/scene review remains available through its default presentation. Portable checks pass; native build and physical UI/playback acceptance are pending.
+
+## Built-in Filmica default — 2026-10-12
+
+- Bundles the supplied Cinema.cube as Filmica (65-cube, all 274625 samples preserved as Float32; SHA256 of original 5c0c0baef12c2ad58292b445cdfb198821f7f0d5f819152b5ce735e111199e74). No replacement or synthetic grade.
+- Installs the bundled data into durable Looks storage automatically. New Apple Log movies select Filmica; supported devices default the New Movie form to Apple Log. Standard capture remains available on unsupported devices. Existing movies and explicit Apple Standard/custom selections are preserved.
+- Look opens the existing selection menu; Files opens only through Add Apple Log Look. The same Filmica table is used by live preview, playback and export, with untouched Log originals and self-contained backup/restore.
+- The creator describes Filmica as an Apple Log workflow (https://www.julianpapis.com/shop/p/filmica). Cinema.cube has no input-space metadata; direct Apple Log input is an inference from its supplied context and sample response, not a verified node-tree instruction. No extra Apple Standard conversion is stacked. Compare against the creator reference on the physical iPhone before color acceptance.
+- Added native tests for resource integrity, default selection, explicit Standard persistence and exact-sample backup/restore. Portable validation passes; this revision awaits native CI and device acceptance.

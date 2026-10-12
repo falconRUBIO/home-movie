@@ -301,6 +301,40 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(decoded.captureProfile, .standard)
         XCTAssertNil(decoded.look)
     }
+    func testBundledFilmicaDefaultsPersistAndStandardRemainsSelectable() async throws {
+        let cube = try ColorCube.filmica.get(); try cube.validate()
+        XCTAssertEqual(cube.name, "Filmica"); XCTAssertEqual(cube.dimension, 65)
+        let first = cube.rgba.withUnsafeBytes { $0.loadUnaligned(as: Float.self) }
+        XCTAssertEqual(first, 0.0308995, accuracy: 0.0000001)
+        let store = try await makeStore()
+        let looks = await store.availableLooks()
+        XCTAssertTrue(looks.contains(.filmica))
+        let movie = try await store.create(name: "Filmica", format: .portrait, profile: .appleLog)
+        XCTAssertEqual(movie.look, .filmica)
+        let stored = try ColorCube.load(.filmica, root: store.root)
+        XCTAssertEqual(stored.rgba, cube.rgba)
+        try await store.setLook(movieID: movie.id, look: nil)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let movies = await reopened.snapshot()
+        XCTAssertNil(movies.first?.look, "An explicit Apple Standard selection survives relaunch")
+        let standard = try await reopened.create(name: "SDR", format: .portrait)
+        XCTAssertNil(standard.look)
+        let explicit = try await reopened.create(name: "Apple Standard", format: .portrait, profile: .appleLog, useDefaultLook: false)
+        XCTAssertNil(explicit.look)
+    }
+    func testBundledFilmicaBackupIncludesExactSamples() async throws {
+        let store = try await makeStore()
+        _ = try await store.create(name: "Default look backup", format: .portrait, profile: .appleLog)
+        let service = BackupService(), backup = try await service.create(store: store) { _ in }
+        let destination = try await makeStore()
+        try await service.restore(from: backup.url, store: destination) { _ in }
+        let movies = await destination.snapshot()
+        let look = try XCTUnwrap(movies.first?.look)
+        XCTAssertEqual(look.name, "Filmica")
+        let restored = try ColorCube.load(look, root: destination.root)
+        XCTAssertEqual(restored.rgba, try ColorCube.filmica.get().rgba)
+        try await service.discard(backup.url)
+    }
     func testLookSelectionPersistsAndInvalidatesExportRevision() async throws {
         let store = try await makeStore(), movie = try await store.create(name: "Log", format: .landscape, profile: .appleLog)
         do { _ = try await store.begin(movieID: movie.id, profile: .standard); XCTFail("A Log movie must not silently record Standard") } catch {}

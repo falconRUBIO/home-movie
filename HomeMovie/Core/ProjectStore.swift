@@ -73,6 +73,12 @@ actor ProjectStore {
     func load() async throws -> [String] {
         guard !loaded else { return [] }
         try ensureDirectories()
+        // Install exact supplied samples into durable storage so backups remain self-contained.
+        let filmica = try ColorCube.filmica.get()
+        let filmicaURL = root.appendingPathComponent(LUTReference.filmica.path)
+        if !fm.fileExists(atPath: filmicaURL.path) {
+            try encoder.encode(filmica).write(to: filmicaURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
         if !cleanedTransfers {
             // These are app-owned temporary copies, never the source recordings.
             for folder in ["RestoreStaging", "OutgoingBackups"] {
@@ -157,10 +163,11 @@ actor ProjectStore {
         return Array(Set(notices)).sorted()
     }
     func snapshot() -> [Movie] { catalog.movies.sorted { ($0.lastRecordedAt ?? $0.createdAt) > ($1.lastRecordedAt ?? $1.createdAt) } }
-    @discardableResult func create(name: String, format: MovieFormat, profile: CaptureProfile = .standard, look: LUTReference? = nil) throws -> Movie {
+    @discardableResult func create(name: String, format: MovieFormat, profile: CaptureProfile = .standard, look: LUTReference? = nil, useDefaultLook: Bool = true) throws -> Movie {
         try requireIdle()
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= 80 else { throw HomeMovieError.message("Give your movie a name of up to 80 characters.") }
+        let look = look ?? (profile == .appleLog && useDefaultLook ? .filmica : nil)
         if let look {
             guard profile == .appleLog else { throw HomeMovieError.message("Choose Apple Log to use this look.") }
             _ = try ColorCube.load(look, root: root)

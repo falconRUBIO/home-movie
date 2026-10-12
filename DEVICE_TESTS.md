@@ -124,3 +124,7 @@ Compare against IMG_5438.PNG on the same iPhone: tall 9:16 portrait preview; hea
 ## Library cover Play (NOT RUN)
 
 Tap the circular Play control for a multi-scene movie: open full-screen playback, start from the beginning, play every active scene/trim in sequence with sound and the selected look. Pause/scrub using native controls; change looks while paused and while playing; background during loading/playback; Done must stop audio and return to the same library. The rest of the cover opens recording and the three-dot export still works. Empty movies must not offer Play. Check both orientations, accessibility labels and a bright cover for button contrast. Existing camera Watch must still show the timeline.
+
+## Built-in Filmica (NOT RUN)
+
+On a supported iPhone, New Movie must initially show Apple Log / Filmica without Files. Record; confirm Filmica preview, full-screen playback and export agree with the supplied Cinema reference. Compare skin, neutral gray and highlights to the creator workflow to confirm Apple Log input (cube lacks metadata). Look opens its menu; only Add opens Files. Apple Standard, Original and custom look switches must work and persist. Existing Standard movies retain their original capture profile. Back up and restore a Filmica movie with no external LUT import.
