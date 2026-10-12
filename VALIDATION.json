@@ -51,9 +51,9 @@
     "Physical-device capture-time Smooth Zoom filtering, native ease-out/held zoom, primary-lens lock/range, persistent overlay/touch/VoiceOver layout and uninterrupted audio/video"
   ],
   "date": "2026-10-12",
-  "native_tests_supplied": 42,
-  "native_tests_run": 37,
-  "native_build_status": "Smooth Zoom passes portable source/grammar/project checks; 42-test native run pending. Previous 9b4efe10 passed 37 tests.",
+  "native_tests_supplied": 43,
+  "native_tests_run": 42,
+  "native_build_status": "Smooth Zoom compiled and passed 42 tests. Log format/codec negotiation correction passes portable checks; 43-test native run pending.",
   "previous_cloud_build": {
     "commit": "6750e2065d3790e3d14da2bc999e33183a0110e9",
     "provider": "GitHub Actions",
@@ -66,12 +66,12 @@
     "application_source_warnings": 0
   },
   "testflight_uploaded": true,
-  "native_tests_passed": 37,
+  "native_tests_passed": 42,
   "native_tests_failed": 0,
   "signed_archive_created": true,
-  "apple_package_validation_status": "PASS for 7ba9e7ca; signed upload succeeded",
-  "uploaded_commit": "7ba9e7cad6632792d9370d9c2d6e7824dd40a089",
-  "successful_upload_run": 38187684998,
+  "apple_package_validation_status": "PASS for build 1041; signed upload succeeded",
+  "uploaded_commit": "e50a1881edc6e6ed6f8b80b05fa35556803e3d2f",
+  "successful_upload_run": 38190895209,
   "latest_failed_native_run": {
     "run_id": 38183482779,
     "commit": "26512ba1363026d8d827f6a4a80844c6a7dd3023",
@@ -81,14 +81,14 @@
   },
   "current_revision_testflight_uploaded": false,
   "latest_cloud_build": {
-    "commit": "9b4efe102f99b4267fc8a070e5cb2d4f85c45a54",
+    "commit": "0376b8591e0a5f36d48d32c7e87566b4e2232ab7",
     "provider": "GitHub Actions",
-    "run_id": 38190065020,
+    "run_id": 38192138287,
     "status": "PASS",
-    "tests_run": 37,
-    "tests_passed": 37,
+    "tests_run": 42,
+    "tests_passed": 42,
     "tests_failed": 0,
-    "test_execution_seconds": 162.796,
+    "test_execution_seconds": 88.714,
     "application_source_warnings": 0
   },
   "audit_initial_cloud_build": {
@@ -100,8 +100,8 @@
     "test_execution_seconds": 70.22
   },
   "uploaded_version": "0.2.0",
-  "uploaded_build_number": 1031,
-  "physical_device_log_status": "FAIL reported by user screenshot IMG_5433.PNG: combined color-space/HEVC readiness guard rejected recording; exact subcondition undetermined. Configuration/readiness follow-up requires phone verification.",
+  "uploaded_build_number": 1041,
+  "physical_device_log_status": "FAIL in TestFlight 1041: Apple Log color space enabled but selected output did not offer HEVC. Correction probes native formats/codecs, prefers HEVC then ProRes LT/422, checks again after session start. Phone verification pending.",
   "log_readiness_cloud_build": {
     "commit": "41e45583a17166c79fdc2068bbb9f88105b51d32",
     "run_id": 38189320304,

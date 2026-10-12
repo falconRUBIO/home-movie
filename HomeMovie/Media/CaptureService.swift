@@ -24,6 +24,17 @@ struct LensChoice: Identifiable, Equatable, Sendable {
         return choices
     }
 }
+enum LogRecordingCodec {
+    // ProRes FourCCs avoid SDK spelling changes; each is checked against the output at runtime.
+    static let proResLT = AVVideoCodecType(rawValue: "apcs")
+    static let proRes422 = AVVideoCodecType(rawValue: "apcn")
+    static func preferred(in available: [AVVideoCodecType]) -> AVVideoCodecType? {
+        [.hevc, proResLT, proRes422].first { available.contains($0) }
+    }
+    static func label(_ codec: AVVideoCodecType?) -> String {
+        codec == .hevc ? "Apple Log · HEVC" : "Apple Log · ProRes"
+    }
+}
 struct CameraOptions: Sendable {
     var lenses: [LensChoice]
     var zoom: CGFloat
@@ -44,6 +55,7 @@ struct CameraOptions: Sendable {
     var torchOn: Bool
     var canStayOnLens: Bool
     var smoothMoving: Bool
+    var recordingFormat: String
 }
 enum CaptureEvent {
     case ready(CameraOptions)
@@ -150,7 +162,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                     self.configuredProfile = profile
                     try self.configure(front: self.device(front: front) == nil ? false : front)
                 }
-                try self.ensureLogCaptureReady()
+                try self.ensureLogCaptureReady(requireCodec: false)
                 try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .videoRecording, options: [.defaultToSpeaker])
                 try AVAudioSession.sharedInstance().setActive(true)
                 if !self.session.isRunning { self.session.startRunning() }
@@ -185,19 +197,13 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         let audio = try AVCaptureDeviceInput(device: mic)
         guard session.canAddInput(audio), session.canAddOutput(output) else { throw HomeMovieError.message("Recording could not be configured.") }
         session.addInput(audio); session.addOutput(output)
-        try configureFormat(camera)
         if configuredProfile == .appleLog {
             guard session.canAddOutput(liveOutput) else { throw HomeMovieError.message("Live Log preview is unavailable on this camera.") }
             session.addOutput(liveOutput)
             liveOutput.alwaysDiscardsLateVideoFrames = true
-            let available = liveOutput.availableVideoPixelFormatTypes
-            guard let pixelFormat = [kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange, kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange].first(where: { available.contains($0) }) else {
-                throw HomeMovieError.message("A high-quality live Log preview is unavailable on this camera.")
-            }
-            liveOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat]
             liveOutput.setSampleBufferDelegate(liveFrames, queue: liveQueue)
-            try configureFormat(camera)
         }
+        try configureFormat(camera)
         setCoordinator(camera)
         configureVideoConnection()
         output.minFreeDiskSpaceLimit = 200_000_000
@@ -215,8 +221,23 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 let b = CMVideoFormatDescriptionGetDimensions($1.formatDescription)
                 return Int64(a.width) * Int64(a.height) < Int64(b.width) * Int64(b.height)
             }
-            guard let format = formats.first else { throw HomeMovieError.message("Apple Log is not available on this camera. Switch back to a supported rear camera.") }
-            camera.activeFormat = format
+            guard let first = formats.first else { throw HomeMovieError.message("Apple Log is not available on this camera. Switch back to a supported rear camera.") }
+            // A Log color space alone does not imply that MovieFileOutput can encode HEVC.
+            // Probe each active format, preferring HEVC across all formats before ProRes.
+            liveOutput.videoSettings = [:]
+            var selected: AVCaptureDevice.Format?
+            var proRes: AVCaptureDevice.Format?
+            for format in formats {
+                camera.activeFormat = format
+                camera.automaticallyAdjustsVideoHDREnabled = false
+                if format.isVideoHDRSupported { camera.isVideoHDREnabled = false }
+                camera.activeColorSpace = .appleLog
+                let codec = LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)
+                if codec == .hevc { selected = format; break }
+                if codec != nil && proRes == nil { proRes = format }
+            }
+            // The fully committed/running graph is checked again before enabling Record.
+            camera.activeFormat = selected ?? proRes ?? first
         } else if camera.activeFormat.supportedColorSpaces.contains(.sRGB) { camera.activeColorSpace = .sRGB }
         if camera.activeFormat.videoSupportedFrameRateRanges.contains(where: { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 }) {
             camera.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
@@ -237,9 +258,16 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
         }
         // Select Log last: format, HDR and zoom configuration must not override it.
-        if configuredProfile == .appleLog { camera.activeColorSpace = .appleLog }
+        if configuredProfile == .appleLog {
+            camera.activeColorSpace = .appleLog
+            let available = liveOutput.availableVideoPixelFormatTypes
+            guard let pixelFormat = [kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange, kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange].first(where: { available.contains($0) }) else {
+                throw HomeMovieError.message("A high-quality live Log preview is unavailable on this camera.")
+            }
+            liveOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat]
+        }
     }
-    private func ensureLogCaptureReady() throws {
+    private func ensureLogCaptureReady(requireCodec: Bool = true) throws {
         guard configuredProfile == .appleLog else { return }
         guard let camera = videoInput?.device, camera.activeFormat.supportedColorSpaces.contains(.appleLog) else {
             throw HomeMovieError.message("The camera’s active format no longer supports Apple Log. Tap Resume Camera to reconnect.")
@@ -253,10 +281,20 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         guard camera.activeColorSpace == .appleLog else {
             throw HomeMovieError.message("Apple Log could not stay enabled on this camera. Tap Resume Camera to reconnect.")
         }
-        guard let connection = output.connection(with: .video), output.availableVideoCodecTypes.contains(.hevc) else {
-            throw HomeMovieError.message("Apple Log is enabled, but this camera output does not offer HEVC recording.")
+        guard requireCodec else { return }
+        if LogRecordingCodec.preferred(in: output.availableVideoCodecTypes) == nil {
+            // Retry format negotiation after startRunning has completed, never during a take.
+            guard ticket == nil else { throw HomeMovieError.message("The Log recording format is unavailable.") }
+            try configureFormat(camera)
+            configureVideoConnection()
+            liveFrames.clear()
         }
-        output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
+        guard let connection = output.connection(with: .video),
+              let codec = LogRecordingCodec.preferred(in: output.availableVideoCodecTypes) else {
+            throw HomeMovieError.message("This camera could not provide a compatible Apple Log recording format. Tap Resume Camera to reconnect.")
+        }
+        output.setOutputSettings([AVVideoCodecKey: codec], for: connection)
+        output.minFreeDiskSpaceLimit = codec == .hevc ? 200_000_000 : 500_000_000
         guard camera.activeColorSpace == .appleLog else {
             throw HomeMovieError.message("The recording output changed the camera’s Apple Log mode. Tap Resume Camera to reconnect.")
         }
@@ -306,7 +344,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             minimumExposureBias: camera.minExposureTargetBias, maximumExposureBias: camera.maxExposureTargetBias,
             canFlip: device(front: !isFront) != nil, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on,
             canStayOnLens: camera.isVirtualDevice && camera.activePrimaryConstituent != nil && camera.primaryConstituentDeviceSwitchingBehavior != .unsupported,
-            smoothMoving: smoothTimer != nil)
+            smoothMoving: smoothTimer != nil,
+            recordingFormat: configuredProfile == .appleLog ? LogRecordingCodec.label(LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)) : "Standard · H.264")
     }
     func focus(at point: CGPoint, locked: Bool = false) {
         guard point.x.isFinite, point.y.isFinite, (0...1).contains(point.x), (0...1).contains(point.y) else { return }
@@ -498,8 +537,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             if live.isVideoMirroringSupported { live.isVideoMirrored = false }
             if live.isVideoStabilizationSupported { live.preferredVideoStabilizationMode = .off }
         }
-        if configuredProfile == .appleLog, output.availableVideoCodecTypes.contains(.hevc) {
-            output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
+        if configuredProfile == .appleLog, let codec = LogRecordingCodec.preferred(in: output.availableVideoCodecTypes) {
+            output.setOutputSettings([AVVideoCodecKey: codec], for: connection)
         }
         if configuredProfile == .standard && output.availableVideoCodecTypes.contains(.h264) {
             output.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.h264], for: connection)
@@ -517,11 +556,12 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 self.turnOffTorch()
                 try self.replaceInput(old, with: next)
                 self.videoInput = next; self.isFront = !oldFront
-                do { try self.configureFormat(camera) }
+                do { try self.configureFormat(camera); try self.ensureLogCaptureReady() }
                 catch {
                     try self.replaceInput(next, with: old)
                     self.videoInput = old; self.isFront = oldFront
                     try self.configureFormat(old.device)
+                    try self.ensureLogCaptureReady()
                     self.setCoordinator(old.device); self.configureVideoConnection()
                     throw error
                 }

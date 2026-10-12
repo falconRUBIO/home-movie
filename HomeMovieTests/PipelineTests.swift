@@ -5,6 +5,14 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    func testLogCodecPrefersHEVCAndSupportsNativeProResWithoutSDRFallback() {
+        XCTAssertEqual(LogRecordingCodec.preferred(in: [LogRecordingCodec.proRes422, .hevc, LogRecordingCodec.proResLT]), .hevc)
+        XCTAssertEqual(LogRecordingCodec.preferred(in: [LogRecordingCodec.proRes422, LogRecordingCodec.proResLT]), LogRecordingCodec.proResLT)
+        XCTAssertEqual(LogRecordingCodec.preferred(in: [LogRecordingCodec.proRes422]), LogRecordingCodec.proRes422)
+        XCTAssertNil(LogRecordingCodec.preferred(in: [.h264]))
+        XCTAssertNil(LogRecordingCodec.preferred(in: []))
+    }
+
     @MainActor func testLiveLookCompletionCannotRevealOriginalOrInactivePreview() throws {
         guard let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) else {
             throw XCTSkip("Metal preview is unavailable on this simulator")

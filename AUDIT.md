@@ -294,3 +294,12 @@ Apple references:
 https://developer.apple.com/documentation/avfoundation/avcapturedevice/ramp(tovideozoomfactor:withrate:)
 https://developer.apple.com/documentation/avfoundation/avcapturedevice/cancelvideozoomramp()
 https://developer.apple.com/documentation/avfoundation/avcapturedevice/primaryconstituentdeviceswitchingbehavior-swift.enum/locked
+
+
+## Log codec failure follow-up — 2026-10-12
+
+- Build 1041 device screenshot identifies missing HEVC in the selected MovieFileOutput format; Apple Log color-space setup succeeded. Previous combined-guard diagnosis is now resolved.
+- Query codec availability for each actual active Log format. Prefer HEVC across all candidates, then native ProRes LT/422, preserving original Apple Log and never substituting SDR/Log 2.
+- Set ten-bit live preview buffers after selecting the capture format. Validate recording codecs after the session starts and again at the take boundary; camera switching uses the same checks.
+- Setup explains ProRes storage, camera settings show actual recording format, Log take preflight reserves 1 GB and ProRes output retains 500 MB free-space headroom.
+- Smooth Zoom source 0376b859 passed 42 native tests with no app-source warnings. New codec selection regression makes 43 tests; native correction build pending. Hardware recording/bit depth/metadata remain unverified.

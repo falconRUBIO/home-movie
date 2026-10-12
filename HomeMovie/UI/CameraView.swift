@@ -134,6 +134,10 @@ struct CameraView: View {
                     .disabled(changingLook)
             }
             Menu {
+                if let options = camera.options {
+                    Text(options.recordingFormat)
+                    Divider()
+                }
                 Picker("Smoothing Speed", selection: $zoomSpeed) {
                     ForEach(SmoothZoomSpeed.allCases) { speed in Text(speed.label).tag(speed.rawValue) }
                 }

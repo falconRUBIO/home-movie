@@ -145,7 +145,7 @@ struct NewMovieView: View {
                             }.foregroundStyle(.primary).disabled(loadingLook)
                         }
                     }
-                } footer: { Text(profile == .appleLog ? "Keeps a flexible original. Choose its look after recording." : "Hold your iPhone upright or sideways. Your first recording sets the movie’s orientation. Each recording becomes the next scene.") }
+                } footer: { Text(profile == .appleLog ? "Keeps a flexible original. ProRes is used when needed and takes more storage. Choose its look after recording." : "Hold your iPhone upright or sideways. Your first recording sets the movie’s orientation. Each recording becomes the next scene.") }
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
             }.navigationTitle("New Movie").navigationBarTitleDisplayMode(.inline)
                 .toolbar {

@@ -223,7 +223,7 @@ actor ProjectStore {
         if let format, let locked = catalog.movies[i].recordingFormat, format != locked {
             throw HomeMovieError.message("This scene must use the movie’s saved format.")
         }
-        try requireSpace(bytes: 300_000_000)
+        try requireSpace(bytes: catalog.movies[i].captureProfile == .appleLog ? 1_000_000_000 : 300_000_000)
         let ticket = CaptureTicket(movieID: movieID, sequence: catalog.movies[i].nextSequence, format: format, profile: profile)
         try encoder.encode(ticket).write(to: try url(ticket.journal), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         return ticket

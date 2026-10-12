@@ -4,7 +4,7 @@ A SwiftUI iPhone application for recording multiple ongoing movies, scene by sce
 
 ## Status — read this first
 
-The latest source revision `9b4efe10` compiled and passed all 37 native simulator tests in GitHub Actions run `38190065020`, with no application-source warnings. This includes Log readiness/reconnect changes, native-style black camera controls, lens-choice filtering, live-look handoff, renderer/export consistency, backup restoration and existing recording/storage behavior. Source `7ba9e7ca` successfully signed and uploaded as TestFlight version 0.2.0 build 1031; the current changes need a new upload from main. Actual Log recording still needs verification on the reported iPhone following its screenshot failure; native simulator success does not test camera hardware. See `AUDIT.md`, `VALIDATION.json` and `DEVICE_TESTS.md`.
+Source `0376b859` compiled and passed all 42 native simulator tests in GitHub Actions run `38192138287`, including Smooth Zoom filtering. Version 0.2.0 build 1041 successfully uploaded to TestFlight, but a physical-device screenshot confirms its Log HEVC readiness guard fails. The follow-up probes native Log formats and recording codecs, preferring HEVC and using ProRes LT/422 when needed, with increased storage reserves and explicit setup/settings information. This correction awaits the 43-test native build and a new TestFlight upload from main. Actual camera, lens lock, Log metadata and live preview require phone verification. See `AUDIT.md`, `VALIDATION.json` and `DEVICE_TESTS.md`.
 
 ## Automatic GitHub build tests
 
