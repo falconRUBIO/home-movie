@@ -90,7 +90,15 @@ enum CaptureEvent {
 final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
     private let singleSession = AVCaptureSession()
     private var seamless: SeamlessCapture?
-    var session: AVCaptureSession { seamless?.session ?? singleSession }
+    private let sessionLock = NSLock()
+    private var selectedSession: AVCaptureSession?
+    var session: AVCaptureSession {
+        sessionLock.lock(); defer { sessionLock.unlock() }
+        return selectedSession ?? singleSession
+    }
+    private func selectSession(_ session: AVCaptureSession) {
+        sessionLock.lock(); selectedSession = session; sessionLock.unlock()
+    }
     private let queue = DispatchQueue(label: "HomeMovie.Capture", qos: .userInitiated)
     private let output = AVCaptureMovieFileOutput()
     let liveFrames = LiveFrames()
@@ -209,12 +217,14 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         liveFrames.clear()
         if session.isRunning { session.stopRunning() }
         seamless = nil
+        selectSession(singleSession)
         singleSession.beginConfiguration()
         singleSession.inputs.forEach { singleSession.removeInput($0) }
         singleSession.outputs.forEach { singleSession.removeOutput($0) }
         singleSession.commitConfiguration()
         if front, configuredProfile == .standard, let dual = SeamlessCapture(queue: queue, frames: liveFrames) {
             seamless = dual; videoInput = dual.activeInput; isFront = true
+            selectSession(dual.session)
             dual.onStarted = { [weak self] id in self?.onEvent?(.started(id)) }
             dual.onFinished = { [weak self] ticket, error in
                 guard let self else { return }
