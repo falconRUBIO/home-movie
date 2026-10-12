@@ -1,5 +1,7 @@
 # Device acceptance — not yet executed
 
+Dolly motion follow-up (NOT RUN on corrected source): compare slow and fast slider drags and pinches at every Manual Dolly Response setting. Try every available lens pair in both directions and all automatic durations, including rapid nearby retargets, direction reversals, release, close, Hands-Free Start and Stay on This Lens changes. Inspect saved footage as well as the viewfinder. Repeat with Standard and Cinema, a stationary camera, bright/low light and a warmed device. Expect continuous movement and truthful measured progress; a long queue stall may extend duration without a catch-up jump. Record any physical sensor-switch, focus/exposure or frame-delivery discontinuity separately. Native motion/gesture tests do not establish smoothness on real sensors.
+
 Every row below is **NOT RUN**. Run the complete matrix on an older supported iPhone and a recent multi-camera iPhone. Include iOS 18 and iOS 26+ when devices are available. Save device/model, OS, Xcode version, result, and a reproduction for any failure.
 
 ## First acceptance gate

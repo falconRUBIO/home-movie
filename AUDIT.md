@@ -1,5 +1,17 @@
 # Implementation audit — 2026-10-12
 
+## Dolly motion audit and manual drag follow-up — October 12
+
+Source `2b287a0ed1bf5f351ac7c3f9b43b966ab3b8a86f` compiled and passed **85 native tests with zero failures** in [run 38279445539](https://github.com/falconRUBIO/home-movie/actions/runs/38279445539). Test execution took 230.053 seconds with no application-source compiler warnings. Portable source/project and Swift grammar checks passed. The combined source preserves the concurrently added endpoint/progress/help interface; oversized SwiftUI expressions were split to resolve its native compiler failure.
+
+The previous controller restarted native ramps every 50 ms and discarded velocity on reversals/takeovers. Dolly now owns one trajectory and applies its zoom positions at 60 Hz. Manual motion uses a damped response with preserved velocity; timed retargeting blends incoming speed/acceleration before the remaining eased move. A short blend prevents long-duration retargets to nearby lenses from amplifying momentum into large overshoots. Speed and lens-range changes preserve motion when hardware bounds permit. The requested lens remains distinct from a temporary clamped destination, allowing continuation when the range widens.
+
+Manual slider and pinch gestures measure hand speed in log zoom space with filtered timestamps. Faster drags raise the follow speed; slow drags stay slow even with Fast selected. Slow/Normal/Fast also have distinct response times. Gesture release retains a smooth finish, and new gestures discard stale speed history. The visible dot/progress follows measured zoom and interpolates between updates, including during dragging; Reduce Motion disables the visual interpolation. Necessary virtual-camera zoom-boundary changes remain available under restricted switching; optional Stay on This Lens remains supported.
+
+A delayed capture queue pauses the motion curve instead of jumping through missed positions. Normal timing follows elapsed time; long stalls can extend the requested duration to preserve smoothness. Close, interruption and suspension still stop and hold with generation guards. Closed-state lens selection remains direct.
+
+Fourteen regressions added since the 71-test baseline passed: motion continuity, response/speed changes, drag velocity and cadence, nearby targets, retained lens destinations, hardware-range rebasing, stalled clocks, and truthful route progress. Existing duration/easing, countdown, Log/Cinema GPU, audio, save/recovery and export tests also passed. These tests verify software commands and math; **physical lens handoffs, delivered frame smoothness, focus/exposure changes and thermal/low-light performance have not been certified on an iPhone**. Current-source TestFlight upload and device acceptance remain pending.
+
 ## Live Cinema preview follow-up — October 12
 
 The user reports a flat live viewfinder while LOG · Cinema is displayed, with Cinema visible during playback. Source `f8294c31719e540c87d42f75eaf90d30b55fe8c9` compiled and passed **71 native simulator tests with zero failures** in [run 38271464260](https://github.com/falconRUBIO/home-movie/actions/runs/38271464260), taking 252.020 test seconds with no application-source compiler warnings.
