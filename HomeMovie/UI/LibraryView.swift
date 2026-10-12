@@ -149,7 +149,7 @@ struct NewMovieView: View {
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
             }.navigationTitle("New Movie").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving || loadingLook) }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Create") {
                             saving = true

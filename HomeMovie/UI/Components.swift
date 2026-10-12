@@ -88,7 +88,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
             lookRenderer?.frames?.setListener(nil)
             if let frames = monitoredFrames, let view = lookView {
                 frames.setListener { [weak frames, weak view] in
-                    DispatchQueue.main.async { frames?.notificationHandled(); view?.draw() }
+                    DispatchQueue.main.async { [weak frames, weak view] in frames?.notificationHandled(); view?.draw() }
                 }
             }
         }
