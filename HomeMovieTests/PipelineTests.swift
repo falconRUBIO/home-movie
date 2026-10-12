@@ -104,6 +104,17 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(choices.map(\.displayed), [0.5, 1, 2, 4, 8])
         XCTAssertEqual(choices.last?.factor, 16)
     }
+    func testInternalSwitchBoundaryDoesNotBecomeAnExtraLensButton() {
+        let choices = LensChoice.available(minimum: 1, maximum: 20, multiplier: 0.5,
+            switchFactors: [1.8, 1.91, 2, 8], secondaryFactors: [4, 16, 16.01])
+        XCTAssertEqual(choices.map(\.displayed), [0.5, 1, 2, 4, 8])
+        XCTAssertEqual(choices.first(where: { $0.displayed == 1 })?.factor, 2,
+            "Use the system multiplier's true 1× anchor, not a nearby switch boundary")
+        XCTAssertFalse(choices.contains(where: { $0.displayed == 0.9 }))
+        let single = LensChoice.available(minimum: 1, maximum: 12, multiplier: 1,
+            switchFactors: [], secondaryFactors: [2])
+        XCTAssertEqual(single.map(\.displayed), [1, 2])
+    }
     func testZoomChoicesRespectDeviceRangeAndDoNotInventEightTimes() {
         let olderPhone = LensChoice.available(minimum: 1, maximum: 12, multiplier: 0.5,
             switchFactors: [2, 6], secondaryFactors: [])

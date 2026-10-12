@@ -50,9 +50,9 @@
     "Signed archive/upload and physical-device acceptance of current preview-handoff audit revision"
   ],
   "date": "2026-10-12",
-  "native_tests_supplied": 36,
+  "native_tests_supplied": 37,
   "native_tests_run": 36,
-  "native_build_status": "Log readiness follow-up passes portable validation; native run pending. Previous 6750e206 passed 36 tests.",
+  "native_build_status": "Native camera controls and lens cleanup pass portable validation; 37-test native run pending. Previous Log readiness 41e45583 passed 36 tests.",
   "previous_cloud_build": {
     "commit": "468bb983a8cf4408752d9a91a0fb04121141304d",
     "provider": "GitHub Actions",
@@ -99,5 +99,12 @@
   },
   "uploaded_version": "0.2.0",
   "uploaded_build_number": 1031,
-  "physical_device_log_status": "FAIL reported by user screenshot IMG_5433.PNG: combined color-space/HEVC readiness guard rejected recording; exact subcondition undetermined. Configuration/readiness follow-up requires phone verification."
+  "physical_device_log_status": "FAIL reported by user screenshot IMG_5433.PNG: combined color-space/HEVC readiness guard rejected recording; exact subcondition undetermined. Configuration/readiness follow-up requires phone verification.",
+  "log_readiness_cloud_build": {
+    "commit": "41e45583a17166c79fdc2068bbb9f88105b51d32",
+    "run_id": 38189320304,
+    "status": "PASS",
+    "tests_run": 36,
+    "tests_failed": 0
+  }
 }

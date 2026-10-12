@@ -6,7 +6,6 @@ struct CameraView: View {
     @ObservedObject var app: AppModel
     @StateObject private var camera: CameraModel
     @State private var movieID: UUID
-    @State private var picking = false
     @State private var watching = false
     @State private var initialReviewID: UUID?
     @State private var pinchBase: CGFloat?
@@ -18,7 +17,6 @@ struct CameraView: View {
     @State private var changingLook = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("lastMovieID") private var lastMovieID = ""
     init(app: AppModel, movieID: UUID) {
         self.app = app; _movieID = State(initialValue: movieID)
         _camera = StateObject(wrappedValue: CameraModel(app: app))
@@ -29,36 +27,27 @@ struct CameraView: View {
         GeometryReader { geometry in
             let landscape = geometry.size.width > geometry.size.height
             if let movie {
-                ZStack {
-                    preview().ignoresSafeArea()
-                    LinearGradient(stops: [
-                        .init(color: .black.opacity(0.55), location: 0),
-                        .init(color: .clear, location: 0.24),
-                        .init(color: .clear, location: 0.62),
-                        .init(color: .black.opacity(0.65), location: 1)
-                    ], startPoint: .top, endPoint: .bottom)
-                        .ignoresSafeArea().allowsHitTesting(false)
-                    VStack(spacing: 10) {
-                        header(movie: movie)
-                        if landscape {
-                            HStack(spacing: 16) {
-                                VStack(spacing: 10) {
-                                    timer(movie: movie)
-                                    Spacer(minLength: 12)
-                                    status(movie: movie)
-                                    lenses
-                                }.frame(maxWidth: .infinity)
-                                controls(movie: movie, compact: true).frame(width: 110)
+                VStack(spacing: 0) {
+                    header(movie: movie)
+                        .padding(.horizontal, 12).padding(.vertical, 8).background(.black)
+                    if landscape {
+                        HStack(spacing: 0) {
+                            VStack(spacing: 0) {
+                                viewfinder(movie: movie)
+                                lenses.padding(.vertical, 8).frame(maxWidth: .infinity).background(.black)
                             }
-                        } else {
-                            timer(movie: movie)
-                            Spacer(minLength: 16)
-                            status(movie: movie)
+                            controls(movie: movie, compact: true)
+                                .frame(width: 132).frame(maxHeight: .infinity)
+                                .padding(.horizontal, 8).background(.black)
+                        }
+                    } else {
+                        viewfinder(movie: movie)
+                        VStack(spacing: 10) {
                             lenses
                             controls(movie: movie, compact: false)
-                        }
+                        }.padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
+                            .frame(maxWidth: .infinity).background(.black)
                     }
-                    .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 10)
                 }
             } else { ContentUnavailableView("Movie unavailable", systemImage: "film") }
         }
@@ -103,18 +92,6 @@ struct CameraView: View {
             if phase != .active { camera.suspend() }
             else if !watching && !camera.busy { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }
         }
-        .sheet(isPresented: $picking) {
-            NavigationStack {
-                List(app.activeMovies) { movie in
-                    Button {
-                        movieID = movie.id; lastMovieID = movie.id.uuidString; picking = false
-                    } label: {
-                        HStack { Text(movie.name); Spacer(); if movie.id == movieID { Image(systemName: "checkmark") } }
-                    }
-                }.navigationTitle("Record into").navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { picking = false } } }
-            }.presentationDetents([.medium, .large])
-        }
         .fullScreenCover(isPresented: $watching, onDismiss: { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }) {
             WatchMovieView(movieID: movieID, initialSceneID: initialReviewID).environmentObject(app)
         }
@@ -124,13 +101,6 @@ struct CameraView: View {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left").frame(width: 44, height: 44).homeGlass()
             }.accessibilityLabel("Back to Movies").disabled(camera.busy)
-            Spacer(minLength: 8)
-            Button { picking = true } label: {
-                HStack(spacing: 7) {
-                    Text(movie.name).font(.subheadline.weight(.medium)).lineLimit(1)
-                    Image(systemName: "chevron.down").font(.caption2)
-                }.padding(.horizontal, 15).frame(minHeight: 40).homeGlass()
-            }.disabled(camera.busy).accessibilityLabel("Recording into \(movie.name). Change movie")
             Spacer(minLength: 8)
             if movie.captureProfile == .appleLog {
                 Menu {
@@ -155,6 +125,16 @@ struct CameraView: View {
                     .disabled(camera.state != .ready && camera.state != .recording)
             } else { Color.clear.frame(width: 44, height: 44) }
         }
+    }
+    private func viewfinder(movie: Movie) -> some View {
+        ZStack {
+            preview()
+            VStack {
+                timer(movie: movie).padding(.top, 8)
+                Spacer(minLength: 12)
+                status(movie: movie).padding(.horizontal, 20).padding(.bottom, 12)
+            }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
     }
     private func timer(movie: Movie) -> some View {
         VStack(spacing: 6) {
@@ -186,6 +166,7 @@ struct CameraView: View {
     }
     @ViewBuilder private func status(movie: Movie) -> some View {
         VStack(spacing: 8) {
+            if camera.state == .finalizing { ProgressView("Saving scene…").tint(.white) }
             if let message = camera.message { Text(message) }
             if camera.state == .failed || camera.state == .interrupted {
                 Button("Resume Camera") { Task { await camera.prepare(profile: movie.captureProfile) } }.buttonStyle(.bordered)
@@ -250,7 +231,6 @@ struct CameraView: View {
                 .frame(width: 46, height: 46).background(.white.opacity(0.15), in: Circle())
         }.accessibilityLabel("Switch camera").disabled(camera.state != .ready || camera.options?.canFlip != true)
         VStack(spacing: 15) {
-            Text(camera.state == .finalizing ? "SAVING…" : "VIDEO").font(.caption.weight(.medium)).tracking(1).foregroundStyle(.yellow)
             if compact { recordButton; HStack { recent; flip } }
             else { HStack { recent; Spacer(); recordButton; Spacer(); flip }.padding(.horizontal, 30) }
             Button { openWatch() } label: {

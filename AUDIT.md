@@ -262,3 +262,16 @@ Moved Apple Log color selection to the end of device configuration after HDR, zo
 Apple references: activeColorSpace should be selected before startRunning; availableVideoCodecTypes is dynamic and depends on activeFormat (TN3104).
 https://developer.apple.com/documentation/avfoundation/avcapturedevice/activecolorspace
 https://developer.apple.com/documentation/technotes/tn3104-recording-video-in-apple-prores
+
+## Native camera controls and lens choices — 2026-10-12
+
+Log readiness revision 41e45583a17166c79fdc2068bbb9f88105b51d32 passed the existing 36 native tests in run 38189320304. This does not establish success on the reported iPhone 17-family device.
+
+Per the user’s screenshot follow-up, removed the top movie-name/switch pill and persistent yellow VIDEO label. Portrait camera uses black top and bottom controls around the live viewfinder; the lower panel holds the lens row immediately above Record, recent scene thumbnail, camera flip and Watch Movie. Landscape retains a black side recording panel and lowers the lens row into the black bottom strip. Saving progress remains visible without a persistent mode caption. Focus and pinch gestures only hit the viewfinder, not the black controls. Saved/exported video retains the full source frame; the aspect-fill viewfinder can trim display edges.
+
+Lens discovery no longer presents sub-1× internal switch boundaries such as 0.9×. Display labels are de-duplicated, preferring the system multiplier’s 1× anchor. Device-derived switch factors and secondary native-resolution factors are retained; unsupported 8× is not invented. Added a regression for 0.9× filtering, duplicate 1×/8× labels, true 1× selection and single-camera options. Multi-camera devices explicitly use automatic primary-constituent selection; movie-file output inherits it rather than imposing a recording-time lock. Zoom changes the capture device, never a software crop of the recorded file. The system can choose fallback cameras for lighting/focus, and 2×/8× may be native-resolution sensor sampling modes rather than separate physical lenses. Thirty-seven native tests are supplied; current UI and physical switching require a device check.
+
+Apple references:
+https://developer.apple.com/documentation/avfoundation/avcapturedevice/virtualdeviceswitchovervideozoomfactors
+https://developer.apple.com/documentation/avfoundation/avcapturedevice/format/secondarynativeresolutionzoomfactors
+https://developer.apple.com/documentation/avfoundation/avcapturemoviefileoutput/isprimaryconstituentdeviceswitchingbehaviorforrecordingenabled

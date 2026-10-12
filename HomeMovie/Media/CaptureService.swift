@@ -9,13 +9,18 @@ struct LensChoice: Identifiable, Equatable, Sendable {
     static func available(minimum: CGFloat, maximum: CGFloat, multiplier: CGFloat,
                           switchFactors: [CGFloat], secondaryFactors: [CGFloat]) -> [LensChoice] {
         guard multiplier.isFinite, multiplier > 0 else { return [] }
-        let candidates = ([minimum, 1 / multiplier] + switchFactors + secondaryFactors)
-            .filter { $0.isFinite && $0 >= minimum && $0 <= maximum }.sorted()
+        // Prefer the familiar displayed 1× anchor to a nearby internal switch point.
+        let candidates = ([1 / multiplier, minimum] + switchFactors + secondaryFactors)
+            .filter { $0.isFinite && $0 >= minimum && $0 <= maximum }
         var choices: [LensChoice] = []
         for factor in candidates {
-            guard !choices.contains(where: { abs($0.factor - factor) < 0.001 }) else { continue }
-            choices.append(LensChoice(factor: factor, displayed: (factor * multiplier * 10).rounded() / 10))
+            let displayed = (factor * multiplier * 10).rounded() / 10
+            // Sub-1× switch boundaries (for example 0.9×) aren't separate lenses.
+            guard displayed == 0.5 || displayed >= 1,
+                  !choices.contains(where: { $0.displayed == displayed }) else { continue }
+            choices.append(LensChoice(factor: factor, displayed: displayed))
         }
+        choices.sort { $0.displayed < $1.displayed }
         return choices
     }
 }
@@ -211,6 +216,9 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         camera.isSubjectAreaChangeMonitoringEnabled = false
         camera.setExposureTargetBias(0, completionHandler: nil)
         focusLocked = false
+        if camera.primaryConstituentDeviceSwitchingBehavior != .unsupported {
+            camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
+        }
         // Select Log last: format, HDR and zoom configuration must not override it.
         if configuredProfile == .appleLog { camera.activeColorSpace = .appleLog }
     }
@@ -355,6 +363,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         session.addInput(next)
     }
     private func configureVideoConnection() {
+        // Inherit the device's automatic physical-camera selection while recording.
+        output.isPrimaryConstituentDeviceSwitchingBehaviorForRecordingEnabled = false
         guard let connection = output.connection(with: .video) else { return }
         connection.automaticallyAdjustsVideoMirroring = false
         if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
