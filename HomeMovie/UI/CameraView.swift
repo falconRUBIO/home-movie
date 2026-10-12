@@ -300,15 +300,6 @@ struct CameraView: View {
     @ViewBuilder private func status(movie: Movie) -> some View {
         VStack(spacing: 8) {
             if camera.state == .finalizing { ProgressView("Saving scene…").tint(.white) }
-            if let id = addedSceneID, movie.activeScenes.last?.id == id, !camera.busy {
-                HStack(spacing: 16) {
-                    Text("Scene added")
-                    Button("Undo") { undoLastTake(id) }
-                        .fontWeight(.semibold).frame(minWidth: 44, minHeight: 44)
-                        .disabled(undoingTake)
-                        .accessibilityLabel("Undo last take")
-                }.padding(.horizontal, 14).homeGlass(interactive: false)
-            }
             if let message = camera.message { Text(message) }
             if camera.state == .failed || camera.state == .interrupted {
                 Button("Resume Camera") { Task { await camera.prepare(profile: movie.captureProfile) } }.buttonStyle(.bordered)
@@ -386,9 +377,29 @@ struct CameraView: View {
                 .accessibilityLabel("Total movie runtime, \(durationLabel(movie.duration))")
         }
         if landscape {
-            VStack(spacing: 12) { recent; watch; flip }.padding(.horizontal, 8)
+            VStack(spacing: 12) {
+                VStack(spacing: 0) { recent; recentTakeUndo(movie: movie) }
+                watch
+                flip
+            }.padding(.horizontal, 8)
         } else {
-            HStack(spacing: 8) { recent; Spacer(minLength: 0); watch; Spacer(minLength: 0); flip }
+            HStack(spacing: 8) {
+                HStack(spacing: 4) { recent; recentTakeUndo(movie: movie) }
+                Spacer(minLength: 0)
+                watch
+                Spacer(minLength: 0)
+                flip
+            }
+        }
+    }
+    @ViewBuilder private func recentTakeUndo(movie: Movie) -> some View {
+        if let id = addedSceneID, movie.activeScenes.last?.id == id, !camera.busy {
+            Button("Undo") { undoLastTake(id) }
+                .font(.caption.weight(.medium))
+                .frame(minWidth: 44, minHeight: 44)
+                .disabled(undoingTake)
+                .accessibilityLabel("Undo last take")
+                .accessibilityHint("Moves the latest scene to Recently Deleted. You can restore it in Settings.")
         }
     }
     private func undoLastTake(_ sceneID: UUID) {
