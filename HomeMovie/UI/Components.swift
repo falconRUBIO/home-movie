@@ -110,31 +110,28 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     private var showingFront = false
     private var lookView: MTKView?
     private var lookRenderer: LiveLookRenderer?
+    var onLiveLookStatus: ((LiveLookStatus) -> Void)?
     func configureLiveLook(frames: LiveFrames?, cube: ColorCube?, active: Bool) {
         if lookView == nil, active, cube != nil, let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) {
             let view = MTKView(frame: bounds, device: device)
             view.isUserInteractionEnabled = false; view.framebufferOnly = false
             view.colorPixelFormat = .bgra8Unorm; (view.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: CGColorSpace.itur_709)
-            view.autoResizeDrawable = false; view.isPaused = true; view.enableSetNeedsDisplay = false; view.alpha = 0
+            view.autoResizeDrawable = false; view.isPaused = true; view.enableSetNeedsDisplay = false
+            view.preferredFramesPerSecond = 30; view.isOpaque = false; view.backgroundColor = .clear
+            view.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0); view.isHidden = true
             view.delegate = renderer; insertSubview(view, at: 0)
+            renderer.onStatusChanged = { [weak self] status in self?.onLiveLookStatus?(status) }
             lookView = view; lookRenderer = renderer
         }
-        let monitoredFrames = active && cube != nil ? frames : nil
-        if lookRenderer?.frames !== monitoredFrames {
-            lookRenderer?.frames?.setListener(nil)
-            if let frames = monitoredFrames, let view = lookView {
-                frames.setListener { [weak frames, weak view] in
-                    DispatchQueue.main.async { [weak frames, weak view] in frames?.notificationHandled(); view?.draw() }
-                }
-            }
-        }
-        let previousPresentation = lookRenderer?.presentationID
+        // The Metal display loop reads only the latest frame. Keep its layer visible at full
+        // opacity so drawable acquisition never depends on a first-render alpha handshake.
+        lookRenderer?.frames?.setListener(nil)
         lookRenderer?.configure(frames: frames, cube: cube, active: active)
-        if previousPresentation != lookRenderer?.presentationID { lookView?.alpha = 0 }
         lookRenderer?.front = showingFront
-        if cube == nil || !active { lookView?.alpha = 0 }
-        else if lookView?.alpha == 0 { lookView?.alpha = 0.001 }
         resizeLookView()
+        let enabled = active && cube != nil && frames != nil
+        lookView?.alpha = 1; lookView?.isHidden = !enabled; lookView?.isPaused = !enabled
+        if enabled, lookRenderer == nil { onLiveLookStatus?(.unavailable) }
     }
     private func resizeLookView() {
         lookView?.frame = bounds
@@ -285,6 +282,7 @@ struct CameraPreview: UIViewRepresentable {
     var liveFrames: LiveFrames? = nil
     var liveCube: ColorCube? = nil
     var liveActive = false
+    var onLiveLookStatus: ((LiveLookStatus) -> Void)? = nil
     var fixedFormat: MovieFormat? = nil
     let onFocus: (CGPoint, Bool) -> Bool
     let onExposure: (Float) -> Void
@@ -301,6 +299,7 @@ struct CameraPreview: UIViewRepresentable {
     func updateUIView(_ view: PreviewUIView, context: Context) {
         view.onFocus = onFocus; view.onExposure = onExposure
         view.fixedFormat = fixedFormat
+        view.onLiveLookStatus = onLiveLookStatus
         view.setFront(front)
         view.configureLiveLook(frames: liveFrames, cube: liveCube, active: liveActive)
         if let options { view.updateMetering(options) }

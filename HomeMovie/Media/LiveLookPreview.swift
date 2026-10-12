@@ -38,12 +38,20 @@ enum LiveLookGeometry {
                                            y: (target.height - bounds.height * scale) / 2))
     }
 }
+enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
+
 @MainActor final class LiveLookRenderer: NSObject, MTKViewDelegate {
     private let queue: MTLCommandQueue
     private let context: CIContext
     private(set) var frames: LiveFrames?
     private(set) var cube: ColorCube?
     private(set) var presentationID = UUID()
+    private(set) var status = LiveLookStatus.inactive
+    var onStatusChanged: ((LiveLookStatus) -> Void)?
+    private func report(_ status: LiveLookStatus) {
+        guard self.status != status else { return }
+        self.status = status; onStatusChanged?(status)
+    }
     func configure(frames: LiveFrames?, cube: ColorCube?, active: Bool) {
         let nextFrames = active && cube != nil ? frames : nil
         let nextCube = active ? cube : nil
@@ -51,6 +59,7 @@ enum LiveLookGeometry {
             self.cube?.dimension != nextCube?.dimension || self.cube?.minimum != nextCube?.minimum ||
             self.cube?.maximum != nextCube?.maximum {
             presentationID = UUID()
+            report(nextFrames == nil ? .inactive : .preparing)
         }
         self.frames = nextFrames; self.cube = nextCube
     }
@@ -65,28 +74,34 @@ enum LiveLookGeometry {
         super.init()
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    func encode(_ source: CVPixelBuffer, to texture: MTLTexture, command: MTLCommandBuffer) throws {
+        guard let cube else { throw HomeMovieError.message("No live look is selected.") }
+        let target = CGSize(width: texture.width, height: texture.height)
+        var image = try cube.apply(to: CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()]))
+        image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: angle, front: front))
+            .cropped(to: CGRect(origin: .zero, size: target))
+        let destination = CIRenderDestination(mtlTexture: texture, commandBuffer: command)
+        destination.colorSpace = nil; destination.isFlipped = true
+        _ = try context.startTask(toRender: image, to: destination)
+    }
     func draw(in view: MTKView) {
-        guard !rendering, let cube, let source = frames?.latest(), let drawable = view.currentDrawable,
+        guard !rendering, cube != nil, let source = frames?.latest(), let drawable = view.currentDrawable,
               let command = queue.makeCommandBuffer() else { return }
         do {
-            var image = try cube.apply(to: CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()]))
-            image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: view.drawableSize, angle: angle, front: front))
-                .cropped(to: CGRect(origin: .zero, size: view.drawableSize))
-            let destination = CIRenderDestination(mtlTexture: drawable.texture, commandBuffer: command)
-            destination.colorSpace = nil; destination.isFlipped = true
-            _ = try context.startTask(toRender: image, to: destination)
+            try encode(source, to: drawable.texture, command: command)
             rendering = true
             let presentationID = self.presentationID
-            command.addCompletedHandler { [weak self, weak view] buffer in
+            command.addCompletedHandler { [weak self] buffer in
                 Task { @MainActor in
                     self?.rendering = false
-                    if buffer.status == .completed, self?.canPresent(presentationID) == true { view?.alpha = 1 }
+                    guard let self, self.canPresent(presentationID) else { return }
+                    self.report(buffer.status == .completed ? .ready : .unavailable)
                 }
             }
             command.present(drawable); command.commit()
         } catch {
             // A preview failure never changes or stops the original recording.
-            view.alpha = 0
+            report(.unavailable)
         }
     }
 }

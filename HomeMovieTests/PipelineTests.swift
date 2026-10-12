@@ -5,6 +5,78 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    private func livePreviewFrame(format: OSType = kCVPixelFormatType_32BGRA) throws -> CVPixelBuffer {
+        var pixel: CVPixelBuffer?
+        let attributes: [String: Any] = [kCVPixelBufferMetalCompatibilityKey as String: true,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:]]
+        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 32, 32, format, attributes as CFDictionary, &pixel), kCVReturnSuccess)
+        let buffer = try XCTUnwrap(pixel)
+        CVPixelBufferLockBaseAddress(buffer, []); defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+        if CVPixelBufferIsPlanar(buffer) {
+            for plane in 0..<CVPixelBufferGetPlaneCount(buffer) {
+                let base = try XCTUnwrap(CVPixelBufferGetBaseAddressOfPlane(buffer, plane)).assumingMemoryBound(to: UInt16.self)
+                let count = CVPixelBufferGetBytesPerRowOfPlane(buffer, plane) / 2 * CVPixelBufferGetHeightOfPlane(buffer, plane)
+                for index in 0..<count { base[index] = UInt16(512 << 6) }
+            }
+        } else {
+            let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(buffer)).assumingMemoryBound(to: UInt8.self)
+            for row in 0..<32 { for column in 0..<32 {
+                let offset = row * CVPixelBufferGetBytesPerRow(buffer) + column * 4
+                base[offset] = 80; base[offset + 1] = 80; base[offset + 2] = 80; base[offset + 3] = 255
+            }}
+        }
+        return buffer
+    }
+    @MainActor func testLiveCinemaGPUOutputMatchesSelectedCubeForEightAndTenBitFrames() async throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice()), renderer = try XCTUnwrap(LiveLookRenderer(device: device))
+        let queue = try XCTUnwrap(device.makeCommandQueue()), cube = try ColorCube.filmica.get()
+        renderer.configure(frames: LiveFrames(), cube: cube, active: true); renderer.angle = 0
+        for format in [kCVPixelFormatType_32BGRA, kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange] {
+            let source = try livePreviewFrame(format: format)
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 32, height: 32, mipmapped: false)
+            descriptor.storageMode = .shared; descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
+            let texture = try XCTUnwrap(device.makeTexture(descriptor: descriptor)), command = try XCTUnwrap(queue.makeCommandBuffer())
+            try renderer.encode(source, to: texture, command: command)
+            let completed = expectation(description: "Cinema GPU render completes")
+            command.addCompletedHandler { _ in completed.fulfill() }; command.commit()
+            await fulfillment(of: [completed], timeout: 15)
+            XCTAssertEqual(command.status, .completed)
+            var actual = [UInt8](repeating: 0, count: 32 * 32 * 4)
+            texture.getBytes(&actual, bytesPerRow: 32 * 4, from: MTLRegionMake2D(0, 0, 32, 32), mipmapLevel: 0)
+            let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
+            let expected = try cube.apply(to: CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()]))
+            var reference = [UInt8](repeating: 0, count: 4), original = [UInt8](repeating: 0, count: 4)
+            context.render(expected, toBitmap: &reference, rowBytes: 4, bounds: CGRect(x: 16, y: 16, width: 1, height: 1), format: .RGBA8, colorSpace: nil)
+            context.render(CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()]), toBitmap: &original, rowBytes: 4, bounds: CGRect(x: 16, y: 16, width: 1, height: 1), format: .RGBA8, colorSpace: nil)
+            let offset = (16 * 32 + 16) * 4
+            XCTAssertEqual(Double(actual[offset + 2]), Double(reference[0]), accuracy: 3)
+            XCTAssertEqual(Double(actual[offset + 1]), Double(reference[1]), accuracy: 3)
+            XCTAssertEqual(Double(actual[offset]), Double(reference[2]), accuracy: 3)
+            XCTAssertNotEqual(reference, original, "The live output must contain Cinema rather than untouched Log samples")
+        }
+    }
+    @MainActor func testLiveLookBecomesVisibleWithoutTransparentFirstFrameHandshake() async throws {
+        let controller = UIViewController(), preview = PreviewUIView(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: preview.bounds)
+        window.frame = preview.bounds; controller.view = preview; window.rootViewController = controller; window.isHidden = false
+        defer { preview.configureLiveLook(frames: nil, cube: nil, active: false); window.isHidden = true }
+        preview.layoutIfNeeded()
+        let shown = expectation(description: "Graded drawable presented in the visible preview")
+        var statuses: [LiveLookStatus] = []
+        preview.onLiveLookStatus = { status in statuses.append(status); if status == .ready { shown.fulfill() } }
+        let frames = LiveFrames(); frames.push(try livePreviewFrame())
+        preview.configureLiveLook(frames: frames, cube: try ColorCube.filmica.get(), active: true)
+        let metal = try XCTUnwrap(preview.subviews.compactMap { $0 as? MTKView }.first)
+        XCTAssertEqual(metal.alpha, 1); XCTAssertFalse(metal.isHidden); XCTAssertFalse(metal.isPaused)
+        await fulfillment(of: [shown], timeout: 15)
+        XCTAssertTrue(statuses.contains(.preparing)); XCTAssertEqual(statuses.last, .ready)
+        preview.configureLiveLook(frames: frames, cube: nil, active: true)
+        XCTAssertTrue(metal.isHidden); XCTAssertTrue(metal.isPaused); XCTAssertEqual(statuses.last, .inactive)
+        preview.configureLiveLook(frames: frames, cube: try ColorCube.filmica.get(), active: true)
+        preview.configureLiveLook(frames: frames, cube: try ColorCube.filmica.get(), active: false)
+        XCTAssertTrue(metal.isHidden); XCTAssertTrue(metal.isPaused); XCTAssertEqual(statuses.last, .inactive)
+    }
     func testSceneAudioEdgesFadeAtActualOffsetsAndKeepFullVolumeBetweenCuts() {
         let parameters = AVMutableAudioMixInputParameters()
         MediaAssembler.smoothAudioEdges(parameters, range: CMTimeRange(start: CMTime(seconds: 2.25, preferredTimescale: 48000), duration: CMTime(seconds: 1, preferredTimescale: 48000)))

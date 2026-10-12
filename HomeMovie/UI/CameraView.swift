@@ -15,6 +15,7 @@ struct CameraView: View {
     @State private var lastZoomAt = Date.distantPast
     @State private var liveCube: ColorCube?
     @State private var liveOriginal = false
+    @State private var liveLookStatus = LiveLookStatus.inactive
     @State private var looks: [LUTReference] = []
     @State private var addingLook = false
     @State private var changingLook = false
@@ -84,7 +85,7 @@ struct CameraView: View {
         }
         .task(id: "\(movieID)-\(movie?.look?.id.uuidString ?? "standard")") {
             guard movie?.captureProfile == .appleLog else { liveCube = nil; return }
-            liveCube = nil
+            liveCube = nil; liveLookStatus = .preparing
             let reference = movie?.look, root = app.store.root
             do {
                 let loaded = try await Task.detached(priority: .userInitiated) {
@@ -92,7 +93,7 @@ struct CameraView: View {
                     return try ColorCube.appleStandard.get()
                 }.value
                 guard !Task.isCancelled else { return }; liveCube = loaded
-            } catch { if !Task.isCancelled { liveCube = nil; camera.message = "This look could not be loaded. Choose Apple Standard." } }
+            } catch { if !Task.isCancelled { liveCube = nil; liveLookStatus = .unavailable; camera.message = "This look could not be loaded. Choose Apple Standard." } }
         }
         .fileImporter(isPresented: $addingLook, allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data], allowsMultipleSelection: false) { result in
             changingLook = true
@@ -233,8 +234,8 @@ struct CameraView: View {
     private func captureIndicators(movie: Movie) -> some View {
         VStack(spacing: 6) {
             if movie.captureProfile == .appleLog {
-                let graded = !liveOriginal && liveCube != nil && camera.state.showsLiveLook
-                LogLookBadge(lookName: graded ? movie.lookName : "Original")
+                let wantsLook = !liveOriginal && camera.state.showsLiveLook
+                LogLookBadge(lookName: wantsLook ? (liveLookStatus == .ready ? movie.lookName : liveLookStatus == .unavailable ? "Preview unavailable" : "Loading look…") : "Original")
             }
             if camera.options?.focusLocked == true {
                 Text("AE/AF LOCK").font(.caption2.weight(.semibold)).foregroundStyle(.black)
@@ -401,6 +402,9 @@ struct CameraView: View {
                 options: camera.options, liveFrames: camera.service.liveFrames,
                 liveCube: liveOriginal ? nil : liveCube,
                 liveActive: movie?.captureProfile == .appleLog && camera.state.showsLiveLook,
+                onLiveLookStatus: { status in
+                    Task { @MainActor in liveLookStatus = status }
+                },
                 fixedFormat: establishedFormat,
                 onFocus: { camera.focus(at: $0, locked: $1) }, onExposure: { camera.exposure($0) })
                 .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
