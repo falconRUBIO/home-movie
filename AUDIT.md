@@ -6,7 +6,7 @@ Baseline source `d086c06d2e564c5ceec989a9c9f2d660e8d00f00` compiled and passed 5
 
 This audit fixes late camera readiness updates that could hide a save failure, premature timed-Dolly completion, elapsed-time drift, loss of remaining Dolly duration on range changes, mixing Standard orphan footage into a Log recovery movie, loss of the live grade during Saving, and playback stopping when changing looks during buffering. Hands-Free countdown scheduling now has direct cancellation, restart, duplicate-start and availability regression coverage.
 
-Portable source/project, Swift grammar and deterministic project-generation checks passed. Seven focused native regression tests were added; the native run for these audit changes is pending. These checks do not establish physical-camera capture, live-LUT color accuracy or measured hardware Dolly timing.
+Audit source `57f6dbd0db879d8632c4ec025830e1fa5285d3cd` compiled and passed **58 native tests with zero failures** in [GitHub Actions run 38255574602](https://github.com/falconRUBIO/home-movie/actions/runs/38255574602). Seven new regressions passed. Test execution took 144.761 seconds. There were no application-source compiler warnings; only the existing runner/XCTest stripping and AppIntents extraction notices appeared. Portable source/project, Swift grammar and deterministic project-generation checks also passed. These checks do not establish physical-camera capture, live-LUT color accuracy or measured hardware Dolly timing.
 
 Remaining device gate: record a genuine Standard and Apple Log take, verify Cinema/Original switching, stop/save, autoplay, export to Photos/Files, Hands-Free cancellation and interruption, both Dolly directions/durations, and iPhone portrait/landscape layout. See `DEVICE_TESTS.md`.
 
