@@ -11,6 +11,7 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
     @Published var elapsed = CMTime.zero
     @Published var message: String?
     @Published var savedScene = false
+    @Published private(set) var hasRecoverableTake = false
     @Published var takeFormat: MovieFormat?
     private var timer: Timer?
     private var beganAt: TimeInterval?
@@ -33,7 +34,7 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
     func prepare(profile: CaptureProfile = .standard) async {
         guard !busy else { return }
         let requestID = UUID(); preparationID = requestID
-        active = true; state = .preparing; message = nil; interruption = nil
+        active = true; state = .preparing; message = nil; interruption = nil; hasRecoverableTake = false
         let granted = await CaptureService.permissions()
         guard active, preparationID == requestID else { return }
         guard granted else { state = .denied; return }
@@ -46,7 +47,7 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
         let format = movie.recordingFormat ?? automatic
         let angle = movie.recordingFormat == nil ? format.recordingAngle(observed: observed) : OrientationPolicy.shared.captureAngle(format: format, observed: observed)
         takeFormat = format
-        state = .starting; savedScene = false; message = nil; startCancelled = false
+        state = .starting; savedScene = false; hasRecoverableTake = false; message = nil; startCancelled = false
         operation = Task {
             var pendingTicket: CaptureTicket?
             defer { operation = nil }
@@ -137,8 +138,9 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
                     FileManager.default.fileExists(atPath: $0.store.root.appendingPathComponent(ticket.staging).path) ||
                     FileManager.default.fileExists(atPath: $0.store.root.appendingPathComponent(ticket.source).path)
                 } ?? false
+                hasRecoverableTake = hasFile
                 if !hasFile { try? await app?.store.abandonUnstarted(ticket) }
-                message = error.localizedDescription + (hasFile ? " Any recording file has been preserved for recovery." : "")
+                message = error.localizedDescription
             }
         case .interrupted(let text):
             interruption = text; message = text; startCancelled = true

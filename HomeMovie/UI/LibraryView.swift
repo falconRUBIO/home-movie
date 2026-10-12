@@ -83,9 +83,13 @@ struct LibraryView: View {
             }
             .navigationTitle("Movies").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("New Movie", systemImage: "plus") { creating = true }.disabled(!app.loaded) }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { creating = true } label: { MovieControlIcon(systemName: "plus") }
+                        .accessibilityLabel("New Movie").disabled(!app.loaded)
+                }
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Settings", systemImage: "gearshape") { settings = true }.disabled(!app.loaded)
+                    Button { settings = true } label: { MovieControlIcon(systemName: "gearshape") }
+                        .accessibilityLabel("Settings").disabled(!app.loaded)
                 }
             }
             .navigationDestination(for: UUID.self) { id in CameraView(app: app, movieID: id) }
@@ -145,7 +149,7 @@ struct LibraryView: View {
     func makeUIView(context: Context) -> MovieOverflowButton {
         let button = MovieOverflowButton(type: .system)
         button.setImage(UIImage(systemName: "ellipsis"), for: .normal)
-        button.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 17), forImageIn: .normal)
+        button.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: 18, weight: .medium), forImageIn: .normal)
         button.tintColor = .label
         button.showsMenuAsPrimaryAction = true
         button.preferredMenuElementOrder = .fixed

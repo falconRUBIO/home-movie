@@ -69,15 +69,15 @@ struct WatchMovieView: View {
                                 }
                                 Divider()
                                 Button("Add Apple Log Look…", systemImage: "plus") { importingLook = true }
-                            } label: { Image(systemName: "slider.horizontal.3") }
+                            } label: { MovieControlIcon(systemName: "slider.horizontal.3") }
                                 .accessibilityLabel("Look: \(showOriginalLog ? "Original Log" : movie.lookName)")
                                 .disabled(changingLook)
                         }
                     }
                     ToolbarItem(placement: .cancellationAction) { Button("Done") { player?.pause(); dismiss() } }
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Export", systemImage: "square.and.arrow.up") { player?.pause(); exporting = true }
-                            .disabled(movie.activeScenes.isEmpty || loading || changingLook || problem != nil)
+                        Button { player?.pause(); exporting = true } label: { MovieControlIcon(systemName: "square.and.arrow.up") }
+                            .accessibilityLabel("Export Movie").disabled(movie.activeScenes.isEmpty || loading || changingLook || problem != nil)
                     }
                 }
                 .fileImporter(isPresented: $importingLook, allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data], allowsMultipleSelection: false) { result in

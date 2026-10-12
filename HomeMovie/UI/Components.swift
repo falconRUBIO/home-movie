@@ -4,6 +4,16 @@ import UIKit
 import UniformTypeIdentifiers
 import MetalKit
 
+struct MovieControlIcon: View {
+    let systemName: String
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 18, weight: .medium))
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+    }
+}
+
 extension View {
     @ViewBuilder func homeGlass(interactive: Bool = true) -> some View {
         if #available(iOS 26.0, *) {

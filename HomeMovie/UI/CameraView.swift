@@ -8,6 +8,8 @@ struct CameraView: View {
     @StateObject private var camera: CameraModel
     @State private var movieID: UUID
     @State private var watching = false
+    @State private var showingRecovery = false
+    @State private var showingErrorDetails = false
     @State private var initialReviewID: UUID?
     @State private var pinchBase: CGFloat?
     @State private var lastZoomAt = Date.distantPast
@@ -106,7 +108,10 @@ struct CameraView: View {
         .onChange(of: camera.options?.minimum) { _, _ in if !zoomDragging { syncSmoothPosition() } }
         .onChange(of: camera.options?.maximum) { _, _ in if !zoomDragging { syncSmoothPosition() } }
         .onChange(of: camera.savedScene) { _, saved in
-            if saved { addedSceneID = movie?.activeScenes.last?.id }
+            if saved {
+                addedSceneID = movie?.activeScenes.last?.id
+                UIAccessibility.post(notification: .announcement, argument: "Scene saved")
+            }
         }
         .task(id: addedSceneID) {
             guard let id = addedSceneID else { return }
@@ -125,8 +130,14 @@ struct CameraView: View {
         .onDisappear { zoomDragging = false; camera.suspend() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { zoomDragging = false; camera.suspend() }
-            else if !watching && !camera.busy { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }
+            else if !watching && !showingRecovery && !camera.busy { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }
         }
+        .sheet(isPresented: $showingRecovery, onDismiss: {
+            Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) }
+        }) { RecordingRecoveryView().environmentObject(app) }
+        .alert("Recording Details", isPresented: $showingErrorDetails) {
+            Button("OK", role: .cancel) { }
+        } message: { Text(camera.message ?? "No additional details are available.") }
         .fullScreenCover(isPresented: $watching, onDismiss: { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }) {
             WatchMovieView(movieID: movieID, initialSceneID: initialReviewID, autoplay: initialReviewID == nil).environmentObject(app)
         }
@@ -134,7 +145,7 @@ struct CameraView: View {
     private func header(movie: Movie) -> some View {
         HStack {
             Button { dismiss() } label: {
-                Image(systemName: "chevron.left").frame(width: 44, height: 44).homeGlass()
+                MovieControlIcon(systemName: "chevron.left").homeGlass()
             }.accessibilityLabel("Back to Movies").disabled(camera.busy)
             Spacer(minLength: 8)
             if movie.captureProfile == .appleLog {
@@ -147,7 +158,7 @@ struct CameraView: View {
                     }
                     Divider()
                     Button("Add Apple Log Look…", systemImage: "plus") { addingLook = true }.disabled(camera.busy)
-                } label: { Image(systemName: "slider.horizontal.3").frame(width: 44, height: 44).homeGlass() }
+                } label: { MovieControlIcon(systemName: "slider.horizontal.3").homeGlass() }
                     .accessibilityLabel("Live look: \(liveOriginal ? "Original Log" : movie.lookName)")
                     .disabled(changingLook)
             }
@@ -166,13 +177,12 @@ struct CameraView: View {
                     Button("Undo Last Take", systemImage: "arrow.uturn.backward") { undoLastTake(last.id) }
                         .disabled(camera.busy || undoingTake)
                 }
-            } label: { Image(systemName: "gearshape").frame(width: 44, height: 44).homeGlass() }
+            } label: { MovieControlIcon(systemName: "gearshape").homeGlass() }
                 .accessibilityLabel("Camera settings")
             if let options = camera.options, options.hasTorch {
                 Button { camera.toggleTorch() } label: {
-                    Image(systemName: options.torchOn ? "bolt.fill" : "bolt.slash")
-                        .foregroundStyle(options.torchOn ? .yellow : .white)
-                        .frame(width: 44, height: 44).homeGlass()
+                    MovieControlIcon(systemName: options.torchOn ? "bolt.fill" : "bolt.slash")
+                        .foregroundStyle(options.torchOn ? .yellow : .white).homeGlass()
                 }.accessibilityLabel(options.torchOn ? "Turn torch off" : "Turn torch on")
                     .disabled(camera.state != .ready && camera.state != .recording)
             } else { Color.clear.frame(width: 44, height: 44) }
@@ -243,9 +253,8 @@ struct CameraView: View {
                     if smoothZoomOpen { camera.endSmoothZoom(); smoothZoomOpen = false }
                     else { syncSmoothPosition(); smoothZoomOpen = true; camera.beginSmoothZoom() }
                 } label: {
-                    Image(systemName: "waveform.path").font(.caption.weight(.medium))
+                    MovieControlIcon(systemName: "waveform.path")
                         .foregroundStyle(smoothZoomOpen ? .yellow : .white)
-                        .frame(width: 44, height: 44)
                         .background(smoothZoomOpen ? Color.white.opacity(0.15) : .clear, in: Circle())
                 }.accessibilityLabel("Dolly").accessibilityValue(smoothZoomOpen ? "Open" : "Closed")
                     .accessibilityAddTraits(smoothZoomOpen ? .isSelected : [])
@@ -312,14 +321,36 @@ struct CameraView: View {
         camera.configureSmoothZoom(speed: SmoothZoomSpeed(rawValue: zoomSpeed) ?? .normal, stayOnLens: stayOnLens)
     }
     @ViewBuilder private func status(movie: Movie) -> some View {
-        VStack(spacing: 8) {
-            if camera.state == .finalizing { ProgressView("Saving scene…").tint(.white) }
-            if let message = camera.message { Text(message) }
-            if camera.state == .failed || camera.state == .interrupted {
-                Button("Resume Camera") { Task { await camera.prepare(profile: movie.captureProfile) } }.buttonStyle(.bordered)
-            }
-        }.font(.footnote).multilineTextAlignment(.center)
-            .shadow(color: .black.opacity(0.8), radius: 3)
+        if camera.state == .failed || camera.state == .interrupted {
+            VStack(spacing: 8) {
+                Text(camera.hasRecoverableTake ? "Take couldn’t be added" : "Camera paused")
+                    .font(.footnote.weight(.semibold))
+                Text(camera.hasRecoverableTake ? "The recording file was kept for recovery." : (camera.message ?? "Try again to reconnect the camera."))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { recoveryActions(movie: movie) }
+                    VStack(spacing: 4) { recoveryActions(movie: movie) }
+                }
+            }.padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .multilineTextAlignment(.center)
+        } else if let message = camera.message {
+            HStack(spacing: 8) {
+                Text(message).font(.caption).lineLimit(2)
+                Button { showingErrorDetails = true } label: { MovieControlIcon(systemName: "info.circle") }
+                    .accessibilityLabel("Read camera notice").accessibilityHint(message)
+            }.padding(.horizontal, 10).homeGlass(interactive: false)
+        }
+    }
+    @ViewBuilder private func recoveryActions(movie: Movie) -> some View {
+        Button("Try Again") { Task { await camera.prepare(profile: movie.captureProfile) } }
+            .frame(minHeight: 44).buttonStyle(.borderedProminent)
+        if camera.hasRecoverableTake {
+            Button("Recover Take") {
+                Task { await camera.pauseForPlayback(); showingRecovery = true }
+            }.frame(minHeight: 44).buttonStyle(.bordered)
+        }
+        Button { showingErrorDetails = true } label: { MovieControlIcon(systemName: "info.circle") }
+            .accessibilityLabel("Recording error details")
     }
     private func preview() -> some View {
         ZStack {
@@ -374,11 +405,11 @@ struct CameraView: View {
     @ViewBuilder private func reviewControls(movie: Movie, landscape: Bool) -> some View {
         let recent = Button { openWatch(sceneID: movie.activeScenes.last?.id) } label: {
             SceneThumbnail(scene: movie.activeScenes.last, root: app.store.root, movie: movie)
-                .frame(width: 46, height: 46).clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
         }.accessibilityLabel("Review recent scene").disabled(camera.busy || movie.activeScenes.isEmpty)
         let flip = Button { camera.flip() } label: {
-            Image(systemName: "arrow.triangle.2.circlepath.camera").font(.title2)
-                .frame(width: 46, height: 46).background(.white.opacity(0.15), in: Circle())
+            MovieControlIcon(systemName: "arrow.triangle.2.circlepath.camera")
+                .background(.white.opacity(0.15), in: Circle())
         }.accessibilityLabel("Switch camera").disabled(camera.state != .ready || camera.options?.canFlip != true)
         let watch = VStack(spacing: 0) {
             Button { openWatch() } label: {
@@ -392,13 +423,13 @@ struct CameraView: View {
         }
         if landscape {
             VStack(spacing: 12) {
-                VStack(spacing: 0) { recent; recentTakeUndo(movie: movie) }
+                VStack(spacing: 0) { recent; recentTakeFeedback(movie: movie) }
                 watch
                 flip
             }.padding(.horizontal, 8)
         } else {
             HStack(spacing: 8) {
-                HStack(spacing: 4) { recent; recentTakeUndo(movie: movie) }
+                HStack(spacing: 4) { recent; recentTakeFeedback(movie: movie) }
                 Spacer(minLength: 0)
                 watch
                 Spacer(minLength: 0)
@@ -406,15 +437,26 @@ struct CameraView: View {
             }
         }
     }
-    @ViewBuilder private func recentTakeUndo(movie: Movie) -> some View {
-        if let id = addedSceneID, movie.activeScenes.last?.id == id, !camera.busy {
-            Button("Undo") { undoLastTake(id) }
-                .font(.caption.weight(.medium))
-                .frame(minWidth: 44, minHeight: 44)
-                .disabled(undoingTake)
-                .accessibilityLabel("Undo last take")
-                .accessibilityHint("Moves the latest scene to Recently Deleted. You can restore it in Settings.")
-        }
+    @ViewBuilder private func recentTakeFeedback(movie: Movie) -> some View {
+        VStack(spacing: 0) {
+            if camera.state == .finalizing {
+                VStack(spacing: 4) {
+                    ProgressView().controlSize(.small).tint(.white)
+                    Text("Saving…").font(.caption2)
+                }.frame(minWidth: 44, minHeight: 44)
+                    .accessibilityElement(children: .ignore).accessibilityLabel("Saving scene")
+                    .transition(.opacity)
+            } else if let id = addedSceneID, movie.activeScenes.last?.id == id, !camera.busy {
+                VStack(spacing: 0) {
+                    Label("Saved", systemImage: "checkmark").font(.caption2).foregroundStyle(.secondary)
+                    Button("Undo") { undoLastTake(id) }
+                        .font(.caption.weight(.medium)).frame(minWidth: 44, minHeight: 44)
+                        .disabled(undoingTake).accessibilityLabel("Undo last take")
+                        .accessibilityHint("Moves the latest scene to Recently Deleted. You can restore it in Settings.")
+                }.transition(.opacity)
+            }
+        }.animation(.easeInOut(duration: 0.2), value: camera.state == .finalizing)
+            .animation(.easeInOut(duration: 0.2), value: addedSceneID)
     }
     private func undoLastTake(_ sceneID: UUID) {
         guard !camera.busy, !undoingTake else { return }
