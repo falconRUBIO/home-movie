@@ -33,6 +33,7 @@ actor ProjectStore {
               Set(scenes.map(\.id)).count == scenes.count else { throw HomeMovieError.message("The catalog contains duplicate identifiers. Its file has been preserved.") }
         var totalBytes: Int64 = 0
         for movie in value.movies {
+            try movie.exportEffects.validate()
             if let look = movie.look {
                 guard movie.captureProfile == .appleLog, !look.name.isEmpty, look.name.count <= 80 else {
                     throw HomeMovieError.message("The movie’s look metadata is invalid.")
@@ -220,6 +221,13 @@ actor ProjectStore {
         if let look { _ = try ColorCube.load(look, root: root) }
         guard catalog.movies[i].look != look else { return }
         var next = catalog; next.movies[i].look = look; next.movies[i].revision += 1; try write(next)
+    }
+    func setFilmEffects(movieID: UUID, settings: FilmEffectsSettings) throws {
+        try requireIdle(); try settings.validate()
+        let i = try index(movieID)
+        guard catalog.movies[i].exportEffects != settings else { return }
+        var next = catalog; next.movies[i].filmEffects = settings; next.movies[i].revision += 1
+        try write(next)
     }
     func rename(_ id: UUID, name: String) throws {
         try requireIdle()
@@ -428,3 +436,4 @@ actor ProjectStore {
     }
 
 }
+

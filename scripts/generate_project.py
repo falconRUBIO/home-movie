@@ -44,6 +44,10 @@ for prefix, source_builds, res in [('app', app_build, resources), ('test', test_
     phases[prefix] = [add(prefix + ':sources', 'PBXSourcesBuildPhase', buildActionMask=2147483647, files=source_builds, runOnlyForDeploymentPostprocessing=0),
         add(prefix + ':frameworks', 'PBXFrameworksBuildPhase', buildActionMask=2147483647, files=[], runOnlyForDeploymentPostprocessing=0),
         add(prefix + ':resources', 'PBXResourcesBuildPhase', buildActionMask=2147483647, files=res, runOnlyForDeploymentPostprocessing=0)]
+shader_path = 'HomeMovie/Media/FilmEffects.ci.metal'
+app_files.append(add(shader_path, 'PBXFileReference', lastKnownFileType='sourcecode.metal', path=shader_path, sourceTree='<group>'))
+shader_script = 'set -eu\nmkdir -p "$DERIVED_FILE_DIR" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"\nxcrun --sdk "$SDK_NAME" metal -fcikernel -c "$SRCROOT/HomeMovie/Media/FilmEffects.ci.metal" -o "$DERIVED_FILE_DIR/FilmEffects.air"\nxcrun --sdk "$SDK_NAME" metallib -cikernel "$DERIVED_FILE_DIR/FilmEffects.air" -o "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/FilmEffects.metallib"\n'
+phases['app'].append(add('app:film-shaders', 'PBXShellScriptBuildPhase', buildActionMask=2147483647, files=[], inputPaths=['$(SRCROOT)/' + shader_path], outputPaths=['$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/FilmEffects.metallib'], runOnlyForDeploymentPostprocessing=0, shellPath='/bin/sh', shellScript=shader_script, name='Compile Film Effects kernels'))
 project_id = ident('project'); app_id = ident('app-target')
 shared = dict(IPHONEOS_DEPLOYMENT_TARGET='18.0', SDKROOT='iphoneos', SWIFT_VERSION='5.0', CLANG_ENABLE_MODULES='YES', CODE_SIGN_STYLE='Automatic', TARGETED_DEVICE_FAMILY='1', SUPPORTED_PLATFORMS='iphoneos iphonesimulator', SWIFT_STRICT_CONCURRENCY='targeted')
 project_debug = config('project:Debug', dict(shared, DEBUG_INFORMATION_FORMAT='dwarf', SWIFT_OPTIMIZATION_LEVEL='-Onone', ENABLE_TESTABILITY='YES', SWIFT_ACTIVE_COMPILATION_CONDITIONS='DEBUG', ONLY_ACTIVE_ARCH='YES'))
@@ -76,3 +80,4 @@ scheme = f'''<?xml version="1.0" encoding="UTF-8"?>
 scheme_dir = project / 'xcshareddata/xcschemes'; scheme_dir.mkdir(parents=True, exist_ok=True)
 (scheme_dir / 'HomeMovie.xcscheme').write_text(scheme)
 print(f'Generated project: {len(app_sources)} source files, {len(tests)} test files')
+

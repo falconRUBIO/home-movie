@@ -36,6 +36,8 @@ jobs:
               exit 1
             fi
           done
+      - name: Install Metal compiler
+        run: xcodebuild -downloadComponent MetalToolchain
       - name: Generate project and build number
         run: |
           export BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
@@ -79,3 +81,4 @@ jobs:
             build/TestResults.xcresult.zip
           if-no-files-found: warn
           retention-days: 14
+

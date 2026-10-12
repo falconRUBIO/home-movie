@@ -406,3 +406,14 @@ Source `7a65c9c0fca3a93addf2e9cf64cc1917add30b63` compiled and passed **87 nativ
 - The track has a 44-point touch height and a minimum usable horizontal width; narrow/large-text layouts put the value and duration above a full-width track inside the same glass container. Camera notice spacing follows measured control height.
 
 Presentation-only follow-up after the verified source: the glass container now uses continuous 26-point rounded corners instead of an expanded capsule, the scrolling lens row allows 64-point height at accessibility sizes, and Help states that opening/closing Dolly does not start/stop recording. These changes passed project/source/Swift grammar checks; they were not separately compiled or visually rendered on an iPhone. Physical-device layout, touch, VoiceOver, optical handoffs and saved-frame acceptance remain pending, along with a new TestFlight upload.
+
+
+## Export Film Effects — implementation
+
+Adds a single Film Effects entry to Export. Separate toggles/amount sliders, disclosed adjustments, playing preview, press-and-hold comparison, fullscreen fit/detail inspection, and per-movie settings. Camera and ordinary Watch Movie playback remain unprocessed. Settings default off for legacy/new catalogs and travel inside existing project backups. Saves increment revision; export caching includes all settings and engine version.
+
+The original Metal-based Core Image kernels synthesize jittered elliptical density particles with pixel-footprint filtering and timeline-based deterministic seeds. Halation and colored bloom use separate highlight extraction and diffusion; halation has red/green spreads plus source/background protection. All stages can bypass independently. Optical processing linearizes the existing selected Rec.709 SDR rendition, preserving the current Log/Cinema domain contract; it is not scene-linear film-negative reconstruction and cannot recover clipped source highlights. No GPL code/assets or creative LUTs added.
+
+Preview and export use the same custom compositor and full 1080p movie canvas. Effects apply only inside picture bounds before black canvas padding. Metal kernels compile at build time. Disabled effects leave normal playback/export composition selection unchanged.
+
+Native compilation/rendering regressions and physical-device acceptance are pending at implementation time. UI and texture quality have not yet been visually accepted on an iPhone.

@@ -126,8 +126,9 @@ final class ColorInstruction: NSObject, AVVideoCompositionInstructionProtocol, @
     let trackID: CMPersistentTrackID
     let transform: CGAffineTransform
     let cube: ColorCube?
-    init(range: CMTimeRange, trackID: CMPersistentTrackID, transform: CGAffineTransform, cube: ColorCube?) {
-        timeRange = range; self.trackID = trackID; self.transform = transform; self.cube = cube
+    let filmEffects: FilmEffectsSettings
+    init(range: CMTimeRange, trackID: CMPersistentTrackID, transform: CGAffineTransform, cube: ColorCube?, filmEffects: FilmEffectsSettings = .off) {
+        timeRange = range; self.trackID = trackID; self.transform = transform; self.cube = cube; self.filmEffects = filmEffects
         requiredSourceTrackIDs = [NSNumber(value: trackID)]
     }
 }
@@ -141,6 +142,7 @@ final class LogVideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendabl
     let canConformColorOfSourceFrames = false
     private let queue = DispatchQueue(label: "HomeMovie.log-render", qos: .userInitiated)
     private let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .cacheIntermediates: false])
+    private let filmRenderer = FilmEffectsRenderer()
     private let cancellationLock = NSLock()
     private var generation = 0
     func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {}
@@ -162,6 +164,10 @@ final class LogVideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendabl
                 let outputFlip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: request.renderContext.size.height)
                 image = image.transformed(by: sourceFlip.concatenating(instruction.transform).concatenating(outputFlip))
                 let bounds = CGRect(origin: .zero, size: request.renderContext.size)
+                if instruction.filmEffects.isActive {
+                    let content = image.extent.intersection(bounds)
+                    image = try self.filmRenderer.render(image.cropped(to: content), settings: instruction.filmEffects, time: request.compositionTime, contentBounds: content)
+                }
                 image = image.composited(over: CIImage(color: .black).cropped(to: bounds)).cropped(to: bounds)
                 self.context.render(image, to: destination, bounds: bounds, colorSpace: nil)
                 guard self.currentGeneration() == started else { request.finishCancelledRequest(); return }
@@ -173,3 +179,4 @@ final class LogVideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendabl
         }
     }
 }
+

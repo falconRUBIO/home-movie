@@ -1,5 +1,5 @@
 {
-  "status": "PASS",
+  "status": "SOURCE CHECKS PENDING",
   "checks": [
     "Permission purpose strings present",
     "No broad Photos read permission requested",
@@ -47,12 +47,14 @@
     "Real-device Photos authorization and video write; Photos export unit checks use injected providers.",
     "Phone listening: verify scene edge treatment is inaudible and suppresses the reported click, comparing original takes with Watch Movie and fresh exports.",
     "Physical-camera frame delivery, live Cinema versus Original comparison and sustained GPU/thermal acceptance of the visible-overlay fix.",
-    "Current-source iPhone Dolly: all physical lens pairs/durations, manual drag/pinch speeds, response settings, retargets, Stay on This Lens, focus/exposure and warm/low-light delivered-frame smoothness."
+    "Current-source iPhone Dolly: all physical lens pairs/durations, manual drag/pinch speeds, response settings, retargets, Stay on This Lens, focus/exposure and warm/low-light delivered-frame smoothness.",
+    "Current Film Effects native compilation and renderer tests.",
+    "Physical iPhone Film Effects visual calibration, encoded grain preservation, sustained GPU/thermal and accessibility acceptance."
   ],
   "date": "2026-10-12",
-  "native_tests_supplied": 87,
+  "native_tests_supplied": 95,
   "native_tests_run": 87,
-  "native_build_status": "PASS: audited Dolly behavior source 7a65c9c compiled and passed 87 native tests. Final presentation-only glass/large-text follow-up passes source and grammar checks; physical iPhone layout acceptance pending.",
+  "native_build_status": "Film Effects implementation added; previous Dolly source passed 87 tests. Current effects source awaits native compilation and renderer regression tests.",
   "previous_cloud_build": {
     "commit": "f8294c31719e540c87d42f75eaf90d30b55fe8c9",
     "provider": "GitHub Actions",
@@ -113,5 +115,6 @@
   "reported_device": "iPhone 17 family; user reports latest iOS update, exact variant/version unconfirmed",
   "physical_device_live_look_status": "User reports flat live preview despite LOG Cinema, while graded playback works. Visible Metal overlay/display-loop fix and render-status badge pass native GPU/presentation tests; corrected-source iPhone confirmation and TestFlight upload pending.",
   "physical_device_dolly_status": "User reports jerky Dolly. Repeated 20 Hz native ramps replaced with one 60 Hz trajectory; adaptive drag speed, response, retargeting, clock and range tests pass. Physical lens handoffs and saved-frame smoothness across actual device speeds/lighting/thermal states remain unverified.",
-  "physical_device_dolly_ui_status": "NOT RUN: final rounded glass, narrow layouts, accessibility text, touch targets, VoiceOver endpoint guidance, route reset and hands-free flow need physical iPhone acceptance. Final presentation-only follow-up was source/grammar checked, not separately natively recompiled."
+  "physical_device_dolly_ui_status": "NOT RUN: final rounded glass, narrow layouts, accessibility text, touch targets, VoiceOver endpoint guidance, route reset and hands-free flow need physical iPhone acceptance. Final presentation-only follow-up was source/grammar checked, not separately natively recompiled.",
+  "film_effects_status": "Implementation pending native validation: independent procedural particle grain, warm local halation and multiscale colored bloom; Export-only editing/preview."
 }

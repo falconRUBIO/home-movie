@@ -33,6 +33,13 @@ import UIKit
         }
     }
     deinit { if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) } }
+    static func cachePrefix(movie: Movie) -> String {
+        "\(movie.id)-r\(movie.revision)-audio2-film\(FilmEffectsSettings.engineVersion)-\(movie.exportEffects.cacheIdentity)-"
+    }
+    func invalidate() {
+        guard !running else { return }
+        exportedURL = nil; committedRevision = nil; committedMovieID = nil; progress = 0; notice = nil
+    }
     func start(movie: Movie, app: AppModel) {
         guard !running else { return }
         if committedMovieID == movie.id, committedRevision == movie.revision,
@@ -47,7 +54,7 @@ import UIKit
                 let seconds = movie.duration.seconds
                 let directory = URL.cachesDirectory.appendingPathComponent("Exports", isDirectory: true)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                let prefix = "\(movie.id)-r\(movie.revision)-audio2-"
+                let prefix = Self.cachePrefix(movie: movie)
                 let candidates = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
                 for candidate in candidates where candidate.lastPathComponent.hasPrefix(prefix) && candidate.pathExtension == "mp4" {
                     try Task.checkCancellation()
@@ -59,7 +66,7 @@ import UIKit
                     }
                 }
                 try await app.store.requireSpace(bytes: Int64(min(seconds * 2_000_000, Double(Int64.max / 2))) + 300_000_000)
-                let bundle = try await app.assembler.build(movie: movie, root: app.store.root)
+                let bundle = try await app.assembler.build(movie: movie, root: app.store.root, filmEffects: movie.exportEffects)
                 try Task.checkCancellation()
                 guard let export = AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality), export.supportedFileTypes.contains(.mp4) else {
                     throw HomeMovieError.message("MP4 export is not supported for this movie.")
@@ -104,3 +111,4 @@ import UIKit
         } catch { self.error = error.localizedDescription }
     }
 }
+

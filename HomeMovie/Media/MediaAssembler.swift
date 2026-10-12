@@ -53,7 +53,9 @@ struct CompositionBundle: @unchecked Sendable {
 
 actor MediaAssembler {
     // Every build uses an immutable movie snapshot. Trims never modify source files.
-    func build(movie: Movie, root: URL, showOriginalLog: Bool = false) async throws -> CompositionBundle {
+    func build(movie: Movie, root: URL, showOriginalLog: Bool = false, filmEffects: FilmEffectsSettings? = nil, forFilmEffectsPreview: Bool = false) async throws -> CompositionBundle {
+        let effects = filmEffects ?? .off
+        try effects.validate()
         let scenes = movie.activeScenes
         guard !scenes.isEmpty else { throw HomeMovieError.message("Record a scene first.") }
         let usesLog = movie.captureProfile == .appleLog || scenes.contains { $0.profile == .appleLog }
@@ -108,10 +110,10 @@ actor MediaAssembler {
             instruction.timeRange = CMTimeRange(start: cursor, duration: scene.playableDuration)
             instruction.backgroundColor = CGColor(gray: 0, alpha: 1)
             instruction.layerInstructions = [layer]
-            if usesLog {
+            if usesLog || effects.isActive || forFilmEffectsPreview {
                 instructions.append(ColorInstruction(range: instruction.timeRange, trackID: videoTrack.trackID,
                     transform: Self.fitTransform(size: naturalSize, preferred: preferred, canvas: movie.format.canvas),
-                    cube: (scene.profile ?? movie.captureProfile) == .appleLog ? cube : nil))
+                    cube: (scene.profile ?? movie.captureProfile) == .appleLog ? cube : nil, filmEffects: effects))
             } else { instructions.append(instruction) }
             cursor = CMTimeAdd(cursor, scene.playableDuration)
         }
@@ -120,7 +122,7 @@ actor MediaAssembler {
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
         videoComposition.sourceTrackIDForFrameTiming = videoTrack.trackID
         videoComposition.instructions = instructions
-        if usesLog {
+        if usesLog || effects.isActive || forFilmEffectsPreview {
             videoComposition.customVideoCompositorClass = LogVideoCompositor.self
             videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
             videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
@@ -157,3 +159,4 @@ actor MediaAssembler {
             .concatenating(CGAffineTransform(translationX: x, y: y))
     }
 }
+

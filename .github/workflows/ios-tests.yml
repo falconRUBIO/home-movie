@@ -24,6 +24,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           persist-credentials: false
+      - name: Install Metal compiler
+        run: xcodebuild -downloadComponent MetalToolchain
       - name: Generate Xcode project
         run: |
           python3 scripts/generate_project.py
@@ -46,3 +48,4 @@ jobs:
             build/TestResults.xcresult.zip
           if-no-files-found: warn
           retention-days: 14
+

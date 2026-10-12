@@ -72,6 +72,8 @@ struct Movie: Codable, Identifiable, Equatable, Sendable {
     var scenes: [Scene] = []
     var profile: CaptureProfile? = nil
     var look: LUTReference? = nil
+    var filmEffects: FilmEffectsSettings? = nil
+    var exportEffects: FilmEffectsSettings { filmEffects ?? .off }
     var captureProfile: CaptureProfile { profile ?? .standard }
     var lookName: String { look?.displayName ?? "Apple Standard" }
     // Deleted scenes still lock the movie; removing a scene never changes its canvas.
@@ -112,3 +114,4 @@ func durationLabel(_ time: CMTime) -> String {
     let s = seconds >= Double(Int.max) ? Int.max : Int(seconds)
     return s >= 3600 ? "\(s / 3600):" + String(format: "%02d:%02d", s / 60 % 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
 }
+
