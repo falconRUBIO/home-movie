@@ -34,6 +34,9 @@ actor ProjectStore {
         var totalBytes: Int64 = 0
         for movie in value.movies {
             try movie.exportEffects.validate()
+            guard movie.dualCameraCapture != true || movie.captureProfile == .standard else {
+                throw HomeMovieError.message("Dual-camera preferences are incompatible with this movie’s recording profile.")
+            }
             if let look = movie.look {
                 guard movie.captureProfile == .appleLog, !look.name.isEmpty, look.name.count <= 80 else {
                     throw HomeMovieError.message("The movie’s look metadata is invalid.")
@@ -75,10 +78,12 @@ actor ProjectStore {
         guard !loaded else { return [] }
         try ensureDirectories()
         // Install exact supplied samples into durable storage so backups remain self-contained.
-        let filmica = try ColorCube.filmica.get()
-        let filmicaURL = root.appendingPathComponent(LUTReference.filmica.path)
-        if !fm.fileExists(atPath: filmicaURL.path) {
-            try encoder.encode(filmica).write(to: filmicaURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        for reference in LUTReference.bundled {
+            let destination = root.appendingPathComponent(reference.path)
+            if !fm.fileExists(atPath: destination.path) {
+                let cube = try ColorCube.bundledCube(for: reference)
+                try encoder.encode(cube).write(to: destination, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            }
         }
         if !cleanedTransfers {
             // These are app-owned temporary copies, never the source recordings.
@@ -228,6 +233,18 @@ actor ProjectStore {
         guard catalog.movies[i].exportEffects != settings else { return }
         var next = catalog; next.movies[i].filmEffects = settings; next.movies[i].revision += 1
         try write(next)
+    }
+    func setPiPLayout(movieID: UUID, layout: PiPLayout) throws {
+        try requireIdle(); let i = try index(movieID)
+        guard catalog.movies[i].preferredPiPLayout != layout else { return }
+        var next = catalog; next.movies[i].pipLayout = layout; next.movies[i].revision += 1; try write(next)
+    }
+    func setDualCameraCapture(movieID: UUID, enabled: Bool) throws {
+        try requireIdle(); let i = try index(movieID)
+        guard !enabled || catalog.movies[i].captureProfile == .standard else {
+            throw HomeMovieError.message("Picture-in-Picture uses a Standard SDR movie. Apple Log stays unchanged.")
+        }
+        var next = catalog; next.movies[i].dualCameraCapture = enabled; next.movies[i].revision += 1; try write(next)
     }
     func rename(_ id: UUID, name: String) throws {
         try requireIdle()

@@ -69,6 +69,13 @@ struct CameraView: View {
     @State private var activeDolly: DollyZoomRoute?
     @State private var showingDollyHelp = false
     @State private var showingDollySettings = false
+    @State private var showingPiPLayout = false
+    @State private var showingPiPCompatibility = false
+    @State private var viewfinderSize = CGSize.zero
+    @State private var pipDragStart: CGPoint?
+    @State private var lastPiPDragPoint: CGPoint?
+    @State private var pipConfiguring = false
+    @State private var enablePiPAfterPreparation = false
     @AppStorage("dollyGuidanceLearned") private var dollyGuidanceLearned = false
     @AppStorage("handsFreeStart") private var handsFreeStart = false
     @AppStorage("dollyStartDelaySeconds") private var dollyStartDelaySeconds = 3
@@ -94,7 +101,7 @@ struct CameraView: View {
             if let movie {
                 let footerHeight: CGFloat = dynamicTypeSize.isAccessibilitySize ? 100 : 64
                 let railWidth: CGFloat = 112
-                let ratio: CGFloat = landscape ? 16 / 9 : 9 / 16
+                let ratio: CGFloat = camera.options?.dualCameraPrepared == true ? (movie.recordingFormat ?? activeTakeFormat)?.aspect ?? (landscape ? 16 / 9 : 9 / 16) : landscape ? 16 / 9 : 9 / 16
                 let availableWidth = max(1, geometry.size.width - (landscape ? railWidth : 0))
                 let availableHeight = max(1, geometry.size.height - (landscape ? 0 : footerHeight))
                 let previewWidth = min(availableWidth, availableHeight * ratio)
@@ -127,7 +134,7 @@ struct CameraView: View {
         .task(id: movieID) {
             liveOriginal = false
             updateZoomSettings()
-            await camera.prepare(profile: movie?.captureProfile ?? .standard)
+            await prepareCamera()
             looks = await app.store.availableLooks()
         }
         .task(id: "\(movieID)-\(movie?.look?.id.uuidString ?? "standard")") {
@@ -154,7 +161,7 @@ struct CameraView: View {
                         liveOriginal = false; looks = await app.store.availableLooks(); await app.refresh()
                     }
                 } catch { camera.message = error.localizedDescription }
-                await camera.prepare(profile: movie?.captureProfile ?? .standard)
+                await prepareCamera()
             }
         }
         .onChange(of: handsFreeStart) { _, _ in
@@ -209,23 +216,36 @@ struct CameraView: View {
             if !zoomDragging && !manualZoomTargetShown { syncSmoothPosition() }
         }
         .task(id: camera.options?.smoothMoving) { await finishDollyIfIdle() }
+        .onChange(of: camera.options?.isPiPEnabled) { _, enabled in if enabled == true { enablePiPAfterPreparation = false } }
+        .onChange(of: camera.pipSetupFailed) { _, failed in if failed { enablePiPAfterPreparation = false } }
+        .onChange(of: movie?.recordingFormat) { _, format in
+            if camera.options?.dualCameraPrepared == true { camera.service.setPiPLayout(camera.pipLayout, canvasFormat: format) }
+        }
         .onDisappear { cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
-            else if !watching && !showingRecovery && !camera.busy { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }
+            else if !watching && !showingRecovery && !camera.busy { Task { await prepareCamera() } }
         }
     }
     var body: some View {
         activeCamera
         .sheet(isPresented: $showingRecovery, onDismiss: {
-            Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) }
+            Task { await prepareCamera() }
         }) { RecordingRecoveryView().environmentObject(app) }
         .sheet(isPresented: $showingDollyHelp) { dollyHelp }
         .sheet(isPresented: $showingDollySettings) { dollySettings }
+        .sheet(isPresented: $showingPiPLayout) {
+            PiPLayoutView(layout: Binding(get: { camera.pipLayout }, set: { camera.updatePiPLayout($0, movieID: movieID) }),
+                format: movie?.recordingFormat ?? MovieFormat.captureFormat(angle: camera.options?.angle ?? 90) ?? .portrait,
+                rearFrames: camera.service.pipRearFrames, frontFrames: camera.service.pipPresenterFrames,
+                ready: camera.options?.piPAvailable == true, canPrepare: camera.options?.canPreparePiP == true,
+                logMode: movie?.captureProfile == .appleLog, obstacles: normalizedPiPObstacles, onPrepare: { enableDualCamera() })
+        }
+        .sheet(isPresented: $showingPiPCompatibility) { pipCompatibility }
         .alert("Recording Details", isPresented: $showingErrorDetails) {
             Button("OK", role: .cancel) { }
         } message: { Text(camera.message ?? "No additional details are available.") }
-        .fullScreenCover(isPresented: $watching, onDismiss: { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }) {
+        .fullScreenCover(isPresented: $watching, onDismiss: { Task { await prepareCamera() } }) {
             WatchMovieView(movieID: movieID, initialSceneID: initialReviewID, autoplay: initialReviewID == nil).environmentObject(app)
         }
     }
@@ -256,6 +276,11 @@ struct CameraView: View {
                 }
                 Button("Dolly Settings", systemImage: "slider.horizontal.3") { showingDollySettings = true }
                     .disabled(camera.busy)
+                Button("PiP Layout…", systemImage: "rectangle.on.rectangle") { showingPiPLayout = true }
+                    .disabled(camera.busy)
+                if camera.options?.dualCameraPrepared == true {
+                    Button("Use Ordinary Camera", systemImage: "camera") { disableDualCamera() }.disabled(camera.busy)
+                }
                 Button("Dolly Help", systemImage: "questionmark.circle") { showingDollyHelp = true }
                     .disabled(camera.busy)
                 if let last = movie.activeScenes.last {
@@ -285,6 +310,7 @@ struct CameraView: View {
                     .padding(.bottom, lensControlHeight + (landscape ? 18 : 124))
             }
         }.clipped()
+            .overlay { pipInteraction }
             .overlay(alignment: .bottom) {
                 lenses.cameraControlRegion().zIndex(2).background {
                     GeometryReader { proxy in
@@ -298,7 +324,7 @@ struct CameraView: View {
                 recordControl.cameraControlRegion().zIndex(3).padding(landscape ? .trailing : .bottom, 16)
             }
             .coordinateSpace(name: "cameraViewfinder")
-            .onPreferenceChange(CameraControlRegionsKey.self) { previewControlRegions = $0 }
+            .onPreferenceChange(CameraControlRegionsKey.self) { previewControlRegions = $0; updatePiPObstacles() }
     }
     private func captureIndicators(movie: Movie) -> some View {
         VStack(spacing: 6) {
@@ -356,6 +382,12 @@ struct CameraView: View {
                     .accessibilityAddTraits(smoothZoomOpen ? .isSelected : [])
                     .disabled(countdown != nil || !smoothZoomOpen && camera.state != .ready && camera.state != .recording)
             }
+            PiPControl(enabled: options.isPiPEnabled,
+                disabled: countdown != nil || camera.state != .ready && camera.state != .recording || camera.state == .recording && !options.piPAvailable,
+                onToggle: {
+                    if options.piPAvailable { camera.togglePiP() }
+                    else if !camera.busy { showingPiPCompatibility = true }
+                }, onLayout: { if !camera.busy { showingPiPLayout = true } })
         }
     }
     private func finishDollyIfIdle() async {
@@ -664,7 +696,7 @@ struct CameraView: View {
         }
     }
     @ViewBuilder private func recoveryActions(movie: Movie) -> some View {
-        Button("Try Again") { Task { await camera.prepare(profile: movie.captureProfile) } }
+        Button("Try Again") { Task { await prepareCamera() } }
             .frame(minHeight: 44).buttonStyle(.borderedProminent)
         if camera.hasRecoverableTake {
             Button("Recover Take") {
@@ -677,7 +709,7 @@ struct CameraView: View {
     private func preview() -> some View {
         ZStack {
             CameraPreview(session: camera.service.session, angle: camera.options?.angle ?? 90, front: camera.options?.isFront ?? false,
-                options: camera.options, protectedRegions: previewControlRegions, liveFrames: camera.service.liveFrames,
+                options: camera.options, protectedRegions: previewControlRegions + pipProtectedRegion, liveFrames: camera.service.liveFrames,
                 liveCube: liveOriginal ? nil : liveCube,
                 liveActive: movie?.captureProfile == .appleLog && camera.state.showsLiveLook,
                 samplePreview: camera.options?.samplePreview == true,
@@ -743,7 +775,7 @@ struct CameraView: View {
                 }
             }
         }.buttonStyle(.plain)
-            .disabled(undoingTake || !camera.recordingSessionActive && camera.state != .ready)
+            .disabled(pipConfiguring || undoingTake || !camera.recordingSessionActive && camera.state != .ready)
             .opacity(!camera.recordingSessionActive && camera.state != .ready ? 0.4 : 1)
             .accessibilityLabel(countdown != nil ? "Cancel countdown" : camera.recordingSessionActive ? "Stop recording" : "Record next scene")
     }
@@ -759,7 +791,7 @@ struct CameraView: View {
                 if camera.recordingFlip != nil { ProgressView().tint(.white) }
             }.background(.white.opacity(0.15), in: Circle())
         }.accessibilityLabel(camera.recordingFlip == nil ? "Switch camera" : "Switching camera")
-            .disabled(camera.recordingFlip != nil || camera.state != .ready && camera.state != .recording || camera.options?.canFlip != true)
+            .disabled(camera.recordingFlip != nil || camera.state != .ready && camera.state != .recording || camera.options?.canFlip != true || camera.options?.isPiPEnabled == true || camera.pipPresentation.opacity > 0)
         let watch = VStack(spacing: 0) {
             Button { openWatch() } label: {
                 Label("Watch Movie", systemImage: "play.fill")
@@ -833,7 +865,7 @@ struct CameraView: View {
         String(format: "%g×", Double((factor * multiplier * 10).rounded() / 10))
     }
     private func startRecording() {
-        guard camera.state == .ready, countdown == nil, scenePhase == .active else { return }
+        guard !pipConfiguring, camera.state == .ready, countdown == nil, scenePhase == .active else { return }
         guard dollyDelayedStart else { camera.record(movieID: movieID); return }
         if smoothZoomOpen, let start = preparedDollyStart, let target = preparedDollyTarget {
             camera.zoom(start)
@@ -852,6 +884,109 @@ struct CameraView: View {
     private func openWatch(sceneID: UUID? = nil) {
         guard !camera.busy else { return }
         Task { await camera.pauseForPlayback(); initialReviewID = sceneID; watching = true }
+    }
+    private func prepareCamera() async {
+        await camera.prepare(profile: movie?.captureProfile ?? .standard, movieID: movieID,
+            dualCamera: movie?.dualCameraCapture == true, layout: movie?.preferredPiPLayout ?? PiPLayout(),
+            canvasFormat: movie?.recordingFormat, enablePiP: enablePiPAfterPreparation)
+    }
+    private var normalizedPiPObstacles: [CGRect] {
+        guard viewfinderSize.width > 0, viewfinderSize.height > 0 else { return [] }
+        return previewControlRegions.map {
+            CGRect(x: $0.minX / viewfinderSize.width, y: $0.minY / viewfinderSize.height,
+                width: $0.width / viewfinderSize.width, height: $0.height / viewfinderSize.height)
+        }.filter { !$0.isEmpty }
+    }
+    private func updatePiPObstacles() { camera.service.setPiPObstacles(normalizedPiPObstacles) }
+    private var pipProtectedRegion: [CGRect] {
+        guard camera.pipPresentation.opacity > 0, viewfinderSize.width > 0 else { return [] }
+        let r = camera.pipPresentation.rect
+        return [CGRect(x: r.minX * viewfinderSize.width, y: r.minY * viewfinderSize.height,
+            width: r.width * viewfinderSize.width, height: r.height * viewfinderSize.height)]
+    }
+    private var pipInteraction: some View {
+        GeometryReader { geometry in
+            if camera.pipPresentation.opacity > 0.001 {
+                let r = camera.pipPresentation.rect
+                Color.clear.frame(width: r.width * geometry.size.width, height: r.height * geometry.size.height)
+                    .contentShape(Rectangle()).onTapGesture { }
+                    .gesture(pipDragGesture(size: geometry.size))
+                    .position(x: r.midX * geometry.size.width, y: r.midY * geometry.size.height)
+                    .accessibilityElement(children: .ignore).accessibilityLabel("Presenter inset")
+                    .accessibilityHint("Hold briefly, then drag to another corner.")
+                    .accessibilityAction(named: "Move to Top Left") { movePiP(to: .topLeft) }
+                    .accessibilityAction(named: "Move to Top Right") { movePiP(to: .topRight) }
+                    .accessibilityAction(named: "Move to Bottom Left") { movePiP(to: .bottomLeft) }
+                    .accessibilityAction(named: "Move to Bottom Right") { movePiP(to: .bottomRight) }
+            }
+        }.onGeometryChange(for: CGSize.self) { $0.size } action: { size in viewfinderSize = size; updatePiPObstacles() }
+    }
+    private func pipDragGesture(size: CGSize) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.25).sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("cameraViewfinder")))
+            .onChanged { value in
+                guard camera.options?.isPiPEnabled == true, size.width > 0, size.height > 0 else { return }
+                switch value {
+                case .first(true):
+                    if pipDragStart == nil { pipDragStart = CGPoint(x: camera.pipPresentation.rect.midX, y: camera.pipPresentation.rect.midY) }
+                case .second(true, let drag?):
+                    let anchor = pipDragStart ?? CGPoint(x: camera.pipPresentation.rect.midX, y: camera.pipPresentation.rect.midY)
+                    pipDragStart = anchor
+                    let point = CGPoint(x: anchor.x + drag.translation.width / size.width, y: anchor.y + drag.translation.height / size.height)
+                    lastPiPDragPoint = point; camera.dragPiP(to: point, finished: false)
+                default: break
+                }
+            }.onEnded { _ in
+                if let point = lastPiPDragPoint ?? pipDragStart { camera.dragPiP(to: point, finished: true) }
+                lastPiPDragPoint = nil; pipDragStart = nil
+            }
+    }
+    private func movePiP(to corner: PiPCorner) {
+        let format = movie?.recordingFormat ?? activeTakeFormat ?? MovieFormat.captureFormat(angle: camera.options?.angle ?? 90) ?? .portrait
+        let center = PiPGeometry.desiredCenter(corner: corner, canvas: format.canvas, size: camera.pipLayout.size)
+        camera.dragPiP(to: center, finished: true)
+    }
+    private var pipCompatibility: some View {
+        NavigationStack {
+            Form {
+                Section("Dual Camera") {
+                    Text(movie?.captureProfile == .appleLog ? "PiP uses SDR front-camera footage. Your Apple Log movie and its look stay unchanged." : "Prepare both cameras before a take so PiP can appear and disappear without restarting video or audio.")
+                    Text("1080p · 30 fps · SDR · H.264\nRear 1× wide camera with digital zoom. One continuous microphone.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    if camera.options?.canPreparePiP == true {
+                        Button(movie?.captureProfile == .appleLog ? "New Standard Movie for PiP" : "Use Dual Camera") { enableDualCamera() }
+                    } else { Text("This iPhone cannot use the required front/rear camera combination.").foregroundStyle(.secondary) }
+                }
+            }.navigationTitle("Picture-in-Picture").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showingPiPCompatibility = false } } }
+        }.presentationDetents([.medium]).presentationDragIndicator(.visible)
+    }
+    private func enableDualCamera() {
+        guard !camera.busy, !pipConfiguring, countdown == nil, let movie, camera.options?.canPreparePiP == true else { return }
+        pipConfiguring = true; showingPiPLayout = false; showingPiPCompatibility = false
+        enablePiPAfterPreparation = true
+        Task {
+            defer { pipConfiguring = false }
+            do {
+                var destination = movie.id
+                if movie.captureProfile == .appleLog {
+                    let created = try await app.store.create(name: String(movie.name.prefix(70)) + " PiP", format: movie.format, profile: .standard, useDefaultLook: false)
+                    destination = created.id
+                    try await app.store.setPiPLayout(movieID: destination, layout: movie.preferredPiPLayout)
+                }
+                try await app.store.setDualCameraCapture(movieID: destination, enabled: true)
+                await app.refresh(); movieID = destination
+                if scenePhase == .active { await prepareCamera() }
+            } catch { enablePiPAfterPreparation = false; camera.message = error.localizedDescription }
+        }
+    }
+    private func disableDualCamera() {
+        guard !camera.busy, !pipConfiguring, countdown == nil else { return }
+        pipConfiguring = true; enablePiPAfterPreparation = false
+        Task {
+            defer { pipConfiguring = false }
+            do { try await app.store.setDualCameraCapture(movieID: movieID, enabled: false); await app.refresh(); await prepareCamera() }
+            catch { camera.message = error.localizedDescription }
+        }
     }
 }
 

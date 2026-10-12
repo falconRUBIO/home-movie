@@ -63,6 +63,11 @@ struct RecordingFlipHandoff {
     @Published var savedScene = false
     @Published private(set) var hasRecoverableTake = false
     @Published var takeFormat: MovieFormat?
+    @Published private(set) var pipPresentation = PiPPresentation()
+    @Published private(set) var pipLayout = PiPLayout()
+    @Published private(set) var pipSetupFailed = false
+    private var preferencesMovieID: UUID?
+    private var enablePiPWhenReady = false
     @Published private(set) var recordingFlip: RecordingFlipHandoff?
     private var timer: Timer?
     private var beganAt: TimeInterval?
@@ -86,21 +91,26 @@ struct RecordingFlipHandoff {
         self.app = app
         service.onEvent = { [weak self] event in Task { @MainActor in await self?.receive(event) } }
     }
-    func prepare(profile: CaptureProfile = .standard) async {
+    func prepare(profile: CaptureProfile = .standard, movieID: UUID? = nil, dualCamera: Bool = false,
+                 layout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil, enablePiP: Bool = false) async {
         guard !busy else { return }
         let requestID = UUID(); preparationID = requestID
+        if preferencesMovieID != movieID { pipPresentation = PiPPresentation() }
+        preferencesMovieID = movieID; pipLayout = layout; pipSetupFailed = false; enablePiPWhenReady = enablePiP
         active = true; state = .preparing; message = nil; interruption = nil; hasRecoverableTake = false
         let granted = await CaptureService.permissions()
         guard active, preparationID == requestID else { return }
         guard granted else { state = .denied; return }
-        service.prepare(front: rememberedFront, profile: profile)
+        service.prepare(front: rememberedFront, profile: profile, dualCamera: dualCamera, pipLayout: layout, canvasFormat: canvasFormat)
     }
     func record(movieID: UUID, continuingAt elapsed: CMTime? = nil) {
         guard state == .ready, active, let app else { return }
         guard let observed = options?.angle, let automatic = MovieFormat.captureFormat(angle: observed),
               let movie = app.movie(movieID), options?.profile == movie.captureProfile else { return }
         let format = movie.recordingFormat ?? automatic
-        let angle = automatic.recordingAngle(observed: observed)
+        let recordingFormat = options?.dualCameraPrepared == true ? format : automatic
+        let angle = recordingFormat.recordingAngle(observed: observed)
+        // Keep the camera controls oriented to the phone; PiP's movie canvas is independent.
         takeFormat = automatic
         activeMovieID = movieID; elapsedBeforeSegment = elapsed ?? .zero
         continuingRecording = elapsed != nil
@@ -167,7 +177,7 @@ struct RecordingFlipHandoff {
     func exposure(_ bias: Float) { if active, [.ready, .recording].contains(state) { service.exposure(bias) } }
     func toggleTorch() { if active, [.ready, .recording].contains(state) { service.toggleTorch() } }
     func flip() {
-        guard active, recordingFlip == nil, options?.canFlip == true else { return }
+        guard active, recordingFlip == nil, options?.canFlip == true, options?.isPiPEnabled != true, pipPresentation.opacity == 0 else { return }
         if state == .recording, options?.canFlipWhileRecording == true { service.flip(); return }
         if state == .recording, let movieID = activeMovieID {
             let current = beganAt.map { CMTimeAdd(elapsedBeforeSegment, CMTime(seconds: max(0, ProcessInfo.processInfo.systemUptime - $0), preferredTimescale: 600)) } ?? elapsed
@@ -176,11 +186,30 @@ struct RecordingFlipHandoff {
             state = .finalizing; timer?.invalidate(); beginBackgroundTime(); service.stop()
         } else if state == .ready { state = .preparing; service.flip() }
     }
+    func togglePiP() {
+        guard active, state == .ready || state == .recording, options?.piPAvailable == true else { return }
+        service.setPiPEnabled(options?.isPiPEnabled != true)
+    }
+    func updatePiPLayout(_ layout: PiPLayout, movieID: UUID) {
+        guard !busy, let app else { return }
+        pipLayout = layout; service.setPiPLayout(layout, canvasFormat: app.movie(movieID)?.recordingFormat)
+        Task {
+            do { try await app.store.setPiPLayout(movieID: movieID, layout: layout); await app.refresh() }
+            catch { message = error.localizedDescription }
+        }
+    }
+    func dragPiP(to center: CGPoint, finished: Bool) {
+        guard active, state == .ready || state == .recording, options?.isPiPEnabled == true else { return }
+        service.dragPiP(to: center, finished: finished)
+    }
     func receive(_ event: CaptureEvent) async {
         switch event {
         case .ready(let options):
             self.options = options; rememberedFront = options.isFront
             if (state == .preparing || state == .ready), recordingFlip == nil, active, interruption == nil { state = .ready }
+            if enablePiPWhenReady, options.piPAvailable, active, state == .ready {
+                enablePiPWhenReady = false; service.setPiPEnabled(true)
+            }
         case .cameraChanged(let options):
             self.options = options; rememberedFront = options.isFront
             guard active, interruption == nil else { recordingFlip = nil; state = .interrupted; return }
@@ -242,6 +271,19 @@ struct RecordingFlipHandoff {
             if busy { interruption = text; stop() } else { state = .failed }
         case .notice(let text):
             message = text
+        case .pipPresentation(let presentation):
+            pipPresentation = presentation
+        case .pipLayout(let layout):
+            pipLayout = layout
+            if let app, let movieID = preferencesMovieID {
+                do { try await app.store.setPiPLayout(movieID: movieID, layout: layout); await app.refresh() }
+                catch { message = "The inset moved for this take, but its default position could not be saved." }
+            }
+        case .pipSetupFailed(let text):
+            pipSetupFailed = true; enablePiPWhenReady = false; message = text
+            if let app, let movieID = preferencesMovieID {
+                try? await app.store.setDualCameraCapture(movieID: movieID, enabled: false); await app.refresh()
+            }
         }
     }
     private func beginBackgroundTime() {
@@ -255,4 +297,3 @@ struct RecordingFlipHandoff {
         UIApplication.shared.endBackgroundTask(backgroundTask); backgroundTask = .invalid
     }
 }
-

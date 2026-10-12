@@ -75,6 +75,11 @@ struct CameraOptions: Sendable {
     var recordingFormat: String
     var samplePreview = false
     var canFlipWhileRecording = false
+    var canPreparePiP = false
+    var piPAvailable = false
+    var isPiPEnabled = false
+    var dualCameraPrepared = false
+    var piPCanvasFormat: MovieFormat? = nil
 }
 enum CaptureEvent {
     case ready(CameraOptions)
@@ -84,6 +89,9 @@ enum CaptureEvent {
     case interrupted(String)
     case failed(String)
     case notice(String)
+    case pipPresentation(PiPPresentation)
+    case pipLayout(PiPLayout)
+    case pipSetupFailed(String)
 }
 
 // All capture mutation is confined to one serial queue. The preview observes the session only.
@@ -102,6 +110,10 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private let queue = DispatchQueue(label: "HomeMovie.Capture", qos: .userInitiated)
     private let output = AVCaptureMovieFileOutput()
     let liveFrames = LiveFrames()
+    let pipRearFrames = LiveFrames()
+    let pipPresenterFrames = LiveFrames()
+    private let piPCapable = SeamlessCapture.canPreparePiP()
+    private var dualCameraRequested = false
     private let liveOutput = AVCaptureVideoDataOutput()
     private let liveQueue = DispatchQueue(label: "HomeMovie.live-look", qos: .userInteractive)
     private var videoInput: AVCaptureDeviceInput?
@@ -184,16 +196,22 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 camera.formats.contains { $0.supportedColorSpaces.contains(.appleLog) && $0.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 } }
             }
     }
-    func prepare(front: Bool, profile: CaptureProfile = .standard) {
+    func prepare(front: Bool, profile: CaptureProfile = .standard, dualCamera: Bool = false,
+                 pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) {
         queue.async {
+            let previousFront = self.isFront
+            let previousZoom = self.videoInput?.device.videoZoomFactor
             do {
                 if self.ticket != nil { return }
-                if !self.configured || self.configuredProfile != profile {
+                if !self.configured || self.configuredProfile != profile || self.dualCameraRequested != dualCamera || dualCamera && self.seamless?.needsPiPReprepare == true {
                     self.configured = false
                     if self.session.isRunning { self.session.stopRunning() }
                     self.configuredProfile = profile
-                    try self.configure(front: self.device(front: front) == nil ? false : front)
+                    self.dualCameraRequested = dualCamera
+                    try self.configure(front: dualCamera ? false : self.device(front: front) == nil ? false : front,
+                        preparedForPiP: dualCamera, pipLayout: pipLayout, canvasFormat: canvasFormat)
                 }
+                self.seamless?.configurePiP(layout: pipLayout, canvasFormat: canvasFormat)
                 try self.ensureLogCaptureReady(requireCodec: false)
                 try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .videoRecording, options: [.defaultToSpeaker])
                 try AVAudioSession.sharedInstance().setActive(true)
@@ -202,7 +220,24 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 guard !self.session.isInterrupted else { throw HomeMovieError.message("The camera is still interrupted. Try Resume Camera again when it is available.") }
                 try self.ensureLogCaptureReady()
                 self.onEvent?(.ready(try self.options()))
-            } catch { self.configured = false; self.onEvent?(.failed(error.localizedDescription)) }
+            } catch {
+                self.configured = false
+                if dualCamera {
+                    self.dualCameraRequested = false
+                    do {
+                        try self.configure(front: previousFront)
+                        try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .videoRecording, options: [.defaultToSpeaker])
+                        try AVAudioSession.sharedInstance().setActive(true); self.session.startRunning()
+                        if let previousZoom, let camera = self.videoInput?.device {
+                            try camera.lockForConfiguration()
+                            camera.videoZoomFactor = min(camera.maxAvailableVideoZoomFactor, max(camera.minAvailableVideoZoomFactor, previousZoom))
+                            camera.unlockForConfiguration()
+                        }
+                        self.onEvent?(.ready(try self.options()))
+                        self.onEvent?(.pipSetupFailed("Dual-camera recording could not be prepared. Your ordinary camera remains available. " + error.localizedDescription))
+                    } catch { self.onEvent?(.failed(error.localizedDescription)) }
+                } else { self.onEvent?(.failed(error.localizedDescription)) }
+            }
         }
     }
     private func device(front: Bool) -> AVCaptureDevice? {
@@ -212,9 +247,11 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             $0.deviceType == type && (configuredProfile == .standard || $0.formats.contains { $0.supportedColorSpaces.contains(.appleLog) && $0.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 } })
         } }.first
     }
-    private func configure(front: Bool) throws {
+    private func configure(front: Bool, preparedForPiP: Bool = false, pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) throws {
         stopSmoothZoomOnQueue()
         liveFrames.clear()
+        pipRearFrames.clear(); pipPresenterFrames.clear()
+        focusLocked = false
         if session.isRunning { session.stopRunning() }
         seamless = nil
         selectSession(singleSession)
@@ -222,8 +259,10 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         singleSession.inputs.forEach { singleSession.removeInput($0) }
         singleSession.outputs.forEach { singleSession.removeOutput($0) }
         singleSession.commitConfiguration()
-        if front, configuredProfile == .standard, let dual = SeamlessCapture(queue: queue, frames: liveFrames) {
-            seamless = dual; videoInput = dual.activeInput; isFront = true
+        if (front || preparedForPiP), configuredProfile == .standard, let dual = SeamlessCapture(queue: queue, frames: liveFrames,
+            rearFrames: pipRearFrames, presenterFrames: pipPresenterFrames, front: front, preparedForPiP: preparedForPiP,
+            layout: pipLayout, canvasFormat: canvasFormat) {
+            seamless = dual; videoInput = dual.activeInput; isFront = front
             selectSession(dual.session)
             dual.onStarted = { [weak self] id in self?.onEvent?(.started(id)) }
             dual.onFinished = { [weak self] ticket, error in
@@ -236,9 +275,20 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 guard let self, let options = try? self.options() else { return }
                 self.onEvent?(.ready(options))
             }
+            dual.onSelectionChanged = { [weak self, weak dual] in
+                guard let self, let dual else { return }
+                self.stopSmoothZoomOnQueue(); self.turnOffTorch()
+                self.videoInput = dual.activeInput; self.isFront = dual.front; self.focusLocked = false
+                self.setCoordinator(dual.activeInput.device)
+                if let options = try? self.options() { self.onEvent?(.cameraChanged(options)) }
+            }
+            dual.onPiPPresentation = { [weak self] in self?.onEvent?(.pipPresentation($0)) }
+            dual.onPiPLayout = { [weak self] in self?.onEvent?(.pipLayout($0)) }
+            dual.onNotice = { [weak self] in self?.onEvent?(.notice($0)) }
             setCoordinator(dual.activeInput.device); configured = true
             return
         }
+        if preparedForPiP { throw HomeMovieError.message("This device cannot sustain the selected 1080p, 30 fps SDR front/rear camera combination.") }
         session.beginConfiguration(); defer { session.commitConfiguration() }
         guard session.canSetSessionPreset(.hd1920x1080) else { throw HomeMovieError.message("1080p recording is not available on this device.") }
         session.inputs.forEach { session.removeInput($0) }; session.outputs.forEach { session.removeOutput($0) }
@@ -414,12 +464,27 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 (!camera.isFocusPointOfInterestSupported || camera.isFocusModeSupported(.autoFocus)),
             focusLocked: focusLocked, exposureBias: camera.exposureTargetBias,
             minimumExposureBias: camera.minExposureTargetBias, maximumExposureBias: camera.maxExposureTargetBias,
-            canFlip: device(front: !isFront) != nil, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on,
+            canFlip: device(front: !isFront) != nil && seamless?.preparedForPiP != true, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on,
             canStayOnLens: camera.isVirtualDevice && camera.activePrimaryConstituent != nil && camera.primaryConstituentDeviceSwitchingBehavior != .unsupported,
             smoothMoving: smoothTimer != nil,
             recordingFormat: configuredProfile == .appleLog ? LogRecordingCodec.label(LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)) : "Standard · H.264",
-            samplePreview: seamless != nil, canFlipWhileRecording: seamless?.readyToFlip == true)
+            samplePreview: seamless != nil, canFlipWhileRecording: seamless?.readyToFlip == true,
+            canPreparePiP: piPCapable, piPAvailable: seamless?.supportsPiP == true && seamless?.preparedForPiP == true && configuredProfile == .standard,
+            isPiPEnabled: seamless?.pipEnabled == true, dualCameraPrepared: seamless?.preparedForPiP == true,
+            piPCanvasFormat: seamless?.canvasFormat)
     }
+    func setPiPEnabled(_ enabled: Bool) {
+        queue.async {
+            guard self.session.isRunning, !self.session.isInterrupted, self.configuredProfile == .standard,
+                  let dual = self.seamless, dual.preparedForPiP else { self.onEvent?(.notice("Prepare Dual Camera before recording to use PiP.")); return }
+            dual.setPiPEnabled(enabled)
+        }
+    }
+    func setPiPLayout(_ layout: PiPLayout, canvasFormat: MovieFormat? = nil) {
+        queue.async { self.seamless?.configurePiP(layout: layout, canvasFormat: canvasFormat) }
+    }
+    func setPiPObstacles(_ rectangles: [CGRect]) { queue.async { self.seamless?.setPiPObstacles(rectangles) } }
+    func dragPiP(to point: CGPoint, finished: Bool) { queue.async { self.seamless?.dragPiP(to: point, finished: finished) } }
     func focus(at point: CGPoint, locked: Bool = false) {
         guard point.x.isFinite, point.y.isFinite, (0...1).contains(point.x), (0...1).contains(point.y) else { return }
         queue.async {
@@ -796,4 +861,3 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         }
     }
 }
-

@@ -6,14 +6,16 @@ import UIKit
 final class LiveFrames: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var frame: CVPixelBuffer?
+    private var composed = false
+    private var rotationAngle: CGFloat?
     private var listener: (@Sendable () -> Void)?
     private var notificationPending = false
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         push(image)
     }
-    func push(_ image: CVPixelBuffer) {
-        lock.lock(); frame = image
+    func push(_ image: CVPixelBuffer, composed: Bool = false, angle: CGFloat? = nil) {
+        lock.lock(); frame = image; self.composed = composed; rotationAngle = angle
         let notify = notificationPending ? nil : listener
         if notify != nil { notificationPending = true }
         lock.unlock(); notify?()
@@ -23,6 +25,10 @@ final class LiveFrames: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
     }
     func notificationHandled() { lock.lock(); notificationPending = false; lock.unlock() }
     func latest() -> CVPixelBuffer? { lock.lock(); defer { lock.unlock() }; return frame }
+    func snapshot() -> (buffer: CVPixelBuffer, composed: Bool, angle: CGFloat?)? {
+        lock.lock(); defer { lock.unlock() }
+        return frame.map { ($0, composed, rotationAngle) }
+    }
     func clear() { lock.lock(); frame = nil; lock.unlock() }
 }
 enum LiveLookGeometry {
@@ -75,23 +81,23 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         super.init()
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
-    func encode(_ source: CVPixelBuffer, to texture: MTLTexture, command: MTLCommandBuffer) throws {
+    func encode(_ source: CVPixelBuffer, to texture: MTLTexture, command: MTLCommandBuffer, composed: Bool = false) throws {
         let target = CGSize(width: texture.width, height: texture.height)
         var image: CIImage
         if passthrough { image = CIImage(cvPixelBuffer: source) }
         else if let cube { image = try cube.apply(to: CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()])) }
         else { throw HomeMovieError.message("No live look is selected.") }
-        image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: angle, front: front))
+        image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: composed ? 0 : angle, front: composed ? false : front))
             .cropped(to: CGRect(origin: .zero, size: target))
         let destination = CIRenderDestination(mtlTexture: texture, commandBuffer: command)
         destination.colorSpace = nil; destination.isFlipped = true
         _ = try context.startTask(toRender: image, to: destination)
     }
     func draw(in view: MTKView) {
-        guard !rendering, cube != nil || passthrough, let source = frames?.latest(), let drawable = view.currentDrawable,
+        guard !rendering, cube != nil || passthrough, let source = frames?.snapshot(), let drawable = view.currentDrawable,
               let command = queue.makeCommandBuffer() else { return }
         do {
-            try encode(source, to: drawable.texture, command: command)
+            try encode(source.buffer, to: drawable.texture, command: command, composed: source.composed)
             rendering = true
             let presentationID = self.presentationID
             command.addCompletedHandler { [weak self] buffer in
@@ -108,4 +114,3 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         }
     }
 }
-

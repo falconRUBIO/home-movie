@@ -1,0 +1,206 @@
+import XCTest
+import AVFoundation
+import CoreImage
+import UIKit
+@testable import HomeMovie
+
+final class PictureInPictureTests: XCTestCase {
+    private func frame(red: UInt8, green: UInt8, blue: UInt8, split: Bool = false) throws -> CVPixelBuffer {
+        var result: CVPixelBuffer?
+        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 64, 36, kCVPixelFormatType_32BGRA,
+            [kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary, &result), kCVReturnSuccess)
+        let buffer = try XCTUnwrap(result)
+        CVPixelBufferLockBaseAddress(buffer, []); defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+        let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(buffer)).assumingMemoryBound(to: UInt8.self)
+        for y in 0..<36 { for x in 0..<64 {
+            let offset = y * CVPixelBufferGetBytesPerRow(buffer) + x * 4
+            base[offset] = blue; base[offset + 1] = split && x >= 32 ? 220 : green
+            base[offset + 2] = split && x >= 32 ? 0 : red; base[offset + 3] = 255
+        }}
+        return buffer
+    }
+    private func sample(_ image: CIImage, point: CGPoint) -> [UInt8] {
+        var rgba = [UInt8](repeating: 0, count: 4)
+        CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()]).render(image,
+            toBitmap: &rgba, rowBytes: 4, bounds: CGRect(x: point.x, y: point.y, width: 1, height: 1), format: .RGBA8, colorSpace: nil)
+        return rgba
+    }
+    private func audio(at time: CMTime) throws -> CMSampleBuffer {
+        var description = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked, mBytesPerPacket: 4, mFramesPerPacket: 1,
+            mBytesPerFrame: 4, mChannelsPerFrame: 1, mBitsPerChannel: 32, mReserved: 0)
+        var format: CMAudioFormatDescription?
+        XCTAssertEqual(CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault, asbd: &description, layoutSize: 0,
+            layout: nil, magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &format), noErr)
+        var block: CMBlockBuffer?
+        XCTAssertEqual(CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: 6400,
+            blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0, dataLength: 6400, flags: 0, blockBufferOut: &block), noErr)
+        let data = try XCTUnwrap(block)
+        XCTAssertEqual(CMBlockBufferFillDataBytes(with: 0, blockBuffer: data, offsetIntoDestination: 0, dataLength: 6400), noErr)
+        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 48_000), presentationTimeStamp: time, decodeTimeStamp: .invalid)
+        var sampleSize = 4; var result: CMSampleBuffer?
+        XCTAssertEqual(CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: data, formatDescription: try XCTUnwrap(format),
+            sampleCount: 1600, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 1,
+            sampleSizeArray: &sampleSize, sampleBufferOut: &result), noErr)
+        return try XCTUnwrap(result)
+    }
+    func testInsetUsesMovieWidthAndFourByThreeAtEveryCorner() throws {
+        for canvas in [MovieFormat.landscape.canvas, MovieFormat.portrait.canvas] {
+            for size in PiPSize.allCases { for corner in PiPCorner.allCases {
+                let rect = try XCTUnwrap(PiPGeometry.rect(layout: PiPLayout(corner: corner, size: size), canvas: canvas))
+                XCTAssertTrue(CGRect(x: 0, y: 0, width: 1, height: 1).contains(rect))
+                XCTAssertEqual(rect.width, size.fraction, accuracy: 0.0001)
+                XCTAssertEqual(rect.width * canvas.width / (rect.height * canvas.height), 4 / 3, accuracy: 0.0001)
+                XCTAssertEqual(PiPGeometry.nearestCorner(to: CGPoint(x: rect.midX, y: rect.midY), layout: PiPLayout(size: size), canvas: canvas), corner)
+            }}
+        }
+    }
+    func testDragClampsInsideMovieAndAvoidsExistingPreviewControls() throws {
+        let canvas = MovieFormat.landscape.canvas
+        let controls = [CGRect(x: 0, y: 0, width: 1, height: 0.1), CGRect(x: 0.2, y: 0.82, width: 0.6, height: 0.18), CGRect(x: 0.88, y: 0.35, width: 0.12, height: 0.3)]
+        for point in [CGPoint(x: -4, y: -3), CGPoint(x: 10, y: 4), CGPoint(x: 0.93, y: 0.6), CGPoint(x: 0.5, y: 0.92)] {
+            let rect = try XCTUnwrap(PiPGeometry.safeRect(center: point, canvas: canvas, size: .small, obstacles: controls))
+            XCTAssertTrue(CGRect(x: 0, y: 0, width: 1, height: 1).contains(rect))
+            XCTAssertFalse(controls.contains { $0.intersects(rect) })
+        }
+        XCTAssertNil(PiPGeometry.safeRect(center: CGPoint(x: 0.5, y: 0.5), canvas: canvas, size: .medium, obstacles: [CGRect(x: 0, y: 0, width: 1, height: 1)]))
+    }
+    func testToggleAndCornerSettleFollowVideoTimeWithoutBounce() throws {
+        var timeline = PiPTimeline(); let canvas = MovieFormat.landscape.canvas
+        timeline.setEnabled(true, at: CMTime(seconds: 10, preferredTimescale: 600))
+        XCTAssertEqual(timeline.opacity(at: CMTime(seconds: 10, preferredTimescale: 600)), 0)
+        XCTAssertEqual(timeline.opacity(at: CMTime(seconds: 10.09, preferredTimescale: 600)), 0.5, accuracy: 0.001)
+        timeline.drag(to: CGPoint(x: 0.15, y: 0.25), at: CMTime(seconds: 11, preferredTimescale: 600), canvas: canvas, obstacles: [])
+        let before = timeline.presentation(at: CMTime(seconds: 11, preferredTimescale: 600), canvas: canvas)
+        let layout = timeline.settle(at: CMTime(seconds: 11, preferredTimescale: 600), canvas: canvas, obstacles: [])
+        XCTAssertEqual(layout.corner, .topLeft)
+        let halfway = timeline.presentation(at: CMTime(seconds: 11.09, preferredTimescale: 600), canvas: canvas)
+        let after = timeline.presentation(at: CMTime(seconds: 11.18, preferredTimescale: 600), canvas: canvas)
+        XCTAssertEqual(halfway.rect.midX, (before.rect.midX + after.rect.midX) / 2, accuracy: 0.001)
+        XCTAssertEqual(halfway.rect.midY, (before.rect.midY + after.rect.midY) / 2, accuracy: 0.001)
+        timeline.setEnabled(false, at: CMTime(seconds: 12, preferredTimescale: 600))
+        XCTAssertEqual(timeline.opacity(at: CMTime(seconds: 12.09, preferredTimescale: 600)), 0.5, accuracy: 0.001)
+        XCTAssertEqual(timeline.opacity(at: CMTime(seconds: 12.18, preferredTimescale: 600)), 0, accuracy: 0.001)
+    }
+    func testFrameMatchingRejectsLateAndFutureFramesWithoutWaitingForFront() throws {
+        let old = try frame(red: 30, green: 0, blue: 0), current = try frame(red: 120, green: 0, blue: 0), future = try frame(red: 220, green: 0, blue: 0)
+        var matcher = PiPFrameMatcher()
+        matcher.push(future, at: CMTime(seconds: 12, preferredTimescale: 600))
+        matcher.push(current, at: CMTime(seconds: 10, preferredTimescale: 600))
+        matcher.push(old, at: CMTime(seconds: 8, preferredTimescale: 600))
+        XCTAssertTrue(matcher.frame(at: CMTime(seconds: 10.03, preferredTimescale: 600)) === current)
+        XCTAssertNil(matcher.frame(at: CMTime(seconds: 11, preferredTimescale: 600)))
+        matcher.clear(); XCTAssertNil(matcher.frame(at: CMTime(seconds: 12, preferredTimescale: 600)))
+    }
+    func testCompositorIsFramelessUnmirroredAndRearContinuesWhenPresenterMissing() throws {
+        let rear = try frame(red: 0, green: 0, blue: 220), front = try frame(red: 220, green: 0, blue: 0, split: true)
+        let canvas = CGSize(width: 640, height: 360)
+        let rect = try XCTUnwrap(PiPGeometry.rect(layout: PiPLayout(), canvas: canvas))
+        let state = PiPPresentation(rect: rect, opacity: 1, enabled: true)
+        let image = PiPCompositor.image(background: rear, presenter: front, canvas: canvas, backgroundAngle: 0, presenterAngle: 0, presentation: state)
+        let y = (1 - rect.midY) * canvas.height
+        let left = sample(image, point: CGPoint(x: (rect.minX + rect.width * 0.25) * canvas.width, y: y))
+        let right = sample(image, point: CGPoint(x: (rect.minX + rect.width * 0.75) * canvas.width, y: y))
+        XCTAssertGreaterThan(left[0], 180); XCTAssertLessThan(left[1], 30)
+        XCTAssertGreaterThan(right[1], 180); XCTAssertLessThan(right[0], 30)
+        let outside = sample(image, point: CGPoint(x: rect.minX * canvas.width - 3, y: y))
+        XCTAssertGreaterThan(outside[2], 180); XCTAssertLessThan(outside[0], 30)
+        let missing = PiPCompositor.image(background: rear, presenter: nil, canvas: canvas, backgroundAngle: 0, presenterAngle: 0, presentation: state)
+        XCTAssertGreaterThan(sample(missing, point: CGPoint(x: rect.midX * canvas.width, y: y))[2], 180)
+    }
+    func testPreferencesPersistPerMovieAndSurviveBackupWithoutChangingLog() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let other = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: other) }
+        let store = ProjectStore(root: root); _ = try await store.load()
+        let movie = try await store.create(name: "Tour", format: .landscape)
+        let log = try await store.create(name: "Cinema", format: .portrait, profile: .appleLog)
+        let layout = PiPLayout(corner: .topLeft, size: .medium)
+        try await store.setPiPLayout(movieID: movie.id, layout: layout)
+        try await store.setDualCameraCapture(movieID: movie.id, enabled: true)
+        do { try await store.setDualCameraCapture(movieID: log.id, enabled: true); XCTFail("Log must not silently downgrade") } catch { }
+        let reopened = ProjectStore(root: root); _ = try await reopened.load()
+        let values = await reopened.snapshot()
+        XCTAssertEqual(values.first { $0.id == movie.id }?.preferredPiPLayout, layout)
+        XCTAssertEqual(values.first { $0.id == movie.id }?.dualCameraCapture, true)
+        XCTAssertEqual(values.first { $0.id == log.id }?.captureProfile, .appleLog)
+        XCTAssertEqual(values.first { $0.id == log.id }?.look, log.look)
+        let backup = BackupService(); let archive = try await backup.create(store: reopened) { _ in }
+        defer { Task { try? await backup.discard(archive.url) } }
+        let restored = ProjectStore(root: other); _ = try await restored.load()
+        try await backup.restore(from: archive.url, store: restored) { _ in }
+        let restoredMovies = await restored.snapshot()
+        XCTAssertEqual(restoredMovies.first { $0.name == "Tour (Restored)" }?.preferredPiPLayout, layout)
+        XCTAssertEqual(restoredMovies.first { $0.name == "Tour (Restored)" }?.dualCameraCapture, true)
+        XCTAssertEqual(restoredMovies.first { $0.name == "Cinema (Restored)" }?.captureProfile, .appleLog)
+        let legacy = Movie(name: "Legacy", format: .portrait)
+        let decoded = try JSONDecoder().decode(Movie.self, from: JSONEncoder().encode(legacy))
+        XCTAssertEqual(decoded.preferredPiPLayout, PiPLayout()); XCTAssertNil(decoded.dualCameraCapture)
+    }
+    @MainActor func testInsetAndPiPControlRegionsCannotTriggerViewfinderFocus() {
+        let preview = PreviewUIView(frame: CGRect(x: 0, y: 0, width: 393, height: 698))
+        preview.protectedRegions = [CGRect(x: 277, y: 610, width: 106, height: 80), CGRect(x: 300, y: 538, width: 44, height: 44)]
+        XCTAssertFalse(preview.permitsPreviewInteraction(at: CGPoint(x: 325, y: 650)))
+        XCTAssertFalse(preview.permitsPreviewInteraction(at: CGPoint(x: 325, y: 560)))
+        XCTAssertTrue(preview.permitsPreviewInteraction(at: CGPoint(x: 190, y: 340)))
+    }
+    func testRecordedPiPChangesAreBakedIntoOneNormalClipAndMovieExport() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root); _ = try await store.load()
+        let movie = try await store.create(name: "Tour recording", format: .landscape)
+        let ticket = try await store.begin(movieID: movie.id, format: .landscape, profile: .standard)
+        let writer = try ContinuousTakeWriter(url: try await store.url(ticket.staging), angle: 0)
+        let rear = try frame(red: 0, green: 0, blue: 220), front = try frame(red: 220, green: 0, blue: 0)
+        let renderer = PiPFrameRenderer(); var timeline = PiPTimeline()
+        for index in 0..<36 {
+            let time = CMTime(value: Int64(index), timescale: 30)
+            if index == 6 { timeline.setEnabled(true, at: time) }
+            if index == 18 {
+                timeline.drag(to: CGPoint(x: 0.15, y: 0.25), at: time, canvas: writer.canvas, obstacles: [])
+                timeline.settle(at: time, canvas: writer.canvas, obstacles: [])
+            }
+            if index == 27 { timeline.setEnabled(false, at: time) }
+            let image = PiPCompositor.image(background: rear, presenter: front, canvas: writer.canvas, backgroundAngle: 0,
+                presenterAngle: 0, presentation: timeline.presentation(at: time, canvas: writer.canvas))
+            let buffer = try XCTUnwrap(renderer.render(image, canvas: writer.canvas))
+            var accepted = false
+            for _ in 0..<100 {
+                if writer.appendRenderedVideo(buffer, at: time) { accepted = true; break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(accepted); writer.appendAudio(try audio(at: time))
+        }
+        let done = expectation(description: "PiP take closes once")
+        writer.finish { error in XCTAssertNil(error); done.fulfill() }; await fulfillment(of: [done], timeout: 30)
+        try await store.commit(ticket)
+        var settings = FilmEffectsSettings(); settings.grainEnabled = true; settings.grainAmount = 0.05
+        try await store.setFilmEffects(movieID: movie.id, settings: settings)
+        let movies = await store.snapshot(); let saved = try XCTUnwrap(movies.first)
+        XCTAssertEqual(saved.activeScenes.count, 1); XCTAssertTrue(saved.activeScenes[0].hasAudio)
+        let asset = AVURLAsset(url: try await store.url(saved.activeScenes[0].source))
+        let videoTracks = try await asset.loadTracks(withMediaType: .video), audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        XCTAssertEqual(videoTracks.count, 1); XCTAssertEqual(audioTracks.count, 1)
+        let audioRange = try await XCTUnwrap(audioTracks.first).load(.timeRange)
+        XCTAssertGreaterThan(audioRange.duration.seconds, 1.1)
+        let composition = try await MediaAssembler().build(movie: saved, root: root, filmEffects: settings)
+        let output = root.appendingPathComponent("PiP-export.mp4")
+        let export = try XCTUnwrap(AVAssetExportSession(asset: composition.asset, presetName: AVAssetExportPresetHighestQuality))
+        export.videoComposition = composition.videoComposition; export.audioMix = composition.audioMix
+        try await export.export(to: output, as: .mp4)
+        let exported = AVURLAsset(url: output)
+        let generator = AVAssetImageGenerator(asset: exported); generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+        func pixel(at time: Double, corner: PiPCorner) async throws -> [UInt8] {
+            let (cg, _) = try await generator.image(at: CMTime(seconds: time, preferredTimescale: 30))
+            let rect = try XCTUnwrap(PiPGeometry.rect(layout: PiPLayout(corner: corner), canvas: writer.canvas))
+            return sample(CIImage(cgImage: cg), point: CGPoint(x: rect.midX * writer.canvas.width, y: (1 - rect.midY) * writer.canvas.height))
+        }
+        let before = try await pixel(at: 2 / 30, corner: .bottomRight)
+        let visible = try await pixel(at: 13 / 30, corner: .bottomRight)
+        let moved = try await pixel(at: 24 / 30, corner: .topLeft)
+        let hidden = try await pixel(at: 35 / 30, corner: .topLeft)
+        XCTAssertGreaterThan(before[2], 150); XCTAssertGreaterThan(visible[0], 150)
+        XCTAssertGreaterThan(moved[0], 150); XCTAssertGreaterThan(hidden[2], 150)
+    }
+}

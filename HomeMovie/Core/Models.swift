@@ -73,6 +73,9 @@ struct Movie: Codable, Identifiable, Equatable, Sendable {
     var profile: CaptureProfile? = nil
     var look: LUTReference? = nil
     var filmEffects: FilmEffectsSettings? = nil
+    var pipLayout: PiPLayout? = nil
+    var dualCameraCapture: Bool? = nil
+    var preferredPiPLayout: PiPLayout { pipLayout ?? PiPLayout() }
     var exportEffects: FilmEffectsSettings { filmEffects ?? .off }
     var captureProfile: CaptureProfile { profile ?? .standard }
     var lookName: String { look?.displayName ?? "Apple Standard" }
