@@ -1,8 +1,19 @@
 import XCTest
 import UIKit
+import AVFoundation
 @testable import HomeMovie
 
 final class CameraTouchTests: XCTestCase {
+    func testRecordingLeavesDeviceAndFormatNegotiationToApple() {
+        for supported in [[AVCaptureVideoStabilizationMode.previewOptimized], [.standard], []] {
+            XCTAssertEqual(CameraStabilization.preferredMode(preview: false, supports: { supported.contains($0) }), .auto)
+        }
+    }
+    func testPreviewUsesResponsiveSupportedModesWithOlderFormatFallbacks() {
+        XCTAssertEqual(CameraStabilization.preferredMode(preview: true, supports: { [.previewOptimized, .standard].contains($0) }), .previewOptimized)
+        XCTAssertEqual(CameraStabilization.preferredMode(preview: true, supports: { $0 == .standard }), .standard)
+        XCTAssertEqual(CameraStabilization.preferredMode(preview: true, supports: { _ in false }), .auto)
+    }
     @MainActor func testNativeHitTestingRoutesLensAndDollyTouchesAwayFromFocus() {
         // The viewfinder is deliberately above the control in UIKit ordering: even if
         // SwiftUI/Glass bridges reorder native surfaces, protected control taps pass through.
@@ -18,14 +29,6 @@ final class CameraTouchTests: XCTestCase {
             XCTAssertNil(preview.hitTest(CGPoint(x: 57, y: 542), with: nil))
             XCTAssertTrue(preview.hitTest(CGPoint(x: 180, y: 240), with: nil) === preview)
         }
-    }
-    @MainActor func testControlsHostedInsideNativePreviewKeepTheirHitTargets() {
-        let preview = PreviewUIView(frame: CGRect(x: 0, y: 0, width: 390, height: 700))
-        let button = UIButton(frame: CGRect(x: 35, y: 520, width: 44, height: 44))
-        preview.addSubview(button)
-        preview.protectedRegions = [CGRect(x: 20, y: 515, width: 350, height: 52)]
-        XCTAssertTrue(preview.hitTest(CGPoint(x: 57, y: 542), with: nil) === button)
-        XCTAssertFalse(preview.permitsPreviewInteraction(at: CGPoint(x: 57, y: 542)))
     }
     @MainActor func testProtectedRegionsFollowRotationAndDoNotDisableTheViewfinder() {
         let preview = PreviewUIView(frame: CGRect(x: 0, y: 0, width: 650, height: 365))

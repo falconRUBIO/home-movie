@@ -1,6 +1,23 @@
 import AVFoundation
 import Foundation
 
+enum CameraStabilization {
+    // Let Apple negotiate recording stabilization for the actual device, format and
+    // frame rate. Keep live interaction responsive with its dedicated preview mode.
+    static func preferredMode(preview: Bool, supports: (AVCaptureVideoStabilizationMode) -> Bool) -> AVCaptureVideoStabilizationMode {
+        guard preview else { return .auto }
+        if supports(.previewOptimized) { return .previewOptimized }
+        if supports(.standard) { return .standard }
+        return .auto
+    }
+    static func configure(_ connection: AVCaptureConnection, format: AVCaptureDevice.Format?, preview: Bool) {
+        guard connection.isVideoStabilizationSupported, let format else { return }
+        let mode = preferredMode(preview: preview, supports: { format.isVideoStabilizationModeSupported($0) })
+        // Avoid renegotiating the pipeline on every zoom/UI update.
+        if connection.preferredVideoStabilizationMode != mode { connection.preferredVideoStabilizationMode = mode }
+    }
+}
+
 struct LensChoice: Identifiable, Equatable, Sendable {
     var id: CGFloat { factor }
     let factor: CGFloat
@@ -202,6 +219,10 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         if configuredProfile == .appleLog {
             guard session.canAddOutput(liveOutput) else { throw HomeMovieError.message("Live Log preview is unavailable on this camera.") }
             session.addOutput(liveOutput)
+            // This output is used only for the graded viewfinder, never recording.
+            // Preview-sized buffers allow Apple's previewOptimized stabilization.
+            liveOutput.automaticallyConfiguresOutputBufferDimensions = false
+            liveOutput.deliversPreviewSizedOutputBuffers = true
             liveOutput.alwaysDiscardsLateVideoFrames = true
             liveOutput.setSampleBufferDelegate(liveFrames, queue: liveQueue)
         }
@@ -296,6 +317,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             throw HomeMovieError.message("This camera could not provide a compatible Apple Log recording format. Tap Resume Camera to reconnect.")
         }
         output.setOutputSettings([AVVideoCodecKey: codec], for: connection)
+        CameraStabilization.configure(connection, format: camera.activeFormat, preview: false)
         output.minFreeDiskSpaceLimit = codec == .hevc ? 200_000_000 : 500_000_000
         guard camera.activeColorSpace == .appleLog else {
             throw HomeMovieError.message("The recording output changed the camera’s Apple Log mode. Tap Resume Camera to reconnect.")
@@ -604,12 +626,12 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         guard let connection = output.connection(with: .video) else { return }
         connection.automaticallyAdjustsVideoMirroring = false
         if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
-        if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
+        CameraStabilization.configure(connection, format: videoInput?.device.activeFormat, preview: false)
         if let live = liveOutput.connection(with: .video) {
             if live.isVideoRotationAngleSupported(0) { live.videoRotationAngle = 0 }
             live.automaticallyAdjustsVideoMirroring = false
             if live.isVideoMirroringSupported { live.isVideoMirrored = false }
-            if live.isVideoStabilizationSupported { live.preferredVideoStabilizationMode = .off }
+            CameraStabilization.configure(live, format: videoInput?.device.activeFormat, preview: true)
         }
         if configuredProfile == .appleLog, let codec = LogRecordingCodec.preferred(in: output.availableVideoCodecTypes) {
             output.setOutputSettings([AVVideoCodecKey: codec], for: connection)
