@@ -158,6 +158,7 @@ struct CameraView: View {
         }
         .onChange(of: handsFreeStart) { _, _ in
             cancelCountdown(); preparedDollyStart = nil; preparedDollyTarget = nil
+            if smoothZoomOpen { preparedDollyStart = camera.options?.zoom }
         }
         .onChange(of: zoomSpeed) { _, _ in updateZoomSettings() }
         .onChange(of: stayOnLens) { _, _ in updateZoomSettings() }
@@ -193,7 +194,10 @@ struct CameraView: View {
             if state != .ready && state != .recording && state != .starting {
                 activeDolly = nil; preparedDollyStart = nil; preparedDollyTarget = nil
             }
-            if smoothZoomOpen, state == .ready { camera.beginSmoothZoom() }
+            if smoothZoomOpen, state == .ready {
+                if preparedDollyStart == nil { preparedDollyStart = camera.options?.zoom }
+                camera.beginSmoothZoom()
+            }
         }
         .onChange(of: camera.options?.isFront) { _, _ in
             cancelCountdown(); preparedDollyStart = nil; preparedDollyTarget = nil
@@ -344,7 +348,12 @@ struct CameraView: View {
                     manualZoomTargetShown = false
                     preparedDollyStart = nil; preparedDollyTarget = nil; activeDolly = nil
                     if smoothZoomOpen { camera.endSmoothZoom(); smoothZoomOpen = false }
-                    else { syncSmoothPosition(); smoothZoomOpen = true; camera.beginSmoothZoom() }
+                    else {
+                        syncSmoothPosition(); smoothZoomOpen = true
+                        preparedDollyStart = options.zoom
+                        camera.beginSmoothZoom()
+                        UISelectionFeedbackGenerator().selectionChanged()
+                    }
                 } label: {
                     MovieControlIcon(systemName: "waveform.path")
                         .foregroundStyle(smoothZoomOpen ? .yellow : .white)
@@ -376,14 +385,14 @@ struct CameraView: View {
         let start = route?.start ?? preparedDollyStart.map { Double($0) }
         let isStart = start.map { abs($0 - Double(factor)) < 0.06 } ?? false
         let isDestination = route.map { abs($0.destination - Double(factor)) < 0.06 } ?? false
-        let highlighted = isDestination || route == nil && selected
+        let highlighted = isDestination || route == nil && (isStart || selected)
         let foreground: Color = highlighted ? .yellow : .white
         let background: Color = isDestination ? .yellow.opacity(0.2) : isStart || route == nil && selected ? .white.opacity(0.15) : .clear
         let border: Color = isDestination ? .yellow : isStart ? .white.opacity(0.5) : .clear
         let value = isDestination ? "Dolly destination" : isStart ? "Dolly start" : selected ? "Current lens" : ""
         let hint: String
         if !smoothZoomOpen { hint = "Switch to this lens." }
-        else if handsFreeStart && camera.state == .ready { hint = "Choose the starting or destination lens, then tap Record." }
+        else if handsFreeStart && camera.state == .ready { hint = "Choose the destination lens, then tap Record. Your current zoom is the start." }
         else { hint = "Smoothly move to this lens using the selected duration." }
         return Button { selectLens(factor) } label: {
             Text(label).font(.caption.weight(.medium)).monospacedDigit()
@@ -410,9 +419,9 @@ struct CameraView: View {
         if handsFreeStart, camera.state == .ready {
             activeDolly = nil
             if preparedDollyStart == nil {
-                preparedDollyStart = factor; preparedDollyTarget = nil
-                camera.zoom(factor)
-            } else if let start = preparedDollyStart, abs(start - factor) > 0.001 {
+                preparedDollyStart = camera.options?.zoom; preparedDollyTarget = nil
+            }
+            if let start = preparedDollyStart, abs(start - factor) > 0.001 {
                 preparedDollyTarget = factor
                 UIAccessibility.post(notification: .announcement, argument: "Dolly ready. Tap Record to start the countdown.")
             } else { preparedDollyTarget = nil }
@@ -445,16 +454,16 @@ struct CameraView: View {
                 } else if zoomDragging || pinchBase != nil {
                     Text("Manual Dolly").font(.caption).foregroundStyle(.secondary)
                 } else if !dollyGuidanceLearned {
-                    Text(handsFreeStart && camera.state == .ready ? "Choose two lenses, then tap Record." : "Tap another lens to dolly from here.")
+                    Text(handsFreeStart && camera.state == .ready ? "Choose a destination, then tap Record." : "Tap another lens to dolly from here.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("Dolly").font(.caption).foregroundStyle(.secondary)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-            if preparedDollyStart != nil, activeDolly == nil {
+            if preparedDollyTarget != nil, activeDolly == nil {
                 Button {
-                    preparedDollyStart = nil; preparedDollyTarget = nil; queuedDolly = nil
-                    UIAccessibility.post(notification: .announcement, argument: "Dolly route cleared. Choose a starting lens.")
+                    preparedDollyStart = options.zoom; preparedDollyTarget = nil; queuedDolly = nil
+                    UIAccessibility.post(notification: .announcement, argument: "Dolly destination cleared. Your current zoom is the start.")
                 } label: {
                     Image(systemName: "arrow.counterclockwise").frame(width: 44, height: 44)
                 }.accessibilityLabel("Reset Dolly route").disabled(camera.busy || countdown != nil)
@@ -486,7 +495,7 @@ struct CameraView: View {
                 Section {
                     Toggle("Hands-Free Start", isOn: $handsFreeStart)
                 } footer: {
-                    Text("Choose a starting lens and a destination, then tap Record. Recording begins after a three-second countdown, followed by the Dolly move.")
+                    Text("Open Dolly to use your current zoom as the start. Choose a destination, then tap Record. Recording begins after a three-second countdown, followed by the Dolly move.")
                 }
                 Section {
                     Toggle("Stay on This Lens", isOn: $stayOnLens)
@@ -505,6 +514,7 @@ struct CameraView: View {
                     Text("Your current zoom is the starting point. Tap another lens to move smoothly to it. The outlined lens is your destination, and the dot follows the camera’s actual zoom.")
                     Text("Tap a different lens during a move to change the destination. Drag the track or pinch the viewfinder to take manual control.")
                     Text("Opening or closing Dolly does not start or stop recording.")
+                    Text("Tap the video to focus, including during a Dolly move. Lens and Dolly controls adjust zoom without changing focus.")
                 }
                 Section("Automatic duration") {
                     Text("Choose the seconds in the Dolly bar to set how long the next lens-to-lens move takes, including its gentle start and finish.")
@@ -513,7 +523,7 @@ struct CameraView: View {
                     Text("Drag faster or slower to control zoom. Slow gives a gentler response, Normal is balanced, and Fast responds more quickly. This setting does not change the automatic duration.")
                 }
                 Section("Hands-Free Start") {
-                    Text("Choose a starting lens, then a destination. Tap another lens to change the destination, or Reset to choose a new starting point. Tap Record for the three-second countdown. The Dolly starts when recording begins.")
+                    Text("Opening Dolly selects your current zoom as the start. Tap a destination lens, then Record for the three-second countdown. Tap another lens to change the destination, or Reset to clear it and use your current zoom as the start. The Dolly starts when recording begins.")
                 }
                 Section {
                     Button("Show Dolly Tips Again") { dollyGuidanceLearned = false; showingDollyHelp = false }
@@ -825,4 +835,3 @@ struct CameraView: View {
         Task { await camera.pauseForPlayback(); initialReviewID = sceneID; watching = true }
     }
 }
-
