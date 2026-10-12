@@ -5,6 +5,18 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    func testDollyRetainsRequestedLensWhenTemporaryHardwareRangeWidens() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 2, minimum: 1, maximum: 4))
+        filter.setTarget(16, duration: 3)
+        XCTAssertEqual(filter.target, 4); XCTAssertEqual(filter.requestedTarget, 16)
+        _ = filter.advance(seconds: 0.25, rate: 0.75)
+        let current = filter.value, velocity = filter.velocity
+        XCTAssertTrue(filter.reconfigure(current: current, minimum: 1, maximum: 32))
+        XCTAssertEqual(filter.target, 16); XCTAssertEqual(filter.value, current); XCTAssertEqual(filter.velocity, velocity)
+        XCTAssertEqual(try XCTUnwrap(filter.remainingDuration), 2.75, accuracy: 0.000001)
+        _ = filter.advance(seconds: 2.75, rate: 0.75)
+        XCTAssertEqual(filter.value, 16, accuracy: 0.000001)
+    }
     func testManualDragVelocityControlsZoomAtEveryBaseSpeed() throws {
         for speed in SmoothZoomSpeed.allCases {
             var values: [Double] = [], rates: [Float] = []

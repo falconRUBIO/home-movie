@@ -14,6 +14,7 @@ enum DollyZoomDuration {
 struct SmoothZoomFilter: Sendable {
     private(set) var value: Double
     private(set) var target: Double
+    private(set) var requestedTarget: Double
     private(set) var velocity = 0.0
     private var acceleration = 0.0
     private var timedCurve: [Double]?
@@ -32,10 +33,11 @@ struct SmoothZoomFilter: Sendable {
     init?(current: Double, minimum: Double, maximum: Double) {
         guard current.isFinite, minimum.isFinite, maximum.isFinite, minimum > 0, maximum > minimum else { return nil }
         self.minimum = minimum; self.maximum = maximum
-        value = min(maximum, max(minimum, current)); target = value
+        value = min(maximum, max(minimum, current)); target = value; requestedTarget = value
     }
     mutating func setTarget(_ target: Double, duration: Double? = nil) {
         guard target.isFinite, target > 0 else { return }
+        requestedTarget = target
         let next = min(maximum, max(minimum, target))
         self.target = next
         if let duration, duration.isFinite, duration > 0 {
@@ -70,7 +72,7 @@ struct SmoothZoomFilter: Sendable {
     }
     mutating func reconfigure(current: Double, minimum: Double, maximum: Double) -> Bool {
         guard current.isFinite, minimum.isFinite, maximum.isFinite, minimum > 0, maximum > minimum else { return false }
-        let remaining = remainingDuration, destination = target
+        let remaining = remainingDuration, destination = requestedTarget
         self.minimum = minimum; self.maximum = maximum
         value = min(maximum, max(minimum, current))
         if value == minimum && velocity < 0 || value == maximum && velocity > 0 { velocity = 0; acceleration = 0 }
