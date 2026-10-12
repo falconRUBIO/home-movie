@@ -4,6 +4,18 @@ import UIKit
 import UniformTypeIdentifiers
 import MetalKit
 
+struct LogLookBadge: View {
+    let lookName: String
+    var body: some View {
+        Text("LOG · \(lookName)")
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.white.opacity(0.8))
+            .shadow(color: .black.opacity(0.8), radius: 2)
+            .accessibilityLabel("Apple Log, \(lookName) view")
+            .allowsHitTesting(false)
+    }
+}
+
 struct MovieControlIcon: View {
     let systemName: String
     var body: some View {

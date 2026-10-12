@@ -44,6 +44,12 @@ struct WatchMovieView: View {
                                     .multilineTextAlignment(.center).padding()
                             }
                         }.frame(width: geometry.size.width, height: geometry.size.height)
+                            .overlay(alignment: .topLeading) {
+                                if movie.captureProfile == .appleLog, player != nil, !loading, problem == nil {
+                                    LogLookBadge(lookName: showOriginalLog ? "Original" : movie.lookName)
+                                        .padding(12)
+                                }
+                            }
                     }.frame(minHeight: 0, maxHeight: .infinity).layoutPriority(-1)
                     if !playbackOnly {
                         Divider()

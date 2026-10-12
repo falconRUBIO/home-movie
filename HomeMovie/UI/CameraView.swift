@@ -209,7 +209,10 @@ struct CameraView: View {
     }
     private func captureIndicators(movie: Movie) -> some View {
         VStack(spacing: 6) {
-            if movie.captureProfile == .appleLog { Text("LOG").font(.caption2.weight(.medium)).foregroundStyle(.white.opacity(0.8)).shadow(radius: 2) }
+            if movie.captureProfile == .appleLog {
+                let graded = !liveOriginal && liveCube != nil && [.ready, .starting, .recording].contains(camera.state)
+                LogLookBadge(lookName: graded ? movie.lookName : "Original")
+            }
             if camera.options?.focusLocked == true {
                 Text("AE/AF LOCK").font(.caption2.weight(.semibold)).foregroundStyle(.black)
                     .padding(.horizontal, 8).padding(.vertical, 4).background(.yellow, in: RoundedRectangle(cornerRadius: 3))
