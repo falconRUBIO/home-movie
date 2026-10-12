@@ -5,6 +5,34 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    func testDollyClosePreservesMotionAndSettlesPromptlyInBothDirections() throws {
+        for speed in SmoothZoomSpeed.allCases {
+            for timed in [false, true] {
+                for (start, end) in [(1.0, 8.0), (8.0, 1.0)] {
+                    var filter = try XCTUnwrap(SmoothZoomFilter(current: start, minimum: 0.5, maximum: 16))
+                    filter.setTarget(end, duration: timed ? 3 : nil)
+                    for _ in 0..<30 { _ = filter.advance(seconds: 1.0 / 60, rate: speed.rate, response: speed.responseTime) }
+                    let current = filter.value, incomingVelocity = filter.velocity
+                    filter.finishMotion()
+                    XCTAssertEqual(filter.value, current)
+                    XCTAssertEqual(filter.velocity, incomingVelocity, accuracy: 0.000001)
+                    for _ in 0..<12 {
+                        _ = filter.advance(seconds: 1.0 / 60, rate: speed.rate, response: speed.responseTime)
+                        XCTAssertTrue((0.5...16).contains(filter.value))
+                    }
+                    XCTAssertTrue(filter.isSettled)
+                    XCTAssertEqual(filter.velocity, 0, accuracy: 0.000001)
+                    XCTAssertGreaterThanOrEqual((log2(filter.value) - log2(current)) * incomingVelocity, -0.000001)
+                }
+            }
+        }
+    }
+    func testIdenticalDollyRoutesHaveDistinctCompletionIdentities() throws {
+        let first = try XCTUnwrap(DollyZoomRoute(start: 1, destination: 8, seconds: 3))
+        let second = try XCTUnwrap(DollyZoomRoute(start: 1, destination: 8, seconds: 3))
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertEqual(first.progress(at: 2), second.progress(at: 2))
+    }
     func testManualResponseSettingsChangeFollowLagWithoutOverridingHandSpeed() throws {
         var values: [Double] = []
         for speed in SmoothZoomSpeed.allCases {

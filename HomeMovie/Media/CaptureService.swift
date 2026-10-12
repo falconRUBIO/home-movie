@@ -91,6 +91,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private var smoothClock = SmoothZoomClock()
     private var smoothInput = SmoothZoomInput()
     private var smoothOpen = false
+    private var smoothClosing = false
     private var smoothSpeed = SmoothZoomSpeed.normal
     private var stayOnLens = false
     private var smoothLensLocked = false
@@ -440,7 +441,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             let changedLock = self.stayOnLens != stayOnLens
             if self.smoothSpeed != speed { self.smoothInput.reset() }
             self.smoothSpeed = speed; self.stayOnLens = stayOnLens
-            if changedLock, self.smoothOpen {
+            if changedLock, self.smoothOpen, !self.smoothClosing {
                 var previous = self.smoothFilter
                 self.stopSmoothZoomOnQueue()
                 self.beginSmoothZoomOnQueue()
@@ -454,6 +455,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     }
     func beginSmoothZoom() { queue.async { self.beginSmoothZoomOnQueue() } }
     private func beginSmoothZoomOnQueue(lockLens: Bool = true) {
+        smoothClosing = false
         guard !smoothOpen, session.isRunning, !session.isInterrupted, let camera = videoInput?.device else { return }
         do {
             try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
@@ -507,6 +509,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     }
     func endSmoothInput() { queue.async { self.smoothInput.end() } }
     private func setSmoothTargetOnQueue(_ factor: CGFloat, duration: Double? = nil) {
+        smoothClosing = false
         if !smoothOpen { beginSmoothZoomOnQueue() }
         guard smoothOpen, smoothFilter != nil, session.isRunning, !session.isInterrupted else { return }
         if duration != nil { smoothInput.reset() }
@@ -542,14 +545,16 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             let seconds = smoothClock.step(at: now)
             guard seconds > 0 else { return }
             let next = filter.advance(seconds: seconds, rate: smoothInput.rate(baseline: smoothSpeed.rate), response: smoothSpeed.responseTime); smoothFilter = filter
-            try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
+            try camera.lockForConfiguration()
             let target = min(camera.maxAvailableVideoZoomFactor, max(camera.minAvailableVideoZoomFactor, CGFloat(next)))
             // One trajectory owns zoom. Restarting native ramps on every sample caused stepping.
             if abs(log2(Double(target / camera.videoZoomFactor))) > 0.0000001 { camera.videoZoomFactor = target }
+            camera.unlockForConfiguration()
             if filter.isSettled,
                abs(log2(Double(camera.videoZoomFactor) / filter.target)) < 0.001 {
                 smoothTimer?.cancel(); smoothTimer = nil; smoothGeneration = UUID(); smoothClock.reset()
                 smoothInput.reset()
+                if smoothClosing { stopSmoothZoomOnQueue() }
                 if let options = try? options() { onEvent?(.ready(options)) }
             }
         } catch {
@@ -557,10 +562,22 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             onEvent?(.notice("Smooth Zoom paused. Your recording continues."))
         }
     }
-    func endSmoothZoom() { queue.async { self.stopSmoothZoomOnQueue(); if let options = try? self.options() { self.onEvent?(.ready(options)) } } }
+    func endSmoothZoom() {
+        queue.async {
+            if self.smoothTimer != nil, var filter = self.smoothFilter, let camera = self.videoInput?.device,
+               self.session.isRunning, !self.session.isInterrupted {
+                // Preserve incoming velocity without a stop or spring-back on close.
+                _ = filter.reconfigure(current: Double(camera.videoZoomFactor), minimum: Double(camera.minAvailableVideoZoomFactor), maximum: Double(camera.maxAvailableVideoZoomFactor))
+                filter.finishMotion()
+                self.smoothFilter = filter; self.smoothInput.end(); self.smoothClosing = true
+            } else { self.stopSmoothZoomOnQueue() }
+            if let options = try? self.options() { self.onEvent?(.ready(options)) }
+        }
+    }
     private func stopSmoothZoomOnQueue() {
         smoothTimer?.cancel(); smoothTimer = nil; smoothGeneration = UUID(); smoothClock.reset()
         smoothFilter = nil; smoothOpen = false
+        smoothClosing = false
         smoothInput.reset()
         guard let camera = videoInput?.device else { return }
         do {

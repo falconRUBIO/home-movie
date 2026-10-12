@@ -21,6 +21,7 @@ enum DollyZoomDuration {
 }
 // Presentation follows measured zoom, never a separate timer or pretend animation.
 struct DollyZoomRoute: Equatable {
+    let id = UUID()
     let start: Double
     let destination: Double
     let seconds: Int
@@ -105,6 +106,13 @@ struct SmoothZoomFilter: Sendable {
         if value == minimum && velocity < 0 || value == maximum && velocity > 0 { velocity = 0; acceleration = 0 }
         setTarget(destination, duration: remaining)
         return true
+    }
+    mutating func finishMotion() {
+        // A short timed finish continues in the incoming direction instead of
+        // springing back to the exact position where the control was closed.
+        let duration = 0.2
+        let destination = exp2(log2(value) + velocity * duration * 0.5)
+        setTarget(destination, duration: duration)
     }
     mutating func advance(seconds: Double, rate: Float, response: Double = 0.4) -> Double {
         guard seconds.isFinite, seconds > 0, rate.isFinite, rate > 0, response.isFinite, response > 0 else { return value }
