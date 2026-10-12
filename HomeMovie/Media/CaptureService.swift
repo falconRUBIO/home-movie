@@ -80,6 +80,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private var smoothSpeed = SmoothZoomSpeed.normal
     private var stayOnLens = false
     private var smoothLensLocked = false
+    private var smoothUnlockedRange: ClosedRange<CGFloat>?
     private var zoomObservation: NSKeyValueObservation?
     private var zoomNotificationPending = false
     var onEvent: (@Sendable (CaptureEvent) -> Void)?
@@ -288,7 +289,9 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             let base = index == 0 ? CGFloat(1) : switches.indices.contains(index - 1) ? switches[index - 1] : CGFloat(1)
             secondary += constituent.activeFormat.secondaryNativeResolutionZoomFactors.map { $0 * base }
         }
-        let lenses = LensChoice.available(minimum: camera.minAvailableVideoZoomFactor, maximum: camera.maxAvailableVideoZoomFactor,
+        // Keep explicit lens choices available so a tap can leave a temporary Smooth Zoom lens lock.
+        let lensRange = smoothLensLocked ? smoothUnlockedRange : nil
+        let lenses = LensChoice.available(minimum: lensRange?.lowerBound ?? camera.minAvailableVideoZoomFactor, maximum: lensRange?.upperBound ?? camera.maxAvailableVideoZoomFactor,
             multiplier: multiplier, switchFactors: switches, secondaryFactors: secondary)
         return CameraOptions(lenses: lenses,
             zoom: camera.videoZoomFactor, minimum: camera.minAvailableVideoZoomFactor, maximum: camera.maxAvailableVideoZoomFactor,
@@ -400,6 +403,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             // .locked holds the current primary camera and narrows its hardware zoom range.
             if stayOnLens, camera.isVirtualDevice, camera.activePrimaryConstituent != nil,
                camera.primaryConstituentDeviceSwitchingBehavior != .unsupported {
+                smoothUnlockedRange = camera.minAvailableVideoZoomFactor...camera.maxAvailableVideoZoomFactor
                 camera.setPrimaryConstituentDeviceSwitchingBehavior(.locked, restrictedSwitchingBehaviorConditions: [])
                 smoothLensLocked = true
             }
@@ -407,7 +411,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             smoothOpen = smoothFilter != nil
             if !smoothOpen, smoothLensLocked {
                 camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
-                smoothLensLocked = false
+                smoothLensLocked = false; smoothUnlockedRange = nil
             }
             if let options = try? options() { onEvent?(.ready(options)) }
         } catch { onEvent?(.notice("Smooth Zoom could not be enabled. Your recording continues.")) }
@@ -464,7 +468,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             if smoothLensLocked, camera.primaryConstituentDeviceSwitchingBehavior != .unsupported {
                 camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
             }
-            smoothLensLocked = false
+            smoothLensLocked = false; smoothUnlockedRange = nil
         } catch { onEvent?(.notice("Zoom could not be paused. Try again.")) }
     }
     private func replaceInput(_ old: AVCaptureDeviceInput, with next: AVCaptureDeviceInput) throws {
