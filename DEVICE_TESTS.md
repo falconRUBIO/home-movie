@@ -139,3 +139,14 @@ Live-preview report follow-up (NOT RUN on corrected source): the user reported f
 Enable Hands-Free Start in camera settings, open Dolly, tap the starting lens and then the ending lens, and select a move duration. The bar shows the planned endpoints. Tap Record: a silent 3–2–1 countdown appears, the same button cancels it, and capture starts before the planned Dolly begins.
 
 Verify both zoom directions and every supported duration, portrait and landscape, Standard and Apple Log. Tap cancel at each countdown number, lock the phone, switch apps and simulate a camera interruption. None of those cancellations may create a take or restart recording on return. Verify the start lens is held through the countdown, the saved take includes the complete move, and rapid Record/Cancel taps never produce duplicate takes. Turn Hands-Free Start off and confirm Record starts immediately.
+
+
+## Dolly delay and stabilization release check (2026-10-12)
+
+- Open Dolly at 1×: start highlights immediately. Choose 8× without retapping 1×. Repeat from 4× and from an intermediate manual zoom value.
+- Expanded Dolly only: timer menu on the left, move duration on the right. Verify Off / 3s / 5s / 7s, selected checkmark, readable labels, 44-point tap targets, portrait, landscape and accessibility text sizes.
+- With a delay selected, choose a destination then Record. Countdown starts at the selected number; recording and Dolly begin after it finishes. Cancel using the record control and confirm neither recording nor queued Dolly starts.
+- Keep 7s selected, close Dolly, then Record: starts immediately. Reopen Dolly: the saved delay returns. Verify backgrounding, phone interruptions, camera switching and unavailable camera cancel a pending countdown.
+- Tap the video to focus before and during manual and automatic Dolly moves. Tap every lens, timer and duration control: never triggers focus. Verify exposure dragging and pinch zoom still work.
+- Compare Apple Camera and Movie Roll on the same iPhone, lighting, lens/zoom and 1080p30 format: preview and saved clips at 1× / 4× / 8×, steady hands, walking and panning. Include Standard, Cinema, front camera, 1×→8× and 8×→1× Dolly moves. Record actual active stabilization modes using Xcode; simulator cannot prove optical steadiness or device crop/latency.
+- Film Effects: compare playing and paused frames, inspect fullscreen, return to Export, save/export/reopen settings, and verify exported effects match preview while ordinary Watch Movie remains clean.
