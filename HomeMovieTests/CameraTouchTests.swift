@@ -4,6 +4,11 @@ import AVFoundation
 @testable import HomeMovie
 
 final class CameraTouchTests: XCTestCase {
+    func testRecordingDoesNotOverridePreviewLensSelectionWithASeparateRestrictedPolicy() {
+        let output = AVCaptureMovieFileOutput()
+        CameraVideoTuning.configureRecordingOutput(output)
+        XCTAssertFalse(output.isPrimaryConstituentDeviceSwitchingBehaviorForRecordingEnabled)
+    }
     func testRecordingFlipCannotResumeUntilFootageIsSavedAndCameraIsAvailable() {
         let movieID = UUID(), elapsed = CMTime(seconds: 12, preferredTimescale: 600)
         var handoff = RecordingFlipHandoff(movieID: movieID, elapsed: elapsed)

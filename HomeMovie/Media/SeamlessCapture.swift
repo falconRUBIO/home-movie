@@ -209,6 +209,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             if format.isVideoHDRSupported { camera.isVideoHDREnabled = false }
             if format.supportedColorSpaces.contains(.sRGB) { camera.activeColorSpace = .sRGB }
             if camera.isFocusModeSupported(.continuousAutoFocus) { camera.focusMode = .continuousAutoFocus }
+            CameraVideoTuning.configureFocus(camera)
             if camera.isExposureModeSupported(.continuousAutoExposure) { camera.exposureMode = .continuousAutoExposure }
             if camera.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { camera.whiteBalanceMode = .continuousAutoWhiteBalance }
             if camera.isFocusPointOfInterestSupported { camera.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5) }

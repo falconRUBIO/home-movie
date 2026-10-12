@@ -1,6 +1,18 @@
 import AVFoundation
 import Foundation
 
+enum CameraVideoTuning {
+    static func configureRecordingOutput(_ output: AVCaptureMovieFileOutput) {
+        // Keep device selection consistent between preview and recording. A separate
+        // MovieFileOutput policy must not override Dolly's camera selection at Record.
+        output.isPrimaryConstituentDeviceSwitchingBehaviorForRecordingEnabled = false
+    }
+    // Caller owns the device configuration lock.
+    static func configureFocus(_ camera: AVCaptureDevice) {
+        if camera.isSmoothAutoFocusSupported { camera.isSmoothAutoFocusEnabled = true }
+    }
+}
+
 enum CameraStabilization {
     // Let Apple negotiate recording stabilization for the actual device, format and
     // frame rate. Keep live interaction responsive with its dedicated preview mode.
@@ -155,7 +167,6 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private var smoothSpeed = SmoothZoomSpeed.normal
     private var stayOnLens = false
     private var smoothLensLocked = false
-    private var smoothSwitchingRestricted = false
     private var smoothUnlockedRange: ClosedRange<CGFloat>?
     private var zoomObservation: NSKeyValueObservation?
     private var zoomNotificationPending = false
@@ -336,6 +347,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             liveOutput.setSampleBufferDelegate(liveFrames, queue: liveQueue)
         }
         try configureFormat(camera)
+        CameraVideoTuning.configureRecordingOutput(output)
         setCoordinator(camera)
         configureVideoConnection()
         output.minFreeDiskSpaceLimit = 200_000_000
@@ -380,6 +392,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         if camera.isFocusPointOfInterestSupported { camera.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5) }
         if camera.isExposurePointOfInterestSupported { camera.exposurePointOfInterest = CGPoint(x: 0.5, y: 0.5) }
         if camera.isFocusModeSupported(.continuousAutoFocus) { camera.focusMode = .continuousAutoFocus }
+        CameraVideoTuning.configureFocus(camera)
         if camera.isExposureModeSupported(.continuousAutoExposure) { camera.exposureMode = .continuousAutoExposure }
         camera.isSubjectAreaChangeMonitoringEnabled = false
         camera.setExposureTargetBias(0, completionHandler: nil)
@@ -617,15 +630,15 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 smoothLensLocked = true
             } else if camera.isVirtualDevice, camera.activePrimaryConstituent != nil,
                       camera.primaryConstituentDeviceSwitchingBehavior != .unsupported {
-                // Permit necessary zoom-boundary switches while suppressing unrelated fallback changes.
-                camera.setPrimaryConstituentDeviceSwitchingBehavior(.restricted, restrictedSwitchingBehaviorConditions: [])
-                smoothSwitchingRestricted = true
+                // Let Apple consider light and focus, not just optical zoom boundaries.
+                // Suppressing fallback can force a darker telephoto image during a Dolly.
+                camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
             }
             smoothFilter = SmoothZoomFilter(current: Double(camera.videoZoomFactor), minimum: Double(camera.minAvailableVideoZoomFactor), maximum: Double(camera.maxAvailableVideoZoomFactor))
             smoothOpen = smoothFilter != nil
-            if !smoothOpen, smoothLensLocked || smoothSwitchingRestricted {
+            if !smoothOpen, smoothLensLocked {
                 camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
-                smoothLensLocked = false; smoothSwitchingRestricted = false; smoothUnlockedRange = nil
+                smoothLensLocked = false; smoothUnlockedRange = nil
             }
             if let options = try? options() { onEvent?(.ready(options)) }
         } catch { onEvent?(.notice("Smooth Zoom could not be enabled. Your recording continues.")) }
@@ -732,10 +745,10 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         do {
             try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
             camera.cancelVideoZoomRamp()
-            if smoothLensLocked || smoothSwitchingRestricted, camera.primaryConstituentDeviceSwitchingBehavior != .unsupported {
+            if smoothLensLocked, camera.primaryConstituentDeviceSwitchingBehavior != .unsupported {
                 camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
             }
-            smoothLensLocked = false; smoothSwitchingRestricted = false; smoothUnlockedRange = nil
+            smoothLensLocked = false; smoothUnlockedRange = nil
         } catch { onEvent?(.notice("Zoom could not be paused. Try again.")) }
     }
     private func replaceInput(_ old: AVCaptureDeviceInput, with next: AVCaptureDeviceInput) throws {
