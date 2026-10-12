@@ -349,8 +349,25 @@ actor ProjectStore {
     func installImportedMovies(_ movies: [Movie]) throws {
         guard maintenance else { throw HomeMovieError.message("Restore is not active.") }
         if !loaded {
+            var existing = Catalog()
+            let current = root.appendingPathComponent("catalog.json")
+            if fm.fileExists(atPath: current.path) {
+                let data = try Data(contentsOf: current)
+                if let header = try? JSONSerialization.jsonObject(with: data),
+                   let fields = header as? [String: Any], let version = fields["schemaVersion"] as? Int, version != 1 {
+                    throw HomeMovieError.message("This library uses an unsupported version. Its catalog and recordings have been preserved.")
+                }
+                if let decoded = try? JSONDecoder().decode(Catalog.self, from: data) {
+                    guard decoded.schemaVersion == 1 else {
+                        throw HomeMovieError.message("This library uses an unsupported version. Its catalog and recordings have been preserved.")
+                    }
+                    // A healthy unopened library keeps all names, trims and movie identities.
+                    // A damaged catalog is preserved separately before importing the backup.
+                    do { try validate(decoded); existing = decoded } catch { existing = Catalog() }
+                }
+            }
             try preserveCatalog()
-            catalog = Catalog()
+            catalog = existing
         }
         var next = catalog; next.movies.append(contentsOf: movies)
         try write(next); loaded = false

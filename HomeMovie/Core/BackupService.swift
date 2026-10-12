@@ -154,7 +154,7 @@ actor BackupService {
                 guard let expected = backup.files[look.path], expected.bytes > 0, expected.bytes <= 8_000_000 else {
                     throw HomeMovieError.message("The backup’s look data is invalid.")
                 }
-                let newLook = LUTReference(id: UUID(), name: look.name)
+                let newLook = LUTReference(id: UUID(), name: look.displayName)
                 let copied = staging.appendingPathComponent("\(newLook.id).json")
                 var entry: BackupEntry?; readError = nil; coordinationError = nil
                 coordinator.coordinate(readingItemAt: source.appendingPathComponent(look.path), options: [], error: &coordinationError) { readable in
@@ -165,6 +165,12 @@ actor BackupService {
                 if let readError { throw readError }
                 guard entry?.sha256 == expected.sha256 else { throw HomeMovieError.message("Backup look verification failed.") }
                 let cube = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: copied)); try cube.validate()
+                if look.id == LUTReference.filmica.id, cube.name != newLook.name {
+                    // Rename only the verified built-in copy; preserve every color sample and the source backup.
+                    let renamed = ColorCube(name: newLook.name, dimension: cube.dimension, rgba: cube.rgba,
+                        minimum: cube.minimum, maximum: cube.maximum)
+                    try JSONEncoder().encode(renamed).write(to: copied, options: .atomic)
+                }
                 restoredLooks[look.id] = newLook; completed += expected.bytes
             }
             for m in restored.indices {
@@ -191,6 +197,9 @@ actor BackupService {
                     guard abs(media.duration.seconds - old.sourceDuration.seconds) < 0.1,
                           abs(media.size.width - old.width) < 1, abs(media.size.height - old.height) < 1 else {
                         throw HomeMovieError.message("A backup video's duration or dimensions do not match its metadata.")
+                    }
+                    if let declared = old.profile, declared != (media.profile ?? .standard) {
+                        throw HomeMovieError.message("A backup recording’s color format does not match its scene metadata. Existing movies have not been changed.")
                     }
                     restored[m].scenes[c].id = newID; restored[m].scenes[c].source = "Originals/\(newID).mov"
                     restored[m].scenes[c].missing = false

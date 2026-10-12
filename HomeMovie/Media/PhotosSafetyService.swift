@@ -7,6 +7,21 @@ private final class PhotoReceipt: @unchecked Sendable {
     func set(_ value: String?) { lock.lock(); defer { lock.unlock() }; identifier = value }
     func get() -> String? { lock.lock(); defer { lock.unlock() }; return identifier }
 }
+enum PhotosVideoWriter {
+    static func write(_ source: URL) async throws -> String {
+        let receipt = PhotoReceipt()
+        try Task.checkCancellation()
+        try await PHPhotoLibrary.shared().performChanges {
+            let request = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: source)
+            receipt.set(request?.placeholderForCreatedAsset?.localIdentifier)
+        }
+        guard let identifier = receipt.get(), !identifier.isEmpty else {
+            throw HomeMovieError.message("Photos did not confirm a saved video. Your original stays in Home Movie; try again or save to Files.")
+        }
+        return identifier
+    }
+}
+
 actor PhotosSafetyService {
     private var copying: Set<UUID> = []
     func authorize() async -> Bool {
@@ -20,13 +35,8 @@ actor PhotosSafetyService {
         copying.insert(scene.id); defer { copying.remove(scene.id) }
         guard await authorize() else { throw HomeMovieError.message("Photos copy is not enabled by permission. The scene remains saved in Home Movie.") }
         try Task.checkCancellation()
-        let source = try await store.url(scene.source), receipt = PhotoReceipt()
-        try Task.checkCancellation()
-        try await PHPhotoLibrary.shared().performChanges {
-            let request = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: source)
-            receipt.set(request?.placeholderForCreatedAsset?.localIdentifier)
-        }
-        guard let identifier = receipt.get() else { throw HomeMovieError.message("Photos did not return a saved-copy receipt. Your original scene is still saved on this iPhone.") }
+        let source = try await store.url(scene.source)
+        let identifier = try await PhotosVideoWriter.write(source)
         try await store.markPhotosCopy(sceneID: scene.id, assetID: identifier)
     }
 }

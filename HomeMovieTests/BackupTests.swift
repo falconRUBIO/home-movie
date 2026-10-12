@@ -34,6 +34,70 @@ final class BackupTests: XCTestCase {
         try await store.trim(movieID: movie.id, sceneID: scene.id, start: CMTime(value: 5, timescale: 30), end: CMTime(value: 25, timescale: 30))
         return (store, movie)
     }
+    func testRestoreIntoUnopenedLibraryPreservesExistingMovieMetadata() async throws {
+        let (store, _) = try await sourceMovie(), service = BackupService()
+        let snapshot = await store.snapshot(); let before = try XCTUnwrap(snapshot.first)
+        let bytes = try Data(contentsOf: store.root.appendingPathComponent(before.scenes[0].source))
+        let prepared = try await service.create(store: store) { _ in }
+        let unopened = ProjectStore(root: store.root)
+        try await service.restore(from: prepared.url, store: unopened) { _ in }
+        let movies = await unopened.snapshot()
+        XCTAssertEqual(movies.count, 2)
+        let retained = try XCTUnwrap(movies.first { $0.id == before.id })
+        XCTAssertEqual(retained, before, "Cold restore must retain names, trims, order and identities")
+        XCTAssertEqual(try Data(contentsOf: store.root.appendingPathComponent(before.scenes[0].source)), bytes)
+    }
+    func testRestoreDoesNotOverwriteAnUnopenedNewerLibrary() async throws {
+        let (store, _) = try await sourceMovie(), service = BackupService()
+        let prepared = try await service.create(store: store) { _ in }
+        let snapshot = await store.snapshot(); let movie = try XCTUnwrap(snapshot.first)
+        let source = store.root.appendingPathComponent(movie.scenes[0].source)
+        let bytes = try Data(contentsOf: source)
+        var newer = await store.catalogSnapshot(); newer.schemaVersion = 2
+        let file = store.root.appendingPathComponent("catalog.json")
+        for data in [try JSONEncoder().encode(newer), Data("{\"schemaVersion\":2,\"movies\":\"new format\"}".utf8)] {
+            try data.write(to: file)
+            let unopened = ProjectStore(root: store.root)
+            do { try await service.restore(from: prepared.url, store: unopened) { _ in }; XCTFail("Do not downgrade a newer catalog") } catch {}
+            XCTAssertEqual(try Data(contentsOf: file), data)
+            XCTAssertEqual(try Data(contentsOf: source), bytes)
+        }
+    }
+    func testBackupRestoreRejectsExplicitWrongColorProfile() async throws {
+        let (store, _) = try await sourceMovie(), service = BackupService()
+        let prepared = try await service.create(store: store) { _ in }
+        let manifest = prepared.url.appendingPathComponent("manifest.json")
+        var backup = try JSONDecoder().decode(ProjectBackup.self, from: Data(contentsOf: manifest))
+        backup.catalog.movies[0].profile = .appleLog
+        backup.catalog.movies[0].scenes[0].profile = .appleLog
+        try JSONEncoder().encode(backup).write(to: manifest)
+        let before = await store.snapshot()
+        do { try await service.restore(from: prepared.url, store: store) { _ in }; XCTFail("SDR footage must not be relabeled Log by a backup") } catch {}
+        let after = await store.snapshot(); XCTAssertEqual(after, before)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.root.appendingPathComponent(before[0].scenes[0].source).path))
+    }
+    func testLegacyBundledLookRestoreUsesCinemaNameWithoutChangingSamples() async throws {
+        let (store, _) = try await sourceMovie(), service = BackupService()
+        let movie = try await store.create(name: "Legacy look", format: .portrait, profile: .appleLog)
+        let cube = try ColorCube.filmica.get()
+        let legacy = ColorCube(name: "Filmica", dimension: cube.dimension, rgba: cube.rgba,
+            minimum: cube.minimum, maximum: cube.maximum)
+        let reference = LUTReference(id: LUTReference.filmica.id, name: "Filmica")
+        try JSONEncoder().encode(legacy).write(to: store.root.appendingPathComponent(reference.path))
+        try await store.setLook(movieID: movie.id, look: reference)
+        let prepared = try await service.create(store: store) { _ in }
+        let originalBackup = try Data(contentsOf: prepared.url.appendingPathComponent(reference.path))
+        try await service.restore(from: prepared.url, store: store) { _ in }
+        let movies = await store.snapshot()
+        let restored = try XCTUnwrap(movies.first { $0.name == "Legacy look (Restored)" })
+        let look = try XCTUnwrap(restored.look)
+        XCTAssertEqual(look.name, "Cinema")
+        let restoredCube = try ColorCube.load(look, root: store.root)
+        XCTAssertEqual(restoredCube.name, "Cinema"); XCTAssertEqual(restoredCube.rgba, cube.rgba)
+        XCTAssertEqual(restoredCube.minimum, cube.minimum); XCTAssertEqual(restoredCube.maximum, cube.maximum)
+        let available = await store.availableLooks(); XCTAssertTrue(available.contains(look))
+        XCTAssertEqual(try Data(contentsOf: prepared.url.appendingPathComponent(reference.path)), originalBackup)
+    }
     func testRoundTripPreservesBytesTrimsAndExistingMovies() async throws {
         let (store, _) = try await sourceMovie(), service = BackupService()
         let before = await store.snapshot().first!

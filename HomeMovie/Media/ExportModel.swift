@@ -14,7 +14,16 @@ import UIKit
     private var backgroundObserver: NSObjectProtocol?
     private var committedRevision: Int?
     private var committedMovieID: UUID?
-    init() {
+    private var savingPhotos = false
+    private let authorizePhotos: @Sendable () async -> Bool
+    private let writePhotosVideo: @Sendable (URL) async throws -> String
+    init(authorizePhotos: @escaping @Sendable () async -> Bool = {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        return status == .authorized || status == .limited
+    }, writePhotosVideo: @escaping @Sendable (URL) async throws -> String = {
+        try await PhotosVideoWriter.write($0)
+    }) {
+        self.authorizePhotos = authorizePhotos; self.writePhotosVideo = writePhotosVideo
         backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.running else { return }
@@ -84,13 +93,13 @@ import UIKit
     }
     func cancel() { if running && notice == nil { notice = "Export canceled. Your original scenes are safe." }; job?.cancel() }
     func saveToPhotos() async {
-        guard let exportedURL else { return }
-        let authorization = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
-        guard authorization == .authorized || authorization == .limited else { error = "Allow Home Movie to add videos to Photos in Settings, or save to Files instead."; return }
+        guard let exportedURL, !savingPhotos else { return }
+        savingPhotos = true; defer { savingPhotos = false }
+        error = nil; notice = nil
+        guard await authorizePhotos() else { error = "Allow Home Movie to add videos to Photos in Settings, or save to Files instead."; return }
         do {
-            try await PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: exportedURL)
-            }
+            let identifier = try await writePhotosVideo(exportedURL)
+            guard !identifier.isEmpty else { throw HomeMovieError.message("Photos did not confirm a saved video. Try again or save to Files.") }
             notice = "Saved to Photos. You can keep adding to your movie."
         } catch { self.error = error.localizedDescription }
     }

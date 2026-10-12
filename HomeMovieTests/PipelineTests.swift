@@ -91,6 +91,63 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: store.root.appendingPathComponent(scene.source)), bytes)
     }
 
+    @MainActor func testPhotosExportRetryClearsEarlierError() async {
+        actor Writer {
+            var calls = 0
+            func write(_ url: URL) throws -> String {
+                calls += 1
+                if calls == 1 { throw HomeMovieError.message("Temporary Photos failure") }
+                return "saved-asset"
+            }
+        }
+        let writer = Writer()
+        let model = ExportModel(authorizePhotos: { true }, writePhotosVideo: { try await writer.write($0) })
+        model.exportedURL = URL(fileURLWithPath: "/tmp/fixture-export.mp4")
+        await model.saveToPhotos(); XCTAssertNotNil(model.error); XCTAssertNil(model.notice)
+        await model.saveToPhotos(); XCTAssertNil(model.error); XCTAssertNotNil(model.notice)
+    }
+    @MainActor func testPhotosExportDoesNotClaimSuccessWithoutAReceipt() async {
+        let model = ExportModel(authorizePhotos: { true }, writePhotosVideo: { _ in "" })
+        model.exportedURL = URL(fileURLWithPath: "/tmp/fixture-export.mp4")
+        model.notice = "Old successful save"
+        await model.saveToPhotos()
+        XCTAssertNotNil(model.error); XCTAssertNil(model.notice)
+    }
+    @MainActor func testDeniedPhotosExportNeverRequestsAWrite() async {
+        let model = ExportModel(authorizePhotos: { false }, writePhotosVideo: { _ in
+            XCTFail("Denied permission must not write to Photos"); return "unexpected"
+        })
+        model.exportedURL = URL(fileURLWithPath: "/tmp/fixture-export.mp4")
+        await model.saveToPhotos(); XCTAssertNotNil(model.error); XCTAssertNil(model.notice)
+    }
+    @MainActor func testConcurrentPhotosExportsDoNotCreateDuplicateWrites() async {
+        actor Writer {
+            var calls = 0
+            private var pending: CheckedContinuation<Void, Never>?
+            func write(_ url: URL) async -> String {
+                calls += 1
+                await withCheckedContinuation { pending = $0 }
+                return "saved-asset"
+            }
+            func finish() { pending?.resume(); pending = nil }
+        }
+        let writer = Writer()
+        let model = ExportModel(authorizePhotos: { true }, writePhotosVideo: { await writer.write($0) })
+        model.exportedURL = URL(fileURLWithPath: "/tmp/fixture-export.mp4")
+        let first = Task { await model.saveToPhotos() }
+        for _ in 0..<1000 {
+            let calls = await writer.calls
+            if calls > 0 { break }
+            await Task.yield()
+        }
+        let startedCalls = await writer.calls
+        guard startedCalls == 1 else { first.cancel(); XCTFail("First save did not start"); return }
+        await model.saveToPhotos() // The first write is deliberately still in flight.
+        let calls = await writer.calls
+        await writer.finish(); await first.value
+        XCTAssertEqual(calls, 1); XCTAssertNil(model.error); XCTAssertNotNil(model.notice)
+    }
+
     func testLogCodecPrefersHEVCAndSupportsNativeProResWithoutSDRFallback() {
         XCTAssertEqual(LogRecordingCodec.preferred(in: [LogRecordingCodec.proRes422, .hevc, LogRecordingCodec.proResLT]), .hevc)
         XCTAssertEqual(LogRecordingCodec.preferred(in: [LogRecordingCodec.proRes422, LogRecordingCodec.proResLT]), LogRecordingCodec.proResLT)
