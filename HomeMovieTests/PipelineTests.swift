@@ -355,6 +355,30 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(restored.rgba, try ColorCube.filmica.get().rgba)
         try await service.discard(backup.url)
     }
+    func testAppleLogVerificationReadsExactTransferIdentifier() throws {
+        func description(_ extensions: [String: Any]) throws -> CMFormatDescription {
+            var result: CMFormatDescription?
+            let status = CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault,
+                codecType: kCMVideoCodecType_AppleProRes422, width: 1920, height: 1080,
+                extensions: extensions as CFDictionary, formatDescriptionOut: &result)
+            XCTAssertEqual(status, noErr)
+            return try XCTUnwrap(result)
+        }
+        let key = kCMFormatDescriptionExtension_LogTransferFunction as String
+        let log = try description([key: kCMFormatDescriptionLogTransferFunction_AppleLog as String])
+        XCTAssertEqual(MediaInspector.captureProfile(for: [log]), .appleLog)
+        let standard = try description([:])
+        XCTAssertNil(MediaInspector.captureProfile(for: [standard]))
+        XCTAssertNil(MediaInspector.captureProfile(for: []))
+        XCTAssertNil(MediaInspector.captureProfile(for: [log, standard]))
+        let log2 = try description([key: "com.apple.apple-wide-gamut.apple-log"])
+        XCTAssertNil(MediaInspector.captureProfile(for: [log2]), "Apple Log 2 needs a different color pipeline")
+        let unrelated = try description(["Comment": "AppleLog"])
+        XCTAssertNil(MediaInspector.captureProfile(for: [unrelated]), "A label is not verified Log metadata")
+        let hdr = try description([kCMFormatDescriptionExtension_TransferFunction as String:
+            kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String])
+        XCTAssertNil(MediaInspector.captureProfile(for: [hdr]))
+    }
     func testRecoveryRejectsSDRIntoLogAndPreservesSource() async throws {
         let store = try await makeStore()
         let movie = try await store.create(name: "Log recovery", format: .portrait, profile: .appleLog)

@@ -10,6 +10,16 @@ struct MediaInfo: Sendable {
 }
 
 enum MediaInspector {
+    static func captureProfile(for descriptions: [CMFormatDescription]) -> CaptureProfile? {
+        // The actual Apple Log identifier contains a hyphen: com.apple.rec2020.apple-log.
+        // Read the specific field and compare Apple's constant, never a dictionary's debug text.
+        guard !descriptions.isEmpty, descriptions.allSatisfy({ description in
+            let identifier = CMFormatDescriptionGetExtension(description,
+                extensionKey: kCMFormatDescriptionExtension_LogTransferFunction) as? String
+            return identifier == kCMFormatDescriptionLogTransferFunction_AppleLog as String
+        }) else { return nil }
+        return .appleLog
+    }
     static func inspect(_ url: URL) async throws -> MediaInfo {
         guard FileManager.default.fileExists(atPath: url.path) else { throw HomeMovieError.message("A recording file is missing.") }
         let asset = AVURLAsset(url: url)
@@ -26,9 +36,7 @@ enum MediaInspector {
             throw HomeMovieError.message("The recording has no valid video duration.")
         }
         let descriptions = try await video.load(.formatDescriptions)
-        let metadata = descriptions.map { String(describing: CMFormatDescriptionGetExtensions($0)) }.joined()
-            .lowercased().replacingOccurrences(of: "_", with: "").replacingOccurrences(of: " ", with: "")
-        let profile: CaptureProfile? = metadata.contains("applelog") && !metadata.contains("applelog2") ? .appleLog : nil
+        let profile = captureProfile(for: descriptions)
         let audio = try await asset.loadTracks(withMediaType: .audio)
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         return MediaInfo(duration: range.duration, size: CGSize(width: abs(bounds.width), height: abs(bounds.height)),

@@ -252,7 +252,7 @@ actor ProjectStore {
         let input = fm.fileExists(atPath: source.path) ? source : staging
         let info = try await MediaInspector.inspect(input)
         if ticket.profile == .appleLog && info.profile != .appleLog {
-            throw HomeMovieError.message("The camera did not produce verified Apple Log footage. The original file has been preserved for recovery.")
+            throw HomeMovieError.message("The recording’s Apple Log metadata could not be verified.")
         }
         guard !catalog.movies.flatMap(\.scenes).contains(where: { $0.id == ticket.sceneID }) else { return }
         let i = try index(ticket.movieID)
