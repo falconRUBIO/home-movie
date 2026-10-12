@@ -68,8 +68,9 @@ struct PiPLayoutView: View {
                     Picker("Inset size", selection: $layout.size) {
                         ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
                     }.pickerStyle(.segmented)
-                } header: { Text("Size") }
-                footer: { Text("During a take, hold the inset briefly and drag it to another corner. Change its size before the next take.") }
+                } header: {
+                    Text("Size")
+                } footer: { Text("During a take, hold the inset briefly and drag it to another corner. Change its size before the next take.") }
                 if !ready {
                     Section {
                         Button(logMode ? "New Standard Movie for PiP" : "Use Dual Camera", action: onPrepare)
