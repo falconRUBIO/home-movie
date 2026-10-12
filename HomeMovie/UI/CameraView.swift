@@ -57,7 +57,7 @@ struct CameraView: View {
     private var countdown: Int? { recordingCountdown.remaining }
     private var movie: Movie? { app.movie(movieID) }
     private var establishedFormat: MovieFormat? { movie?.recordingFormat ?? (camera.busy ? camera.takeFormat : nil) }
-    var body: some View {
+    private var cameraSurface: some View {
         GeometryReader { geometry in
             let landscape = geometry.size.width > geometry.size.height
             if let movie {
@@ -92,6 +92,9 @@ struct CameraView: View {
         .background(.black).foregroundStyle(.white)
         .toolbar(.hidden, for: .navigationBar).navigationBarBackButtonHidden()
         .preferredColorScheme(.dark)
+    }
+    private var configuredCamera: some View {
+        cameraSurface
         .task(id: movieID) {
             liveOriginal = false
             updateZoomSettings()
@@ -145,6 +148,9 @@ struct CameraView: View {
             guard !Task.isCancelled, addedSceneID == id else { return }
             addedSceneID = nil
         }
+    }
+    private var activeCamera: some View {
+        configuredCamera
         .onChange(of: camera.state) { _, state in
             if state == .starting { addedSceneID = nil }
             if state == .recording, let move = queuedDolly {
@@ -175,6 +181,9 @@ struct CameraView: View {
             if phase != .active { cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
             else if !watching && !showingRecovery && !camera.busy { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }
         }
+    }
+    var body: some View {
+        activeCamera
         .sheet(isPresented: $showingRecovery, onDismiss: {
             Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) }
         }) { RecordingRecoveryView().environmentObject(app) }
@@ -468,7 +477,7 @@ struct CameraView: View {
                     Circle().fill(activeDolly == nil ? .white : .yellow).frame(width: 14, height: 14)
                         .offset(x: 1 + CGFloat(actualPosition) * width)
                 }.frame(height: 34).contentShape(Rectangle())
-                    .animation(reduceMotion || zoomDragging ? nil : .linear(duration: 0.05), value: actualPosition)
+                    .animation(reduceMotion ? nil : .linear(duration: 0.05), value: actualPosition)
                     .gesture(DragGesture(minimumDistance: 0).onChanged { value in
                         zoomDragging = true
                         setSmoothPosition(Double((value.location.x - 8) / width), options: options, inputTime: value.time.timeIntervalSinceReferenceDate)

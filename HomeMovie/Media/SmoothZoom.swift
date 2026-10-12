@@ -4,6 +4,7 @@ enum SmoothZoomSpeed: String, CaseIterable, Identifiable, Sendable {
     case slow, normal, fast
     var id: Self { self }
     var label: String { rawValue.capitalized }
+    var responseTime: Double { switch self { case .slow: 0.55; case .normal: 0.4; case .fast: 0.28 } }
     var responseDescription: String {
         switch self {
         case .slow: "Gentler response to your drag."
@@ -105,8 +106,8 @@ struct SmoothZoomFilter: Sendable {
         setTarget(destination, duration: remaining)
         return true
     }
-    mutating func advance(seconds: Double, rate: Float) -> Double {
-        guard seconds.isFinite, seconds > 0, rate.isFinite, rate > 0 else { return value }
+    mutating func advance(seconds: Double, rate: Float, response: Double = 0.4) -> Double {
+        guard seconds.isFinite, seconds > 0, rate.isFinite, rate > 0, response.isFinite, response > 0 else { return value }
         if let main = timedCurve {
             timedElapsed = min(timedDuration, timedElapsed + seconds)
             let blending = timedElapsed < timedBridgeDuration && timedBridge != nil
@@ -124,7 +125,7 @@ struct SmoothZoomFilter: Sendable {
         // A critically damped spring preserves velocity on drag reversal and speed changes.
         // Small analytic substeps keep behavior consistent across timer/gesture cadences.
         let elapsed = min(seconds, 0.1), count = max(1, Int(ceil(elapsed * 120)))
-        let dt = elapsed / Double(count), response = 0.4, omega = 2 / response, decay = exp(-omega * dt)
+        let dt = elapsed / Double(count), omega = 2 / response, decay = exp(-omega * dt)
         for _ in 0..<count {
             let current = log2(value), wanted = log2(target)
             let displacement = min(Double(rate) * response, max(-Double(rate) * response, current - wanted))

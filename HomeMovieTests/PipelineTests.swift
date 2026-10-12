@@ -5,6 +5,22 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    func testManualResponseSettingsChangeFollowLagWithoutOverridingHandSpeed() throws {
+        var values: [Double] = []
+        for speed in SmoothZoomSpeed.allCases {
+            var input = SmoothZoomInput(), filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 0.5, maximum: 32))
+            input.observe(factor: 1, at: 0)
+            for frame in 1...120 {
+                let time = Double(frame) / 60, target = exp2(time)
+                input.observe(factor: target, at: time); filter.setTarget(target)
+                _ = filter.advance(seconds: 1.0 / 60, rate: input.rate(baseline: speed.rate), response: speed.responseTime)
+            }
+            values.append(filter.value)
+        }
+        XCTAssertLessThan(values[0], values[1]); XCTAssertLessThan(values[1], values[2])
+        XCTAssertGreaterThan(values[0], 2, "Gentle response must still follow the moving hand")
+        XCTAssertLessThan(values[2], 4, "Fast response retains smoothing rather than jumping straight to the target")
+    }
     func testDollyGuidanceFollowsActualZoomInBothDirections() throws {
         for (start, end) in [(1.0, 8.0), (8.0, 1.0)] {
             let route = try XCTUnwrap(DollyZoomRoute(start: start, destination: end, seconds: 3))
@@ -58,7 +74,7 @@ final class PipelineTests: XCTestCase {
                 for frame in 1...120 {
                     let time = Double(frame) / 60, target = exp2(handSpeed * time)
                     input.observe(factor: target, at: time); filter.setTarget(target)
-                    _ = filter.advance(seconds: 1.0 / 60, rate: input.rate(baseline: speed.rate))
+                    _ = filter.advance(seconds: 1.0 / 60, rate: input.rate(baseline: speed.rate), response: speed.responseTime)
                 }
                 values.append(filter.value); rates.append(input.rate(baseline: speed.rate))
             }
