@@ -5,6 +5,76 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    func testSceneAudioEdgesFadeAtActualOffsetsAndKeepFullVolumeBetweenCuts() {
+        let parameters = AVMutableAudioMixInputParameters()
+        MediaAssembler.smoothAudioEdges(parameters, range: CMTimeRange(start: CMTime(seconds: 2.25, preferredTimescale: 48000), duration: CMTime(seconds: 1, preferredTimescale: 48000)))
+        var start: Float = -1, end: Float = -1, range = CMTimeRange.invalid
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.26, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertEqual(start, 0); XCTAssertEqual(end, 1)
+        XCTAssertEqual(range.start.seconds, 2.25, accuracy: 0.00001)
+        XCTAssertEqual(range.duration.seconds, 0.02, accuracy: 0.00001)
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.75, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertEqual(start, 1); XCTAssertEqual(end, 1)
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 3.24, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertEqual(start, 1); XCTAssertEqual(end, 0)
+        XCTAssertEqual(CMTimeRangeGetEnd(range).seconds, 3.25, accuracy: 0.00001)
+    }
+    func testVeryShortSceneAudioFadesDoNotOverlap() {
+        let parameters = AVMutableAudioMixInputParameters()
+        MediaAssembler.smoothAudioEdges(parameters, range: CMTimeRange(start: .zero, duration: CMTime(value: 480, timescale: 48000)))
+        var start: Float = -1, end: Float = -1, range = CMTimeRange.invalid
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(value: 120, timescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertEqual(start, 0); XCTAssertEqual(end, 1)
+        XCTAssertEqual(range.duration.seconds, 0.005, accuracy: 0.00001)
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(value: 360, timescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertEqual(start, 1); XCTAssertEqual(end, 0)
+        XCTAssertEqual(range.start.seconds, 0.005, accuracy: 0.00001)
+    }
+    func testAudioMixSurvivesSilentSceneGapsTrimsAndExport() async throws {
+        let store = try await makeStore(), movie = try await store.create(name: "Audio cuts", format: .landscape)
+        _ = try await record(movie, into: store)
+        let ticket = try await store.begin(movieID: movie.id), target = try await store.url(ticket.staging)
+        let video = store.root.appendingPathComponent("tone-video.mov"), wave = store.root.appendingPathComponent("tone.wav")
+        try await footage(video)
+        var data = Data()
+        func append<T: FixedWidthInteger>(_ value: T) {
+            var little = value.littleEndian; withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+        }
+        data.append(contentsOf: "RIFF".utf8); append(UInt32(36 + 96000 * 2))
+        data.append(contentsOf: "WAVEfmt ".utf8); append(UInt32(16)); append(UInt16(1)); append(UInt16(1))
+        append(UInt32(48000)); append(UInt32(96000)); append(UInt16(2)); append(UInt16(16))
+        data.append(contentsOf: "data".utf8); append(UInt32(96000 * 2))
+        for _ in 0..<96000 { append(Int16(16000)) }
+        try data.write(to: wave)
+        let composition = AVMutableComposition()
+        let videoTracks = try await AVURLAsset(url: video).loadTracks(withMediaType: .video)
+        let audioTracks = try await AVURLAsset(url: wave).loadTracks(withMediaType: .audio)
+        let sourceVideo = try XCTUnwrap(videoTracks.first), sourceAudio = try XCTUnwrap(audioTracks.first)
+        let videoTrack = try XCTUnwrap(composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
+        let audioTrack = try XCTUnwrap(composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid))
+        let full = CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 48000))
+        try videoTrack.insertTimeRange(full, of: sourceVideo, at: .zero)
+        try audioTrack.insertTimeRange(full, of: sourceAudio, at: .zero)
+        let fixture = try XCTUnwrap(AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality))
+        try await fixture.export(to: target, as: .mov); try await store.commit(ticket)
+        try await store.trim(movieID: movie.id, sceneID: ticket.sceneID, start: CMTime(seconds: 0.25, preferredTimescale: 48000), end: CMTime(seconds: 1.25, preferredTimescale: 48000))
+        _ = try await record(movie, into: store)
+        let movies = await store.snapshot(); let snapshot = try XCTUnwrap(movies.first)
+        let bundle = try await MediaAssembler().build(movie: snapshot, root: store.root)
+        XCTAssertEqual(bundle.duration.seconds, 5, accuracy: 0.0001)
+        let mix = try XCTUnwrap(bundle.audioMix), parameters = try XCTUnwrap(mix.inputParameters.first)
+        var start: Float = -1, end: Float = -1, range = CMTimeRange.invalid
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.01, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertEqual(start, 0); XCTAssertEqual(end, 1); XCTAssertEqual(range.start.seconds, 2, accuracy: 0.0001)
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.99, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertEqual(start, 1); XCTAssertEqual(end, 0)
+        let output = store.root.appendingPathComponent("smoothed.mp4")
+        let exporter = try XCTUnwrap(AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality))
+        exporter.videoComposition = bundle.videoComposition; exporter.audioMix = mix
+        try await exporter.export(to: output, as: .mp4)
+        let info = try await MediaInspector.inspect(output)
+        XCTAssertTrue(info.hasAudio); XCTAssertEqual(info.duration.seconds, 5, accuracy: 0.15)
+    }
     @MainActor func testLateCameraReadyUpdatesDoNotHideFailureOrInterruption() async throws {
         let app = AppModel(store: try await makeStore())
         // Keep the model's weak application owner alive for the complete test.

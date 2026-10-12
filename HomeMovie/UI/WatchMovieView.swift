@@ -114,7 +114,7 @@ struct WatchMovieView: View {
                         try AVAudioSession.sharedInstance().setActive(true)
                         let bundle = try await app.assembler.build(movie: movie, root: app.store.root, showOriginalLog: showOriginalLog)
                         try Task.checkCancellation()
-                        let item = AVPlayerItem(asset: bundle.asset); item.videoComposition = bundle.videoComposition
+                        let item = AVPlayerItem(asset: bundle.asset); item.videoComposition = bundle.videoComposition; item.audioMix = bundle.audioMix
                         player = AVPlayer(playerItem: item)
                         if position.isNumeric, position.seconds > 0 {
                             _ = await player?.seek(to: CMTimeMinimum(position, bundle.duration), toleranceBefore: .zero, toleranceAfter: .zero)
@@ -250,7 +250,7 @@ struct SceneReviewView: View {
                         movie.scenes = [fullScene]
                         let bundle = try await app.assembler.build(movie: movie, root: app.store.root)
                         guard !Task.isCancelled else { return }
-                        let item = AVPlayerItem(asset: bundle.asset); item.videoComposition = bundle.videoComposition
+                        let item = AVPlayerItem(asset: bundle.asset); item.videoComposition = bundle.videoComposition; item.audioMix = bundle.audioMix
                         item.forwardPlaybackEndTime = scene.trimEnd.cmTime
                         originalStart = .zero; player = AVPlayer(playerItem: item)
                         _ = await player?.seek(to: scene.trimStart.cmTime, toleranceBefore: .zero, toleranceAfter: .zero)

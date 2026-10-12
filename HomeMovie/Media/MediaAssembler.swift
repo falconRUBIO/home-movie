@@ -47,6 +47,7 @@ enum MediaInspector {
 struct CompositionBundle: @unchecked Sendable {
     let asset: AVMutableComposition
     let videoComposition: AVMutableVideoComposition
+    let audioMix: AVAudioMix?
     let duration: CMTime
 }
 
@@ -63,6 +64,7 @@ actor MediaAssembler {
         }
         // A silent movie must not contain an empty, formatless audio track.
         var audioTrack: AVMutableCompositionTrack?
+        var audioParameters: AVMutableAudioMixInputParameters?
         var cursor = CMTime.zero
         var instructions: [AVVideoCompositionInstructionProtocol] = []
         for scene in scenes {
@@ -85,10 +87,14 @@ actor MediaAssembler {
                 if intersection.isValid, intersection.duration.isNumeric, intersection.duration.seconds > 0 {
                     if audioTrack == nil {
                         audioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+                        audioParameters = audioTrack.map { AVMutableAudioMixInputParameters(track: $0) }
                     }
                     guard let audioTrack else { throw HomeMovieError.message("Could not prepare movie audio.") }
                     let audioPosition = CMTimeAdd(cursor, CMTimeSubtract(intersection.start, selected.start))
                     try audioTrack.insertTimeRange(intersection, of: sourceAudio, at: audioPosition)
+                    if let audioParameters {
+                        Self.smoothAudioEdges(audioParameters, range: CMTimeRange(start: audioPosition, duration: intersection.duration))
+                    }
                 }
             }
             let naturalSize = try await sourceVideo.load(.naturalSize)
@@ -120,7 +126,19 @@ actor MediaAssembler {
             videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
             videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
         }
-        return CompositionBundle(asset: composition, videoComposition: videoComposition, duration: cursor)
+        let audioMix: AVMutableAudioMix? = audioParameters.map { parameters in
+            let mix = AVMutableAudioMix(); mix.inputParameters = [parameters]; return mix
+        }
+        return CompositionBundle(asset: composition, videoComposition: videoComposition, audioMix: audioMix, duration: cursor)
+    }
+    // Brief fades remove waveform discontinuities at cuts without changing scene timing or source files.
+    nonisolated static func smoothAudioEdges(_ parameters: AVMutableAudioMixInputParameters, range: CMTimeRange) {
+        guard range.isValid, range.duration.isNumeric, range.duration.seconds > 0 else { return }
+        let fade = CMTimeMinimum(CMTime(value: 1, timescale: 50), CMTimeMultiplyByFloat64(range.duration, multiplier: 0.5))
+        parameters.setVolumeRamp(fromStartVolume: 0, toEndVolume: 1,
+            timeRange: CMTimeRange(start: range.start, duration: fade))
+        parameters.setVolumeRamp(fromStartVolume: 1, toEndVolume: 0,
+            timeRange: CMTimeRange(start: CMTimeSubtract(CMTimeRangeGetEnd(range), fade), duration: fade))
     }
     nonisolated static func hasValidGeometry(size: CGSize, preferred: CGAffineTransform) -> Bool {
         guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0,

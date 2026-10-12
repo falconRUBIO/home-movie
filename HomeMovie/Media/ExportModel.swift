@@ -47,7 +47,7 @@ import UIKit
                 let seconds = movie.duration.seconds
                 let directory = URL.cachesDirectory.appendingPathComponent("Exports", isDirectory: true)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                let prefix = "\(movie.id)-r\(movie.revision)-"
+                let prefix = "\(movie.id)-r\(movie.revision)-audio2-"
                 let candidates = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
                 for candidate in candidates where candidate.lastPathComponent.hasPrefix(prefix) && candidate.pathExtension == "mp4" {
                     try Task.checkCancellation()
@@ -64,9 +64,9 @@ import UIKit
                 guard let export = AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality), export.supportedFileTypes.contains(.mp4) else {
                     throw HomeMovieError.message("MP4 export is not supported for this movie.")
                 }
-                session = export; export.videoComposition = bundle.videoComposition
+                session = export; export.videoComposition = bundle.videoComposition; export.audioMix = bundle.audioMix
                 export.shouldOptimizeForNetworkUse = true
-                let destination = directory.appendingPathComponent("\(movie.id)-r\(movie.revision)-\(UUID()).mp4")
+                let destination = directory.appendingPathComponent("\(prefix)\(UUID()).mp4")
                 output = destination
                 let progressTask = Task { [weak self] in
                     for await state in export.states(updateInterval: 0.2) {
