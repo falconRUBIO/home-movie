@@ -128,3 +128,9 @@ Tap the circular Play control for a multi-scene movie: open full-screen playback
 ## Built-in Filmica (NOT RUN)
 
 On a supported iPhone, New Movie must initially show Apple Log / Filmica without Files. Record; confirm Filmica preview, full-screen playback and export agree with the supplied Cinema reference. Compare skin, neutral gray and highlights to the creator workflow to confirm Apple Log input (cube lacks metadata). Look opens its menu; only Add opens Files. Apple Standard, Original and custom look switches must work and persist. Existing Standard movies retain their original capture profile. Back up and restore a Filmica movie with no external LUT import.
+
+## Hands-Free Start acceptance — NOT RUN
+
+Enable Hands-Free Start in camera settings, open Dolly, tap the starting lens and then the ending lens, and select a move duration. The bar shows the planned endpoints. Tap Record: a silent 3–2–1 countdown appears, the same button cancels it, and capture starts before the planned Dolly begins.
+
+Verify both zoom directions and every supported duration, portrait and landscape, Standard and Apple Log. Tap cancel at each countdown number, lock the phone, switch apps and simulate a camera interruption. None of those cancellations may create a take or restart recording on return. Verify the start lens is held through the countdown, the saved take includes the complete move, and rapid Record/Cancel taps never produce duplicate takes. Turn Hands-Free Start off and confirm Record starts immediately.

@@ -23,6 +23,13 @@ struct CameraView: View {
     @State private var smoothZoomOpen = false
     @State private var smoothPosition = 0.0
     @State private var zoomDragging = false
+    @State private var countdown: Int?
+    @State private var countdownTask: Task<Void, Never>?
+    @State private var startRequestID = UUID()
+    @State private var preparedDollyStart: CGFloat?
+    @State private var preparedDollyTarget: CGFloat?
+    @State private var queuedDolly: (target: CGFloat, seconds: Int)?
+    @AppStorage("handsFreeStart") private var handsFreeStart = false
     @AppStorage("dollyZoomSeconds") private var dollySeconds = 3
     @AppStorage("smoothZoomSpeed") private var zoomSpeed = SmoothZoomSpeed.normal.rawValue
     @AppStorage("smoothStayOnLens") private var stayOnLens = false
@@ -51,7 +58,7 @@ struct CameraView: View {
                         viewfinder(movie: movie, landscape: true)
                             .frame(width: previewWidth, height: previewHeight)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        reviewControls(movie: movie, landscape: true)
+                        reviewControls(movie: movie, landscape: true).disabled(countdown != nil)
                             .frame(width: railWidth).frame(maxHeight: .infinity).background(.black)
                     }
                 } else {
@@ -59,7 +66,7 @@ struct CameraView: View {
                         viewfinder(movie: movie, landscape: false)
                             .frame(width: previewWidth, height: previewHeight)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        reviewControls(movie: movie, landscape: false)
+                        reviewControls(movie: movie, landscape: false).disabled(countdown != nil)
                             .padding(.horizontal, 20).frame(height: footerHeight)
                             .frame(maxWidth: .infinity).background(.black)
                     }
@@ -103,6 +110,9 @@ struct CameraView: View {
                 await camera.prepare(profile: movie?.captureProfile ?? .standard)
             }
         }
+        .onChange(of: handsFreeStart) { _, _ in
+            cancelCountdown(); preparedDollyStart = nil; preparedDollyTarget = nil
+        }
         .onChange(of: zoomSpeed) { _, _ in updateZoomSettings() }
         .onChange(of: stayOnLens) { _, _ in updateZoomSettings() }
         .onChange(of: camera.options?.minimum) { _, _ in if !zoomDragging { syncSmoothPosition() } }
@@ -121,15 +131,25 @@ struct CameraView: View {
         }
         .onChange(of: camera.state) { _, state in
             if state == .starting { addedSceneID = nil }
+            if state == .recording, let move = queuedDolly {
+                queuedDolly = nil
+                camera.dollyZoom(to: move.target, seconds: move.seconds)
+            }
+            if state == .failed || state == .interrupted || state == .denied || state == .preparing {
+                cancelCountdown()
+            }
             zoomDragging = false
             if smoothZoomOpen, state == .ready { camera.beginSmoothZoom() }
+        }
+        .onChange(of: camera.options?.isFront) { _, _ in
+            cancelCountdown(); preparedDollyStart = nil; preparedDollyTarget = nil
         }
         .onChange(of: camera.options?.zoom) { _, _ in
             if !zoomDragging { syncSmoothPosition() }
         }
-        .onDisappear { zoomDragging = false; camera.suspend() }
+        .onDisappear { cancelCountdown(); zoomDragging = false; camera.suspend() }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { zoomDragging = false; camera.suspend() }
+            if phase != .active { cancelCountdown(); zoomDragging = false; camera.suspend() }
             else if !watching && !showingRecovery && !camera.busy { Task { await camera.prepare(profile: movie?.captureProfile ?? .standard) } }
         }
         .sheet(isPresented: $showingRecovery, onDismiss: {
@@ -167,6 +187,10 @@ struct CameraView: View {
                     Text(options.recordingFormat)
                     Divider()
                 }
+                Toggle("Hands-Free Start", isOn: $handsFreeStart)
+                    .disabled(camera.busy)
+                if handsFreeStart { Text("3-second countdown. Choose two Dolly lenses, then tap Record.") }
+                Divider()
                 Picker("Smoothing Speed", selection: $zoomSpeed) {
                     ForEach(SmoothZoomSpeed.allCases) { speed in Text(speed.label).tag(speed.rawValue) }
                 }
@@ -186,7 +210,7 @@ struct CameraView: View {
                 }.accessibilityLabel(options.torchOn ? "Turn torch off" : "Turn torch on")
                     .disabled(camera.state != .ready && camera.state != .recording)
             } else { Color.clear.frame(width: 44, height: 44) }
-        }
+        }.disabled(countdown != nil)
     }
     private func viewfinder(movie: Movie, landscape: Bool) -> some View {
         ZStack {
@@ -217,6 +241,10 @@ struct CameraView: View {
                 Text("AE/AF LOCK").font(.caption2.weight(.semibold)).foregroundStyle(.black)
                     .padding(.horizontal, 8).padding(.vertical, 4).background(.yellow, in: RoundedRectangle(cornerRadius: 3))
             }
+            if handsFreeStart, countdown == nil, camera.state == .ready {
+                Label("3s", systemImage: "timer").font(.caption2).foregroundStyle(.white.opacity(0.8))
+                    .accessibilityLabel("Hands-free start, three-second countdown")
+            }
             if camera.state == .recording {
                 Text("● \(durationLabel(camera.elapsed))")
                     .font(.caption.monospacedDigit()).padding(.horizontal, 10).padding(.vertical, 5)
@@ -241,18 +269,26 @@ struct CameraView: View {
             ForEach(options.lenses) { lens in
                 let selected = abs(lens.factor - options.zoom) < 0.06
                 Button {
-                    if smoothZoomOpen { camera.dollyZoom(to: lens.factor, seconds: DollyZoomDuration.validated(dollySeconds)) }
+                    if smoothZoomOpen, handsFreeStart, camera.state == .ready {
+                        if preparedDollyStart == nil || preparedDollyTarget != nil {
+                            preparedDollyStart = lens.factor; preparedDollyTarget = nil
+                            camera.zoom(lens.factor)
+                        } else if let start = preparedDollyStart, abs(start - lens.factor) > 0.001 {
+                            preparedDollyTarget = lens.factor
+                        } else { camera.zoom(lens.factor) }
+                    } else if smoothZoomOpen { camera.dollyZoom(to: lens.factor, seconds: DollyZoomDuration.validated(dollySeconds)) }
                     else { camera.zoom(lens.factor) }
                 } label: {
                     Text(lens.label).font(.caption.weight(.medium)).monospacedDigit()
                         .foregroundStyle(selected ? .yellow : .white)
                         .frame(minWidth: 44, minHeight: 44)
                         .background(selected ? Color.white.opacity(0.15) : .clear, in: Circle())
-                }.disabled(camera.state != .ready && camera.state != .recording)
+                }.disabled(countdown != nil || camera.state != .ready && camera.state != .recording)
                     .accessibilityLabel("\(lens.label) lens").accessibilityAddTraits(selected ? .isSelected : [])
             }
             if options.maximum > options.minimum || smoothZoomOpen {
                 Button {
+                    preparedDollyStart = nil; preparedDollyTarget = nil
                     if smoothZoomOpen { camera.endSmoothZoom(); smoothZoomOpen = false }
                     else { syncSmoothPosition(); smoothZoomOpen = true; camera.beginSmoothZoom() }
                 } label: {
@@ -261,14 +297,18 @@ struct CameraView: View {
                         .background(smoothZoomOpen ? Color.white.opacity(0.15) : .clear, in: Circle())
                 }.accessibilityLabel("Dolly").accessibilityValue(smoothZoomOpen ? "Open" : "Closed")
                     .accessibilityAddTraits(smoothZoomOpen ? .isSelected : [])
-                    .disabled(!smoothZoomOpen && camera.state != .ready && camera.state != .recording)
+                    .disabled(countdown != nil || !smoothZoomOpen && camera.state != .ready && camera.state != .recording)
             }
         }
     }
     private func smoothZoomBar(options: CameraOptions) -> some View {
         HStack(spacing: 12) {
-            Text(String(format: "%g×", Double((options.zoom * options.multiplier * 10).rounded() / 10)))
-                .font(.caption.monospacedDigit()).frame(minWidth: 42)
+            Group {
+                if handsFreeStart, camera.state == .ready, let start = preparedDollyStart, let end = preparedDollyTarget {
+                    Text("\(zoomLabel(start, multiplier: options.multiplier)) → \(zoomLabel(end, multiplier: options.multiplier))")
+                        .foregroundStyle(.yellow).accessibilityLabel("Dolly from \(zoomLabel(start, multiplier: options.multiplier)) to \(zoomLabel(end, multiplier: options.multiplier))")
+                } else { Text(zoomLabel(options.zoom, multiplier: options.multiplier)) }
+            }.font(.caption.monospacedDigit()).frame(minWidth: 42)
             GeometryReader { geometry in
                 let width = max(1, geometry.size.width - 16)
                 ZStack(alignment: .leading) {
@@ -309,10 +349,11 @@ struct CameraView: View {
                 .accessibilityValue("\(DollyZoomDuration.validated(dollySeconds)) seconds")
         }.padding(.horizontal, 12).padding(.vertical, 5)
             .contentShape(Rectangle()).onTapGesture { }
-            .frame(maxWidth: 360).disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum)
+            .frame(maxWidth: 360).disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum || countdown != nil)
     }
     private func setSmoothPosition(_ position: Double, options: CameraOptions) {
-        guard smoothZoomOpen, position.isFinite else { return }
+        guard smoothZoomOpen, countdown == nil, position.isFinite else { return }
+        preparedDollyStart = nil; preparedDollyTarget = nil
         smoothPosition = min(1, max(0, position))
         camera.smoothZoom(to: CGFloat(SmoothZoomFilter.factor(smoothPosition, minimum: Double(options.minimum), maximum: Double(options.maximum))))
     }
@@ -364,18 +405,25 @@ struct CameraView: View {
                 fixedFormat: establishedFormat,
                 onFocus: { camera.focus(at: $0, locked: $1) }, onExposure: { camera.exposure($0) })
                 .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+                .allowsHitTesting(countdown == nil).accessibilityHidden(countdown != nil)
                 .accessibilityLabel("Camera viewfinder")
                 .accessibilityAction(named: "Focus at center") { _ = camera.focus(at: CGPoint(x: 0.5, y: 0.5)) }
                 .accessibilityAction(named: "Lock focus and exposure at center") { _ = camera.focus(at: CGPoint(x: 0.5, y: 0.5), locked: true) }
                 .accessibilityAction(named: "Increase brightness") { camera.exposure((camera.options?.exposureBias ?? 0) + 0.5) }
                 .accessibilityAction(named: "Decrease brightness") { camera.exposure((camera.options?.exposureBias ?? 0) - 0.5) }
                 .gesture(MagnificationGesture().onChanged { value in
-                    guard camera.state == .ready || camera.state == .recording, let options = camera.options else { return }
+                    guard countdown == nil, camera.state == .ready || camera.state == .recording, let options = camera.options else { return }
                     if pinchBase == nil { pinchBase = options.zoom }
                     if Date().timeIntervalSince(lastZoomAt) > 0.05 {
                         camera.zoom((pinchBase ?? options.zoom) * value); lastZoomAt = Date()
                     }
                 }.onEnded { _ in pinchBase = nil })
+            if let countdown {
+                Text("\(countdown)").font(.system(size: 64, weight: .light, design: .rounded))
+                    .foregroundStyle(.white).shadow(color: .black.opacity(0.5), radius: 8)
+                    .contentTransition(.numericText()).allowsHitTesting(false)
+                    .accessibilityLabel("Recording in \(countdown) seconds")
+            }
             if camera.state == .preparing {
                 ProgressView("Preparing camera…").padding().background(.black.opacity(0.8), in: Capsule())
             }
@@ -392,18 +440,24 @@ struct CameraView: View {
     }
     private var recordControl: some View {
         Button {
-            if camera.state == .recording { camera.stop() } else { camera.record(movieID: movieID) }
+            if countdown != nil { cancelCountdown() }
+            else if camera.state == .recording { camera.stop() }
+            else { startRecording() }
         } label: {
             ZStack {
                 Circle().fill(.black.opacity(0.25)).frame(width: 78, height: 78)
                 Circle().strokeBorder(.white, lineWidth: 3).frame(width: 78, height: 78)
-                RoundedRectangle(cornerRadius: camera.state == .recording ? 5 : 32)
-                    .fill(.red).frame(width: camera.state == .recording ? 29 : 62, height: camera.state == .recording ? 29 : 62)
+                if countdown != nil {
+                    Image(systemName: "xmark").font(.system(size: 24, weight: .medium)).foregroundStyle(.white)
+                } else {
+                    RoundedRectangle(cornerRadius: camera.state == .recording ? 5 : 32)
+                        .fill(.red).frame(width: camera.state == .recording ? 29 : 62, height: camera.state == .recording ? 29 : 62)
+                }
             }
         }.buttonStyle(.plain)
             .disabled(undoingTake || camera.state != .recording && camera.state != .ready)
             .opacity(camera.state != .recording && camera.state != .ready ? 0.4 : 1)
-            .accessibilityLabel(camera.state == .recording ? "Stop recording" : "Record next scene")
+            .accessibilityLabel(countdown != nil ? "Cancel countdown" : camera.state == .recording ? "Stop recording" : "Record next scene")
     }
     @ViewBuilder private func reviewControls(movie: Movie, landscape: Bool) -> some View {
         let recent = Button { openWatch(sceneID: movie.activeScenes.last?.id) } label: {
@@ -482,6 +536,41 @@ struct CameraView: View {
             defer { changingLook = false }
             await app.run { try await app.store.setLook(movieID: movieID, look: look) }
         }
+    }
+    private func zoomLabel(_ factor: CGFloat, multiplier: CGFloat) -> String {
+        String(format: "%g×", Double((factor * multiplier * 10).rounded() / 10))
+    }
+    private func startRecording() {
+        guard camera.state == .ready, countdown == nil, scenePhase == .active else { return }
+        guard handsFreeStart else { camera.record(movieID: movieID); return }
+        if smoothZoomOpen, let start = preparedDollyStart, let target = preparedDollyTarget {
+            camera.zoom(start)
+            queuedDolly = (target, DollyZoomDuration.validated(dollySeconds))
+        } else { camera.endSmoothZoom(); queuedDolly = nil }
+        let request = UUID(); startRequestID = request
+        countdown = 3
+        countdownTask = Task { @MainActor in
+            var requestedRecording = false
+            defer {
+                if startRequestID == request {
+                    countdown = nil; countdownTask = nil
+                    if !requestedRecording { queuedDolly = nil }
+                }
+            }
+            for number in stride(from: 3, through: 1, by: -1) {
+                guard !Task.isCancelled, startRequestID == request, camera.state == .ready, scenePhase == .active else { return }
+                countdown = number
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
+            guard !Task.isCancelled, startRequestID == request, camera.state == .ready, scenePhase == .active else { return }
+            countdown = nil; countdownTask = nil
+            camera.record(movieID: movieID)
+            requestedRecording = camera.state == .starting
+        }
+    }
+    private func cancelCountdown() {
+        startRequestID = UUID(); countdownTask?.cancel(); countdownTask = nil
+        countdown = nil; queuedDolly = nil
     }
     private func openWatch(sceneID: UUID? = nil) {
         guard !camera.busy else { return }
