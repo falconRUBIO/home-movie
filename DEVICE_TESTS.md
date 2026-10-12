@@ -139,3 +139,15 @@ Live-preview report follow-up (NOT RUN on corrected source): the user reported f
 Enable Hands-Free Start in camera settings, open Dolly, tap the starting lens and then the ending lens, and select a move duration. The bar shows the planned endpoints. Tap Record: a silent 3–2–1 countdown appears, the same button cancels it, and capture starts before the planned Dolly begins.
 
 Verify both zoom directions and every supported duration, portrait and landscape, Standard and Apple Log. Tap cancel at each countdown number, lock the phone, switch apps and simulate a camera interruption. None of those cancellations may create a take or restart recording on return. Verify the start lens is held through the countdown, the saved take includes the complete move, and rapid Record/Cancel taps never produce duplicate takes. Turn Hands-Free Start off and confirm Record starts immediately.
+
+
+## Film Effects and camera touch acceptance — October 12
+
+Use a build containing the Film Effects source and lens-touch routing correction. The older installed beta does not update from a source push.
+
+1. Open a legacy movie and a new Standard movie. Export → Film Effects initially reports Off. Enable each effect independently; verify Amount, disclosed adjustments, reset, and the 35mm/16mm grain choices. Done must retain settings for that movie across relaunch and project backup/restore.
+2. Play the actual movie in the correct aspect ratio. Change a slider while playing: the timeline should continue without deliberate pause/resume. Pause, inspect Detail 2×, pan, and compare. Grain must freeze while paused and repeat when seeking to the same timeline frame. Hold Compare must remove only Film Effects and preserve the selected Cinema/Apple Standard appearance, including fullscreen.
+3. Inspect faces, fine fabric, bright windows, daylight skies, colored LEDs and night lamps. Grain must avoid visible grid/repeating patterns, halation must remain local and warm, and bloom must retain source colors. Check weak and strong settings, shadow texture, highlights, and existing camera noise. Compare the encoded MP4, not just the playing preview.
+4. Export, change saved effects, export again and share/save the new copy. Confirm different settings cannot reuse a stale file. Confirm originals, trims, audio and the regular camera/Watch Movie view remain unchanged. Test cancel, leaving the app and insufficient storage without losing originals.
+5. In portrait and landscape, tap every visible lens with Dolly closed and open, before/during recording. Lens taps should select a lens or its Dolly destination and never create a focus box. Test the entire button area, bar padding, horizontal lens scrolling, Dolly drag/duration, shutter and header controls. Then tap/hold and adjust exposure in the unobstructed viewfinder; these gestures must still work. Repeat after rotation and at larger text sizes.
+6. Run sustained playing preview/export on the actual supported iPhones. Measure frame delivery, temperature, battery use and export grain preservation. Simulator tests do not establish physical-camera responsiveness or perceptual film quality.
