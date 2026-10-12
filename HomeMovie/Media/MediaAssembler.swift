@@ -137,6 +137,7 @@ actor MediaAssembler {
         let fade = CMTimeMinimum(CMTime(value: 1, timescale: 200), CMTimeMultiplyByFloat64(range.duration, multiplier: 0.5))
         parameters.setVolumeRamp(fromStartVolume: 0, toEndVolume: 1,
             timeRange: CMTimeRange(start: range.start, duration: fade))
+        parameters.setVolume(1, at: CMTimeAdd(range.start, fade))
         parameters.setVolumeRamp(fromStartVolume: 1, toEndVolume: 0,
             timeRange: CMTimeRange(start: CMTimeSubtract(CMTimeRangeGetEnd(range), fade), duration: fade))
     }

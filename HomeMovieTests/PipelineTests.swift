@@ -34,18 +34,17 @@ final class PipelineTests: XCTestCase {
         let store = try await makeStore(), movie = try await store.create(name: "Audio cuts", format: .landscape)
         _ = try await record(movie, into: store)
         let ticket = try await store.begin(movieID: movie.id), target = try await store.url(ticket.staging)
-        let video = store.root.appendingPathComponent("tone-video.mov"), wave = store.root.appendingPathComponent("tone.wav")
+        let video = store.root.appendingPathComponent("tone-video.mov"), wave = store.root.appendingPathComponent("tone.caf")
         try await footage(video)
-        var data = Data()
-        func append<T: FixedWidthInteger>(_ value: T) {
-            var little = value.littleEndian; withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 96000))
+        buffer.frameLength = 96000
+        let samples = try XCTUnwrap(buffer.floatChannelData)[0]
+        for frame in 0..<96000 { samples[frame] = Float(sin(Double(frame) * 2 * .pi * 440 / 48000) * 0.5) }
+        do {
+            let audioFile = try AVAudioFile(forWriting: wave, settings: format.settings)
+            try audioFile.write(from: buffer)
         }
-        data.append(contentsOf: "RIFF".utf8); append(UInt32(36 + 96000 * 2))
-        data.append(contentsOf: "WAVEfmt ".utf8); append(UInt32(16)); append(UInt16(1)); append(UInt16(1))
-        append(UInt32(48000)); append(UInt32(96000)); append(UInt16(2)); append(UInt16(16))
-        data.append(contentsOf: "data".utf8); append(UInt32(96000 * 2))
-        for _ in 0..<96000 { append(Int16(16000)) }
-        try data.write(to: wave)
         let composition = AVMutableComposition()
         let videoTracks = try await AVURLAsset(url: video).loadTracks(withMediaType: .video)
         let audioTracks = try await AVURLAsset(url: wave).loadTracks(withMediaType: .audio)
@@ -56,7 +55,9 @@ final class PipelineTests: XCTestCase {
         try videoTrack.insertTimeRange(full, of: sourceVideo, at: .zero)
         try audioTrack.insertTimeRange(full, of: sourceAudio, at: .zero)
         let fixture = try XCTUnwrap(AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality))
-        try await fixture.export(to: target, as: .mov); try await store.commit(ticket)
+        do { try await fixture.export(to: target, as: .mov) }
+        catch { XCTFail("Audio fixture mux failed: \(error)"); throw error }
+        try await store.commit(ticket)
         try await store.trim(movieID: movie.id, sceneID: ticket.sceneID, start: CMTime(seconds: 0.25, preferredTimescale: 48000), end: CMTime(seconds: 1.25, preferredTimescale: 48000))
         _ = try await record(movie, into: store)
         let movies = await store.snapshot(); let snapshot = try XCTUnwrap(movies.first)
@@ -71,7 +72,8 @@ final class PipelineTests: XCTestCase {
         let output = store.root.appendingPathComponent("smoothed.mp4")
         let exporter = try XCTUnwrap(AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality))
         exporter.videoComposition = bundle.videoComposition; exporter.audioMix = mix
-        try await exporter.export(to: output, as: .mp4)
+        do { try await exporter.export(to: output, as: .mp4) }
+        catch { XCTFail("Scene audio mix export failed: \(error)"); throw error }
         let info = try await MediaInspector.inspect(output)
         XCTAssertTrue(info.hasAudio); XCTAssertEqual(info.duration.seconds, 5, accuracy: 0.15)
     }
