@@ -495,6 +495,41 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(completedStarts, 1)
         XCTAssertNil(countdown.remaining)
     }
+    func testDollyStartDelayDoesNotDelayOrdinaryRecording() {
+        for seconds in [0, 3, 5, 7, -1, 999] {
+            XCTAssertEqual(DollyStartDelay.effective(seconds, dollyOpen: false), 0)
+        }
+        XCTAssertEqual(DollyStartDelay.effective(0, dollyOpen: true), 0)
+        XCTAssertEqual(DollyStartDelay.effective(5, dollyOpen: true), 5)
+        XCTAssertEqual(DollyStartDelay.effective(7, dollyOpen: true), 7)
+        XCTAssertEqual(DollyStartDelay.effective(-1, dollyOpen: true), 3)
+    }
+    @MainActor func testSelectedDollyCountdownStartsOnceAndOffStartsImmediately() async {
+        for seconds in [3, 5, 7] {
+            let countdown = RecordingCountdown(tick: .milliseconds(1))
+            var starts = 0
+            let started = expectation(description: "Selected delay \(seconds) completes")
+            countdown.start(seconds: seconds, canStart: { true }, onStart: { starts += 1; started.fulfill() })
+            XCTAssertEqual(countdown.remaining, seconds)
+            countdown.start(seconds: 3, canStart: { true }, onStart: { XCTFail("Duplicate start") })
+            await fulfillment(of: [started], timeout: 2)
+            XCTAssertEqual(starts, 1); XCTAssertNil(countdown.remaining)
+        }
+        let countdown = RecordingCountdown(tick: .milliseconds(1))
+        var starts = 0
+        countdown.start(seconds: 0, canStart: { true }, onStart: { starts += 1 })
+        XCTAssertEqual(starts, 1); XCTAssertNil(countdown.remaining)
+    }
+    @MainActor func testLongDollyCountdownCanBeCancelledAndReplaced() async {
+        let countdown = RecordingCountdown(tick: .milliseconds(1))
+        countdown.start(seconds: 7, canStart: { true }, onStart: { XCTFail("Cancelled countdown fired") })
+        XCTAssertEqual(countdown.remaining, 7); countdown.cancel()
+        let started = expectation(description: "Replacement delay completes")
+        countdown.start(seconds: 5, canStart: { true }, onStart: { started.fulfill() })
+        XCTAssertEqual(countdown.remaining, 5)
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertNil(countdown.remaining)
+    }
     @MainActor func testHandsFreeCountdownRechecksCameraAvailability() async {
         let countdown = RecordingCountdown(tick: .milliseconds(1))
         var available = true

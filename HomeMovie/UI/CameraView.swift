@@ -71,6 +71,7 @@ struct CameraView: View {
     @State private var showingDollySettings = false
     @AppStorage("dollyGuidanceLearned") private var dollyGuidanceLearned = false
     @AppStorage("handsFreeStart") private var handsFreeStart = false
+    @AppStorage("dollyStartDelaySeconds") private var dollyStartDelaySeconds = 3
     @AppStorage("dollyZoomSeconds") private var dollySeconds = 3
     @AppStorage("smoothZoomSpeed") private var zoomSpeed = SmoothZoomSpeed.normal.rawValue
     @AppStorage("smoothStayOnLens") private var stayOnLens = false
@@ -83,6 +84,8 @@ struct CameraView: View {
         _camera = StateObject(wrappedValue: CameraModel(app: app))
     }
     private var countdown: Int? { recordingCountdown.remaining }
+    private var startDelay: Int { DollyStartDelay.effective(handsFreeStart ? dollyStartDelaySeconds : 0, dollyOpen: smoothZoomOpen) }
+    private var dollyDelayedStart: Bool { startDelay > 0 }
     private var movie: Movie? { app.movie(movieID) }
     private var establishedFormat: MovieFormat? { movie?.recordingFormat ?? (camera.busy ? camera.takeFormat : nil) }
     private var cameraSurface: some View {
@@ -160,6 +163,7 @@ struct CameraView: View {
             cancelCountdown(); preparedDollyStart = nil; preparedDollyTarget = nil
             if smoothZoomOpen { preparedDollyStart = camera.options?.zoom }
         }
+        .onChange(of: dollyStartDelaySeconds) { _, _ in cancelCountdown() }
         .onChange(of: zoomSpeed) { _, _ in updateZoomSettings() }
         .onChange(of: stayOnLens) { _, _ in updateZoomSettings() }
         .onChange(of: camera.options?.minimum) { _, _ in if !zoomDragging { syncSmoothPosition() } }
@@ -252,10 +256,6 @@ struct CameraView: View {
                     Text(options.recordingFormat)
                     Divider()
                 }
-                Toggle("Hands-Free Start", isOn: $handsFreeStart)
-                    .disabled(camera.busy)
-                if handsFreeStart { Text("Waits 3 seconds before recording") }
-                Divider()
                 Button("Dolly Settings", systemImage: "slider.horizontal.3") { showingDollySettings = true }
                     .disabled(camera.busy)
                 Button("Dolly Help", systemImage: "questionmark.circle") { showingDollyHelp = true }
@@ -311,10 +311,6 @@ struct CameraView: View {
             if camera.options?.focusLocked == true {
                 Text("AE/AF LOCK").font(.caption2.weight(.semibold)).foregroundStyle(.black)
                     .padding(.horizontal, 8).padding(.vertical, 4).background(.yellow, in: RoundedRectangle(cornerRadius: 3))
-            }
-            if handsFreeStart, countdown == nil, camera.state == .ready {
-                Label("3s", systemImage: "timer").font(.caption2).foregroundStyle(.white.opacity(0.8))
-                    .accessibilityLabel("Hands-free start, three-second countdown")
             }
             if camera.state == .recording {
                 Text("● \(durationLabel(camera.elapsed))")
@@ -392,7 +388,7 @@ struct CameraView: View {
         let value = isDestination ? "Dolly destination" : isStart ? "Dolly start" : selected ? "Current lens" : ""
         let hint: String
         if !smoothZoomOpen { hint = "Switch to this lens." }
-        else if handsFreeStart && camera.state == .ready { hint = "Choose the destination lens, then tap Record. Your current zoom is the start." }
+        else if dollyDelayedStart && camera.state == .ready { hint = "Choose the destination lens, then tap Record. Your current zoom is the start." }
         else { hint = "Smoothly move to this lens using the selected duration." }
         return Button { selectLens(factor) } label: {
             Text(label).font(.caption.weight(.medium)).monospacedDigit()
@@ -416,7 +412,7 @@ struct CameraView: View {
         manualZoomTargetShown = false
         guard smoothZoomOpen else { camera.zoom(factor); return }
         UISelectionFeedbackGenerator().selectionChanged()
-        if handsFreeStart, camera.state == .ready {
+        if dollyDelayedStart, camera.state == .ready {
             activeDolly = nil
             if preparedDollyStart == nil {
                 preparedDollyStart = camera.options?.zoom; preparedDollyTarget = nil
@@ -448,13 +444,13 @@ struct CameraView: View {
                         Text(countdown != nil ? "Starts after countdown" : "Ready · Tap Record to start")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
-                } else if handsFreeStart, camera.state == .ready, preparedDollyStart != nil {
+                } else if dollyDelayedStart, camera.state == .ready, preparedDollyStart != nil {
                     Text("Choose the destination lens")
                         .font(.caption).foregroundStyle(.secondary)
                 } else if zoomDragging || pinchBase != nil {
                     Text("Manual Dolly").font(.caption).foregroundStyle(.secondary)
                 } else if !dollyGuidanceLearned {
-                    Text(handsFreeStart && camera.state == .ready ? "Choose a destination, then tap Record." : "Tap another lens to dolly from here.")
+                    Text(dollyDelayedStart && camera.state == .ready ? "Choose a destination, then tap Record." : "Tap another lens to dolly from here.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("Dolly").font(.caption).foregroundStyle(.secondary)
@@ -493,11 +489,6 @@ struct CameraView: View {
                     Text("Time for the next move between lenses, including the gentle start and finish. You can also change this in the Dolly bar.")
                 }
                 Section {
-                    Toggle("Hands-Free Start", isOn: $handsFreeStart)
-                } footer: {
-                    Text("Open Dolly to use your current zoom as the start. Choose a destination, then tap Record. Recording begins after a three-second countdown, followed by the Dolly move.")
-                }
-                Section {
                     Toggle("Stay on This Lens", isOn: $stayOnLens)
                         .disabled(camera.options?.canStayOnLens != true)
                 } footer: {
@@ -522,8 +513,8 @@ struct CameraView: View {
                 Section("Manual Dolly Response") {
                     Text("Drag faster or slower to control zoom. Slow gives a gentler response, Normal is balanced, and Fast responds more quickly. This setting does not change the automatic duration.")
                 }
-                Section("Hands-Free Start") {
-                    Text("Opening Dolly selects your current zoom as the start. Tap a destination lens, then Record for the three-second countdown. Tap another lens to change the destination, or Reset to clear it and use your current zoom as the start. The Dolly starts when recording begins.")
+                Section("Start Delay") {
+                    Text("The timer on the left sets an optional 3, 5 or 7 second delay before recording. The duration on the right controls the Dolly move itself. With a delay selected, choose a destination and tap Record. The Dolly starts when recording begins. Delay applies only while Dolly is open.")
                 }
                 Section {
                     Button("Show Dolly Tips Again") { dollyGuidanceLearned = false; showingDollyHelp = false }
@@ -534,13 +525,15 @@ struct CameraView: View {
     }
     private func smoothZoomBar(options: CameraOptions) -> some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                dollyStartDelayMenu
                 dollyZoomValue(options: options)
                 dollyTrack(options: options).frame(minWidth: 88)
                 dollyDurationMenu
             }
             VStack(spacing: 0) {
                 HStack {
+                    dollyStartDelayMenu
                     dollyZoomValue(options: options)
                     Spacer(minLength: 8)
                     dollyDurationMenu
@@ -596,6 +589,29 @@ struct CameraView: View {
                     let factor = Double(options.zoom) * pow(2, direction == .increment ? 0.25 : -0.25)
                     setSmoothPosition(SmoothZoomFilter.position(factor, minimum: Double(options.minimum), maximum: Double(options.maximum)), options: options)
                 }
+    }
+    private var dollyStartDelayMenu: some View {
+        Menu {
+            Picker("Start delay", selection: Binding(get: {
+                handsFreeStart ? DollyStartDelay.validated(dollyStartDelaySeconds) : 0
+            }, set: { seconds in
+                handsFreeStart = seconds > 0
+                if seconds > 0 { dollyStartDelaySeconds = DollyStartDelay.validated(seconds) }
+            })) {
+                ForEach(DollyStartDelay.choices, id: \.self) { seconds in
+                    Text(seconds == 0 ? "Off" : "\(seconds) seconds").tag(seconds)
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "timer")
+                Text(startDelay == 0 ? "Off" : "\(startDelay)s").monospacedDigit()
+            }.font(.caption.weight(.medium)).foregroundStyle(dollyDelayedStart ? .yellow : .white)
+                .frame(minWidth: 44, minHeight: 44)
+        }.accessibilityLabel("Dolly start delay")
+            .accessibilityValue(startDelay == 0 ? "Off" : "\(startDelay) seconds")
+            .accessibilityHint("Delay before recording starts. Only applies while Dolly is open.")
+            .disabled(camera.state != .ready || countdown != nil)
     }
     private var dollyDurationMenu: some View {
             Menu {
@@ -815,12 +831,12 @@ struct CameraView: View {
     }
     private func startRecording() {
         guard camera.state == .ready, countdown == nil, scenePhase == .active else { return }
-        guard handsFreeStart else { camera.record(movieID: movieID); return }
+        guard dollyDelayedStart else { camera.record(movieID: movieID); return }
         if smoothZoomOpen, let start = preparedDollyStart, let target = preparedDollyTarget {
             camera.zoom(start)
             queuedDolly = (target, DollyZoomDuration.validated(dollySeconds))
         } else { camera.endSmoothZoom(); queuedDolly = nil }
-        recordingCountdown.start(canStart: {
+        recordingCountdown.start(seconds: startDelay, canStart: {
             camera.state == .ready && scenePhase == .active
         }, onStart: {
             camera.record(movieID: movieID)

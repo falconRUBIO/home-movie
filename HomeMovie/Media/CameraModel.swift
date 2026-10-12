@@ -7,6 +7,12 @@ enum CameraState: Equatable {
     var showsLiveLook: Bool { [.ready, .starting, .recording, .finalizing].contains(self) }
 }
 
+enum DollyStartDelay {
+    static let choices = [0, 3, 5, 7]
+    static func validated(_ seconds: Int) -> Int { choices.contains(seconds) ? seconds : 3 }
+    static func effective(_ seconds: Int, dollyOpen: Bool) -> Int { dollyOpen ? validated(seconds) : 0 }
+}
+
 @MainActor final class RecordingCountdown: ObservableObject {
     @Published private(set) var remaining: Int?
     private var task: Task<Void, Never>?
@@ -14,15 +20,17 @@ enum CameraState: Equatable {
     private let tick: Duration
     init(tick: Duration = .seconds(1)) { self.tick = tick }
 
-    func start(canStart: @escaping @MainActor () -> Bool, onStart: @escaping @MainActor () -> Void) {
+    func start(seconds: Int = 3, canStart: @escaping @MainActor () -> Bool, onStart: @escaping @MainActor () -> Void) {
         guard remaining == nil, canStart() else { return }
-        let request = UUID(); requestID = request; remaining = 3
+        let duration = DollyStartDelay.validated(seconds)
+        if duration == 0 { onStart(); return }
+        let request = UUID(); requestID = request; remaining = duration
         task = Task { @MainActor [weak self] in
             guard let self else { return }
             defer {
                 if self.requestID == request { self.remaining = nil; self.task = nil }
             }
-            for number in stride(from: 3, through: 1, by: -1) {
+            for number in stride(from: duration, through: 1, by: -1) {
                 guard !Task.isCancelled, self.requestID == request, canStart() else { return }
                 self.remaining = number
                 do { try await Task.sleep(for: self.tick) } catch { return }
