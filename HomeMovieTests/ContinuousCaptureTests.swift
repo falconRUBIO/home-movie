@@ -3,6 +3,29 @@ import AVFoundation
 @testable import HomeMovie
 
 final class ContinuousCaptureTests: XCTestCase {
+    func testLogRecordingCannotUseSegmentedCameraFlip() {
+        XCTAssertFalse(CameraCompatibility.allowsFlip(profile: .appleLog, recording: true,
+            otherCameraSupported: true, continuousFlipSupported: false))
+        XCTAssertTrue(CameraCompatibility.allowsFlip(profile: .appleLog, recording: false,
+            otherCameraSupported: true, continuousFlipSupported: false))
+        XCTAssertFalse(CameraCompatibility.allowsFlip(profile: .appleLog, recording: false,
+            otherCameraSupported: false, continuousFlipSupported: false))
+    }
+    func testStandardCameraFlipKeepsExistingFallbackAndContinuousPaths() {
+        for continuous in [false, true] {
+            XCTAssertTrue(CameraCompatibility.allowsFlip(profile: .standard, recording: true,
+                otherCameraSupported: true, continuousFlipSupported: continuous))
+            XCTAssertFalse(CameraCompatibility.allowsFlip(profile: .standard, recording: true,
+                otherCameraSupported: false, continuousFlipSupported: continuous))
+        }
+    }
+    func testPiPRequiresStandardEvenOnDualCameraHardware() {
+        XCTAssertFalse(CameraCompatibility.allowsPiP(profile: .appleLog, deviceSupported: true))
+        XCTAssertFalse(CameraCompatibility.allowsPiP(profile: .appleLog, deviceSupported: false))
+        XCTAssertFalse(CameraCompatibility.allowsPiP(profile: .standard, deviceSupported: false))
+        XCTAssertTrue(CameraCompatibility.allowsPiP(profile: .standard, deviceSupported: true))
+    }
+
     private func frame(red: Bool) throws -> CVPixelBuffer {
         var result: CVPixelBuffer?
         XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 32, 18, kCVPixelFormatType_32BGRA,
@@ -81,3 +104,4 @@ final class ContinuousCaptureTests: XCTestCase {
         XCTAssertEqual(take.writer.status, .cancelled)
     }
 }
+

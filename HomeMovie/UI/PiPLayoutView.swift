@@ -4,6 +4,7 @@ import CoreImage
 
 struct PiPControl: View {
     let enabled: Bool
+    var unavailableReason: String? = nil
     let disabled: Bool
     let onToggle: () -> Void
     let onLayout: () -> Void
@@ -11,14 +12,14 @@ struct PiPControl: View {
         MovieControlIcon(systemName: "rectangle.on.rectangle")
             .foregroundStyle(enabled ? .yellow : .white)
             .background(enabled ? Color.white.opacity(0.15) : .clear, in: Circle())
-            .opacity(disabled ? 0.4 : 1).contentShape(Rectangle())
+            .opacity(disabled || unavailableReason != nil ? 0.4 : 1).contentShape(Rectangle())
             .gesture(LongPressGesture(minimumDuration: 0.45).exclusively(before: TapGesture()).onEnded { value in
                 guard !disabled else { return }
                 switch value { case .first: onLayout(); case .second: onToggle() }
             })
             .accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton)
             .accessibilityLabel("Picture-in-Picture").accessibilityValue(enabled ? "On" : "Off")
-            .accessibilityHint(disabled ? "Prepare a compatible Dual Camera configuration before the next take." : "Tap to toggle. Hold for PiP Layout while idle.")
+            .accessibilityHint(unavailableReason ?? (disabled ? "Prepare a compatible Dual Camera configuration before the next take." : "Tap to toggle. Hold for PiP Layout while idle."))
             .accessibilityAction { if !disabled { onToggle() } }
             .accessibilityAction(named: "PiP Layout") { if !disabled { onLayout() } }
     }
@@ -45,7 +46,7 @@ struct PiPLayoutView: View {
                         if !ready {
                             VStack(spacing: 6) {
                                 Image(systemName: "rectangle.on.rectangle").font(.title2)
-                                Text("Enable Dual Camera for live framing").font(.caption).multilineTextAlignment(.center)
+                                Text(logMode ? "Switch to Standard to use PiP" : "Enable Dual Camera for live framing").font(.caption).multilineTextAlignment(.center)
                             }.foregroundStyle(.white.opacity(0.8)).padding()
                         }
                     }.aspectRatio(format.aspect, contentMode: .fit).frame(maxHeight: 180).listRowInsets(EdgeInsets())
@@ -73,10 +74,10 @@ struct PiPLayoutView: View {
                 } footer: { Text("During a take, hold the inset briefly and drag it to another corner. Change its size before the next take.") }
                 if !ready {
                     Section {
-                        Button(logMode ? "New Standard Movie for PiP" : "Use Dual Camera", action: onPrepare)
-                            .disabled(!canPrepare)
+                        if logMode { Text(CameraCompatibility.logPiPExplanation) }
+                        else { Button("Use Dual Camera", action: onPrepare).disabled(!canPrepare) }
                     } footer: {
-                        Text(canPrepare ? "1080p · 30 fps · SDR · H.264. Uses the rear 1× wide camera with digital zoom and one microphone. Ordinary recording and Apple Log keep their existing setup." : "This iPhone cannot use the required front/rear camera combination. Ordinary recording remains available.")
+                        Text(logMode ? "Choose a Standard movie before recording with PiP." : canPrepare ? "1080p · 30 fps · SDR · H.264. Uses the rear 1× wide camera with digital zoom and one microphone. Ordinary recording and Apple Log keep their existing setup." : "This iPhone cannot use the required front/rear camera combination. Ordinary recording remains available.")
                     }
                 }
             }
@@ -136,3 +137,4 @@ struct PiPCompositionPreview: UIViewRepresentable {
         catch { }
     }
 }
+

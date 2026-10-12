@@ -52,6 +52,24 @@ enum LogRecordingCodec {
         codec == .hevc ? "Apple Log · HEVC" : "Apple Log · ProRes"
     }
 }
+enum CameraCompatibility {
+    static let logPiPExplanation = "Switch to Standard to use PiP. Your Log movie stays unchanged."
+    static let logRecordingFlipExplanation = "Camera flip is unavailable while recording in Log. Stop recording to change cameras, or use Standard."
+    static let logCameraExplanation = "The other camera cannot record this Log format. Switch to Standard to use it."
+
+    static func allowsFlip(profile: CaptureProfile, recording: Bool, otherCameraSupported: Bool,
+                           continuousFlipSupported: Bool) -> Bool {
+        otherCameraSupported && (profile != .appleLog || !recording || continuousFlipSupported)
+    }
+    static func allowsPiP(profile: CaptureProfile, deviceSupported: Bool) -> Bool {
+        profile == .standard && deviceSupported
+    }
+    static func supportsLog(_ format: AVCaptureDevice.Format) -> Bool {
+        let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        return format.supportedColorSpaces.contains(.appleLog) && size.width >= 1920 && size.height >= 1080 &&
+            format.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 }
+    }
+}
 struct CameraOptions: Sendable {
     var lenses: [LensChoice]
     var zoom: CGFloat
@@ -199,6 +217,10 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     func prepare(front: Bool, profile: CaptureProfile = .standard, dualCamera: Bool = false,
                  pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) {
         queue.async {
+            guard !dualCamera || CameraCompatibility.allowsPiP(profile: profile, deviceSupported: self.piPCapable) else {
+                self.onEvent?(.pipSetupFailed(profile == .appleLog ? CameraCompatibility.logPiPExplanation : "This iPhone cannot use Dual Camera."))
+                return
+            }
             let previousFront = self.isFront
             let previousZoom = self.videoInput?.device.videoZoomFactor
             do {
@@ -244,7 +266,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         let types: [AVCaptureDevice.DeviceType] = front ? [.builtInTrueDepthCamera, .builtInWideAngleCamera] : [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
         let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video, position: front ? .front : .back)
         return types.compactMap { type in discovery.devices.first {
-            $0.deviceType == type && (configuredProfile == .standard || $0.formats.contains { $0.supportedColorSpaces.contains(.appleLog) && $0.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 } })
+            $0.deviceType == type && (configuredProfile == .standard || $0.formats.contains(where: CameraCompatibility.supportsLog))
         } }.first
     }
     private func configure(front: Bool, preparedForPiP: Bool = false, pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) throws {
@@ -323,9 +345,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
         if configuredProfile == .appleLog {
             let formats = camera.formats.filter {
-                let size = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
-                return $0.supportedColorSpaces.contains(.appleLog) && size.width >= 1920 && size.height >= 1080 &&
-                    $0.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 }
+                CameraCompatibility.supportsLog($0)
             }.sorted {
                 let a = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
                 let b = CMVideoFormatDescriptionGetDimensions($1.formatDescription)
@@ -469,12 +489,15 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             smoothMoving: smoothTimer != nil,
             recordingFormat: configuredProfile == .appleLog ? LogRecordingCodec.label(LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)) : "Standard · H.264",
             samplePreview: seamless != nil, canFlipWhileRecording: seamless?.readyToFlip == true,
-            canPreparePiP: piPCapable, piPAvailable: seamless?.supportsPiP == true && seamless?.preparedForPiP == true && configuredProfile == .standard,
+            canPreparePiP: CameraCompatibility.allowsPiP(profile: configuredProfile, deviceSupported: piPCapable), piPAvailable: seamless?.supportsPiP == true && seamless?.preparedForPiP == true && configuredProfile == .standard,
             isPiPEnabled: seamless?.pipEnabled == true, dualCameraPrepared: seamless?.preparedForPiP == true,
             piPCanvasFormat: seamless?.canvasFormat)
     }
     func setPiPEnabled(_ enabled: Bool) {
         queue.async {
+            guard CameraCompatibility.allowsPiP(profile: self.configuredProfile, deviceSupported: self.piPCapable) else {
+                self.onEvent?(.notice(self.configuredProfile == .appleLog ? CameraCompatibility.logPiPExplanation : "This iPhone cannot use Dual Camera.")); return
+            }
             guard self.session.isRunning, !self.session.isInterrupted, self.configuredProfile == .standard,
                   let dual = self.seamless, dual.preparedForPiP else { self.onEvent?(.notice("Prepare Dual Camera before recording to use PiP.")); return }
             dual.setPiPEnabled(enabled)
@@ -746,6 +769,13 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     }
     func flip() {
         queue.async {
+            guard CameraCompatibility.allowsFlip(profile: self.configuredProfile, recording: self.ticket != nil,
+                otherCameraSupported: self.device(front: !self.isFront) != nil,
+                continuousFlipSupported: self.seamless?.readyToFlip == true) else {
+                self.onEvent?(.notice(self.configuredProfile == .appleLog ?
+                    (self.ticket != nil ? CameraCompatibility.logRecordingFlipExplanation : CameraCompatibility.logCameraExplanation) : "No other camera is available."))
+                return
+            }
             if let dual = self.seamless {
                 guard self.ticket == nil || !self.stopRequested, dual.flip() else {
                     self.onEvent?(.notice("Both cameras are still preparing. Your recording continues."))
@@ -861,3 +891,4 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         }
     }
 }
+

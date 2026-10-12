@@ -275,6 +275,11 @@ struct CameraView: View {
             Menu {
                 if let options = camera.options {
                     Text(options.recordingFormat)
+                    if options.profile == .appleLog {
+                        Text(CameraCompatibility.logPiPExplanation)
+                        Text(camera.state == .recording ? CameraCompatibility.logRecordingFlipExplanation :
+                            options.canFlip ? "Camera flip is available before recording. It is unavailable during a Log take." : CameraCompatibility.logCameraExplanation)
+                    }
                     Divider()
                 }
                 Button("Dolly Settings", systemImage: "slider.horizontal.3") { showingDollySettings = true }
@@ -386,6 +391,7 @@ struct CameraView: View {
                     .disabled(countdown != nil || !smoothZoomOpen && camera.state != .ready && camera.state != .recording)
             }
             PiPControl(enabled: options.isPiPEnabled,
+                unavailableReason: options.profile == .appleLog ? CameraCompatibility.logPiPExplanation : nil,
                 disabled: countdown != nil || camera.state != .ready && camera.state != .recording || camera.state == .recording && !options.piPAvailable,
                 onToggle: {
                     if options.piPAvailable { camera.togglePiP() }
@@ -794,7 +800,11 @@ struct CameraView: View {
                 if camera.recordingFlip != nil { ProgressView().tint(.white) }
             }.background(.white.opacity(0.15), in: Circle())
         }.accessibilityLabel(camera.recordingFlip == nil ? "Switch camera" : "Switching camera")
-            .disabled(camera.recordingFlip != nil || camera.state != .ready && camera.state != .recording || camera.options?.canFlip != true || camera.options?.isPiPEnabled == true || camera.pipPresentation.opacity > 0)
+            .accessibilityHint(movie.captureProfile == .appleLog ?
+                (camera.state == .recording ? CameraCompatibility.logRecordingFlipExplanation : camera.options?.canFlip == true ? "Switch cameras before recording." : CameraCompatibility.logCameraExplanation) : "Switch between the front and rear cameras.")
+            .disabled(camera.recordingFlip != nil || camera.state != .ready && camera.state != .recording || camera.options?.canFlip != true ||
+                movie.captureProfile == .appleLog && camera.state == .recording && camera.options?.canFlipWhileRecording != true ||
+                camera.options?.isPiPEnabled == true || camera.pipPresentation.opacity > 0)
         let watch = VStack(spacing: 0) {
             Button { openWatch() } label: {
                 Label("Watch Movie", systemImage: "play.fill")
@@ -952,11 +962,13 @@ struct CameraView: View {
         NavigationStack {
             Form {
                 Section("Dual Camera") {
-                    Text(movie?.captureProfile == .appleLog ? "PiP uses SDR front-camera footage. Your Apple Log movie and its look stay unchanged." : "Prepare both cameras before a take so PiP can appear and disappear without restarting video or audio.")
+                    Text(movie?.captureProfile == .appleLog ? CameraCompatibility.logPiPExplanation : "Prepare both cameras before a take so PiP can appear and disappear without restarting video or audio.")
                     Text("1080p · 30 fps · SDR · H.264\nRear 1× wide camera with digital zoom. One continuous microphone.")
                         .font(.subheadline).foregroundStyle(.secondary)
-                    if camera.options?.canPreparePiP == true {
-                        Button(movie?.captureProfile == .appleLog ? "New Standard Movie for PiP" : "Use Dual Camera") { enableDualCamera() }
+                    if movie?.captureProfile == .appleLog {
+                        Text("Choose a Standard movie before recording with PiP.").foregroundStyle(.secondary)
+                    } else if camera.options?.canPreparePiP == true {
+                        Button("Use Dual Camera") { enableDualCamera() }
                     } else { Text("This iPhone cannot use the required front/rear camera combination.").foregroundStyle(.secondary) }
                 }
             }.navigationTitle("Picture-in-Picture").navigationBarTitleDisplayMode(.inline)
@@ -964,18 +976,13 @@ struct CameraView: View {
         }.presentationDetents([.medium]).presentationDragIndicator(.visible)
     }
     private func enableDualCamera() {
-        guard !camera.busy, !pipConfiguring, countdown == nil, let movie, camera.options?.canPreparePiP == true else { return }
+        guard !camera.busy, !pipConfiguring, countdown == nil, let movie, movie.captureProfile == .standard, camera.options?.canPreparePiP == true else { return }
         pipConfiguring = true; showingPiPLayout = false; showingPiPCompatibility = false
         enablePiPAfterPreparation = true
         Task {
             defer { pipConfiguring = false }
             do {
-                var destination = movie.id
-                if movie.captureProfile == .appleLog {
-                    let created = try await app.store.create(name: String(movie.name.prefix(70)) + " PiP", format: movie.format, profile: .standard, useDefaultLook: false)
-                    destination = created.id
-                    try await app.store.setPiPLayout(movieID: destination, layout: movie.preferredPiPLayout)
-                }
+                let destination = movie.id
                 try await app.store.setDualCameraCapture(movieID: destination, enabled: true)
                 await app.refresh(); movieID = destination
                 if scenePhase == .active { await prepareCamera() }
@@ -992,4 +999,5 @@ struct CameraView: View {
         }
     }
 }
+
 

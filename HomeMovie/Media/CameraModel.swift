@@ -177,8 +177,15 @@ struct RecordingFlipHandoff {
     func exposure(_ bias: Float) { if active, [.ready, .recording].contains(state) { service.exposure(bias) } }
     func toggleTorch() { if active, [.ready, .recording].contains(state) { service.toggleTorch() } }
     func flip() {
-        guard active, recordingFlip == nil, options?.canFlip == true, options?.isPiPEnabled != true, pipPresentation.opacity == 0 else { return }
-        if state == .recording, options?.canFlipWhileRecording == true { service.flip(); return }
+        guard active, recordingFlip == nil, let options, options.isPiPEnabled != true, pipPresentation.opacity == 0 else { return }
+        guard CameraCompatibility.allowsFlip(profile: options.profile, recording: state == .recording,
+            otherCameraSupported: options.canFlip, continuousFlipSupported: options.canFlipWhileRecording) else {
+            if options.profile == .appleLog {
+                message = state == .recording ? CameraCompatibility.logRecordingFlipExplanation : CameraCompatibility.logCameraExplanation
+            }
+            return
+        }
+        if state == .recording, options.canFlipWhileRecording == true { service.flip(); return }
         if state == .recording, let movieID = activeMovieID {
             let current = beganAt.map { CMTimeAdd(elapsedBeforeSegment, CMTime(seconds: max(0, ProcessInfo.processInfo.systemUptime - $0), preferredTimescale: 600)) } ?? elapsed
             elapsed = current
@@ -297,3 +304,4 @@ struct RecordingFlipHandoff {
         UIApplication.shared.endBackgroundTask(backgroundTask); backgroundTask = .invalid
     }
 }
+
