@@ -374,7 +374,7 @@ final class PipelineTests: XCTestCase {
         guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal preview is unavailable") }
         let preview = PreviewUIView(frame: CGRect(x: 0, y: 0, width: 393, height: 698))
         let session = AVCaptureSession(); preview.previewLayer.session = session
-        let frames = LiveFrames(); frames.push(try makePreviewFrame())
+        let frames = LiveFrames(); frames.push(try livePreviewFrame())
         preview.configureLiveLook(frames: frames, cube: try ColorCube.filmica.get(), active: true)
         let metal = try XCTUnwrap(preview.subviews.compactMap { $0 as? MTKView }.first)
         let delegate = metal.delegate
