@@ -34,6 +34,7 @@ The app must not be represented as device-tested until this gate passes.
 | Mixed geometry | Exercise portrait/landscape fixtures in a movie | Canvas fits with letterbox/pillarbox rather than cropping | NOT RUN |
 | Silent media | Run generated no-audio fixtures | Playback/export valid without assuming audio tracks | NOT RUN |
 | Audio offsets | Fixture with delayed audio-track start | Correct offset; no shifted dialogue or insertion exception | NOT RUN |
+| Scene audio joins | Record quiet room tone and speech across three takes; listen on speaker/headphones in Watch Movie and a fresh export | No boundary click or noticeable fade/dip; speech timing and duration unchanged; compare originals to identify any click already recorded by the mic | NOT RUN |
 | Trim | Drag edges; reset; reopen and export | Same range in playback/export; original file byte-for-byte unchanged | NOT RUN |
 | Deletion | Remove scene/movie; reopen; restore in Settings | Original retained; scene order/trim restored | NOT RUN |
 | Missing source | In a developer test container, remove one source | Missing scene reported; fail clearly; no silent skipped footage | NOT RUN |

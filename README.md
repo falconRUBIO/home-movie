@@ -4,7 +4,9 @@ A SwiftUI iPhone application for recording multiple ongoing movies, scene by sce
 
 ## Status — read this first
 
-Full-system audit source `07cf94c0` compiled and passed all **66 native simulator tests with zero failures** in [GitHub Actions run 38258797618](https://github.com/falconRUBIO/home-movie/actions/runs/38258797618). No application-source compiler warnings were reported. The suite covers Apple Log identifier recognition, Cinema LUT samples/backup, graded thumbnails, playback/export color consistency, Dolly duration math, countdown cancellation/restart, save/recovery, cold-library restore and Photos export receipt/retry/concurrency behavior.
+Current source `117e5486` compiled and passed all **69 native simulator tests with zero failures** in [GitHub Actions run 38266938800](https://github.com/falconRUBIO/home-movie/actions/runs/38266938800). No application-source compiler warnings were reported. The suite covers Apple Log identifier recognition, Cinema LUT samples/backup, graded thumbnails, playback/export color consistency, Dolly duration math, countdown cancellation/restart, save/recovery, cold-library restore, Photos export receipt/retry/concurrency and scene audio edge mixing/export.
+
+Movies stay in one column for one to three titles and switch to two columns at four or more. Movie/scene deletion uses centered native alerts. Assembled playback/export uses five-millisecond audio edges to soften hard-cut clicks, with full volume between edges and unchanged scene timing/originals. Inaudibility and the reported click still require phone listening; old cached exports are rebuilt.
 
 The October 12 audits fix late readiness callbacks hiding recording failures, premature/elapsed-time Dolly completion, mixed-profile orphan recovery, the live grade dropping during saving, playback changes during buffering, unopened-library restore metadata loss, unsupported catalog overwrite, restored Cinema naming and false/duplicate Photos export success. Genuine camera recording, measured hardware zoom timing, real Photos writes and live-LUT color accuracy still require an updated TestFlight build and phone acceptance.
 

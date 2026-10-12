@@ -1,5 +1,15 @@
 # Implementation audit — 2026-10-12
 
+## Scene audio and library refinements — October 12
+
+Source `117e54864be388c0b997010c27c579200b4d8eb7` compiled and passed **69 native tests with zero failures** in [run 38266938800](https://github.com/falconRUBIO/home-movie/actions/runs/38266938800), taking 224.286 test seconds with no application-source compiler warnings.
+
+Assembled scene audio previously used hard cuts. Playback and export now share a five-millisecond fade at each actual audio edge, capped at half the available audio duration for very short clips. Volume is explicitly restored to full level between edges. Scene timing, original files, speech outside those edges and silent gaps stay intact. Export cache names include an audio-processing version so earlier hard-cut exports are not reused. Single-scene source review remains an original-media comparison.
+
+Three new tests verify edge offsets/full volume, non-overlapping short-clip fades, and trimmed audio between silent scenes through export. Earlier runs exposed an incorrect ramp-query assumption and premature release of test fixture source assets; these were corrected before the successful run. Phone listening is still required to confirm the reported click is suppressed and the edge treatment is inaudible. A click already present inside the recording may persist; no broader processing or automatic trimming was added.
+
+The same compiled source includes the library switch from one column at one to three movies to two columns at four or more, plus centered native movie/scene delete alerts with explicit Cancel actions. Native visual/device acceptance and a signed TestFlight upload remain pending.
+
 ## Full-system re-audit — October 12
 
 Source `07cf94c0efa6fa15ae39c61dc957ecb19f8e81bc` compiled under Xcode 26.6 and passed **66 native simulator tests with zero failures** in [GitHub Actions run 38258797618](https://github.com/falconRUBIO/home-movie/actions/runs/38258797618). Test execution took 186.093 seconds. There were no application-source compiler warnings. Only runner destination/XCTest stripping and AppIntents extraction notices appeared; the Node.js 20 action warning was absent. Portable source/project, Swift grammar and deterministic project-generation checks passed.
