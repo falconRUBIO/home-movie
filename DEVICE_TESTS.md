@@ -4,7 +4,7 @@ Every row below is **NOT RUN**. Run the complete matrix on an older supported iP
 
 ## First acceptance gate
 
-1. Create movie A in Landscape and movie B in Portrait.
+1. Create movies A and B. Hold the phone sideways for A’s first take and upright for B’s first take.
 2. Record three audible scenes into A, then two into B, using different available cameras.
 3. Stop each take, wait until saving finishes, then immediately record again.
 4. Quit and reopen the app. Check movie names, assignment, sequence, duration and covers.
@@ -22,13 +22,13 @@ The app must not be represented as device-tested until this gate passes.
 | Lens range | Pinch past either end, switch lenses while recording | Values clamp; no overlapping capture; valid output and sound | NOT RUN |
 | Default lens | Enter rear camera | Starts at the device’s displayed 1× where available | NOT RUN |
 | Full frame | Record a framing chart with corners visible | Live preview fills the screen edge to edge in both orientations; controls stay inside safe areas. Fill preview may trim edges; saved footage and export retain the complete source frame | NOT RUN |
-| Orientation | Landscape left/right, Portrait, rotate during a take | Required starting orientation enforced; take orientation remains fixed | NOT RUN |
+| Orientation | Landscape left/right, Portrait, rotate during a take | First take chooses the format; later pages open in that saved format without a rotation prompt; take orientation remains fixed | NOT RUN |
 | Front camera | Record a page of text | Mirrored preview; unmirrored saved footage; complete frame | NOT RUN |
 | Rapid taps | Tap Record/Stop repeatedly during start and save | One take and one commit; destination remains fixed | NOT RUN |
 | Movie switching | Attempt to switch during a take/finalization | Controls disabled; take stays in original movie | NOT RUN |
 | Audio routing | Built-in mic, headphones, Bluetooth changes | Sound captured; interruption clear; deliberate resume | NOT RUN |
 | Phone call | Interrupt an active take | Previous scenes intact; completed take validated; no automatic recording resume | NOT RUN |
-| Lock/background | Lock or switch apps during a take | Finalization attempted; committed scenes survive; resume requires a tap | NOT RUN |
+| Lock/background | Lock or switch apps during a take | Finalization attempted; committed scenes survive; recording never restarts automatically | NOT RUN |
 | Forced termination | Kill while recording, finalizing, and just after saving | Prior scenes intact; recover valid journaled media; preserve incomplete files | NOT RUN |
 | Low storage | Near-full device before and during capture/export | Clear error; saved originals remain usable | NOT RUN |
 | Mixed geometry | Exercise portrait/landscape fixtures in a movie | Canvas fits with letterbox/pillarbox rather than cropping | NOT RUN |
@@ -98,3 +98,5 @@ Automatic-orientation acceptance (NOT RUN): create a movie without selecting a f
 Apple Log/looks acceptance (NOT RUN): Standard New Movie remains simple and has no Look controls. On a supported phone, choose Apple Log and record portrait and both landscapes with microphone audio. Inspect file transfer tags, 10-bit codec profile, lens availability/zoom and dimensions; verify front-camera switching is disabled when unsupported. View Apple Standard, import Cinema.cube through Files, switch among multiple Apple Log looks, compare Show Original and return to the selected look. Export while the original comparison is showing and confirm the selected look is burned into the copy. Compare exported frames/audio with playback and Resolve references, including dark shadows, bright highlights, skin, saturated colors, edges/rotation and trims. Show Original must preserve the selected look; Standard scenes must not get Log conversion. Relaunch and backup/restore to another install, confirming look identity, checksum verification, original footage integrity and selected-look rendering. Test malformed/oversized/1D cubes, unavailable iCloud providers, cancellation/backgrounding, larger text and VoiceOver. Measure long-playback/export memory, thermal and battery behavior on actual hardware.
 
 Established-format/live-look acceptance (NOT RUN): reopen portrait and landscape movies while holding the phone in either direction and verify their Camera and Watch pages request the saved format without a rotation prompt. Compare live framing with recorded playback/export, including both landscape directions, front-camera mirroring, tap focus and locked exposure. Switch live looks and Show Original during one uninterrupted take; confirm the original file stays genuine Log without any baked grade. Import Cinema.cube before recording, relaunch, and confirm setup, live preview, playback and export agree. Test Original bypass, unsupported high-bit-depth dual-output configurations, background/interruption, rapid look changes, Files import, sheet dismissal and return to an unlocked library. Measure sustained 10-minute recording/rendering memory, GPU, heat and dropped preview frames on actual supported phones; preview slowness must never queue frames or change the recorded file.
+
+Live-look handoff acceptance (NOT RUN): rapidly alternate Show Original and several imported looks during a single take. Original must remain visible until a selected look is explicitly enabled; a finishing GPU frame must not flash the previous look. Switch away during rendering, return, and repeat across foreground/background transitions. Timer, zoom and metering updates must not flicker an unchanged look. Confirm New Movie can expand with the keyboard and larger text, and both Cancel and swipe dismissal are blocked during a look import.

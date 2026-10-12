@@ -47,28 +47,29 @@
     "Physical-device automatic first-scene orientation, locked later scenes and independent preview rotation",
     "Physical-device genuine Apple Log bit depth/codec/lenses; long LUT rendering; Cinema match against guide/Resolve reference",
     "Physical-device live Metal LUT preview, high-bit-depth simultaneous capture, established UIKit geometry and metering alignment",
-    "Signed archive/upload and physical-device acceptance of current live-look revision"
+    "Signed archive/upload and physical-device acceptance of current preview-handoff audit revision"
   ],
   "date": "2026-10-12",
   "native_tests_supplied": 36,
-  "native_tests_run": 34,
-  "native_build_status": "Current preview handoff audit passes portable validation; 36-test native run pending. Previous source 468bb983 passed all 34 tests.",
+  "native_tests_run": 36,
+  "native_build_status": "Source revision 6750e206 compiled on Xcode 26.6 and passed all 36 simulator tests; no application-source warnings.",
   "previous_cloud_build": {
-    "commit": "d70fa524028219e806d7853c05ff4f8f9da60643",
+    "commit": "468bb983a8cf4408752d9a91a0fb04121141304d",
     "provider": "GitHub Actions",
-    "run_id": 38177797042,
+    "run_id": 38183715011,
     "status": "PASS",
-    "tests_run": 25,
-    "tests_passed": 25,
-    "tests_failed": 0
+    "tests_run": 34,
+    "tests_passed": 34,
+    "tests_failed": 0,
+    "test_execution_seconds": 176.806
   },
   "testflight_uploaded": true,
-  "native_tests_passed": 34,
+  "native_tests_passed": 36,
   "native_tests_failed": 0,
   "signed_archive_created": true,
-  "apple_package_validation_status": "PASS for 123e29e; upload succeeded",
-  "uploaded_commit": "123e29e7de0dedaf4ae8ecb42bd539018203825d",
-  "successful_upload_run": 38173470003,
+  "apple_package_validation_status": "PASS for 7ba9e7ca; signed upload succeeded",
+  "uploaded_commit": "7ba9e7cad6632792d9370d9c2d6e7824dd40a089",
+  "successful_upload_run": 38187684998,
   "latest_failed_native_run": {
     "run_id": 38183482779,
     "commit": "26512ba1363026d8d827f6a4a80844c6a7dd3023",
@@ -78,13 +79,24 @@
   },
   "current_revision_testflight_uploaded": false,
   "latest_cloud_build": {
-    "commit": "468bb983a8cf4408752d9a91a0fb04121141304d",
+    "commit": "6750e2065d3790e3d14da2bc999e33183a0110e9",
     "provider": "GitHub Actions",
-    "run_id": 38183715011,
+    "run_id": 38188431667,
     "status": "PASS",
-    "tests_run": 34,
-    "tests_passed": 34,
+    "tests_run": 36,
+    "tests_passed": 36,
     "tests_failed": 0,
-    "test_execution_seconds": 176.806
-  }
+    "test_execution_seconds": 80.61,
+    "application_source_warnings": 0
+  },
+  "audit_initial_cloud_build": {
+    "commit": "d750f6eed1533962394d0aeb6f0374baf12623d7",
+    "run_id": 38187868797,
+    "status": "PASS",
+    "tests_run": 36,
+    "tests_failed": 0,
+    "test_execution_seconds": 70.22
+  },
+  "uploaded_version": "0.2.0",
+  "uploaded_build_number": 1031
 }
