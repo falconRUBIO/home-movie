@@ -5,6 +5,118 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    func testLongDurationRetargetToNearbyLensDoesNotAmplifyMomentum() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 0.5, maximum: 32))
+        filter.setTarget(8, duration: 3); _ = filter.advance(seconds: 1.5, rate: 0.75)
+        let current = filter.value, velocity = filter.velocity
+        let target = current * exp2(0.1)
+        filter.setTarget(target, duration: 10)
+        XCTAssertEqual(filter.velocity, velocity)
+        for _ in 0..<600 {
+            let next = filter.advance(seconds: 1.0 / 60, rate: 0.75)
+            XCTAssertGreaterThanOrEqual(next, current - 0.000001)
+            XCTAssertLessThanOrEqual(next, target + 0.000001, "A long duration must not stretch incoming momentum into a large overshoot")
+        }
+        XCTAssertEqual(filter.value, target, accuracy: 0.000001); XCTAssertEqual(filter.velocity, 0, accuracy: 0.000001)
+    }
+    func testManualDollyReversalsKeepMomentumAndSettleAtEverySpeed() throws {
+        for speed in SmoothZoomSpeed.allCases {
+            var filter = try XCTUnwrap(SmoothZoomFilter(current: 2, minimum: 0.5, maximum: 32))
+            filter.setTarget(8)
+            for _ in 0..<60 { _ = filter.advance(seconds: 1.0 / 60, rate: speed.rate) }
+            let value = filter.value, velocity = filter.velocity
+            filter.setTarget(1)
+            XCTAssertEqual(filter.value, value); XCTAssertEqual(filter.velocity, velocity)
+            XCTAssertGreaterThan(filter.advance(seconds: 1.0 / 120, rate: speed.rate), value, "Reversal first decelerates the existing motion")
+            for _ in 0..<1800 {
+                let previous = filter.value
+                let next = filter.advance(seconds: 1.0 / 60, rate: speed.rate)
+                XCTAssertTrue(next.isFinite); XCTAssertGreaterThanOrEqual(next, 0.5); XCTAssertLessThanOrEqual(next, 32)
+                XCTAssertLessThanOrEqual(abs(log2(next / previous)), Double(speed.rate) / 60 + 0.00001)
+            }
+            XCTAssertEqual(filter.value, 1, accuracy: 0.00001); XCTAssertTrue(filter.isSettled)
+        }
+    }
+    func testTimedDollyRetargetAndManualTakeoverPreserveIncomingSpeed() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 0.5, maximum: 32))
+        filter.setTarget(8, duration: 3); _ = filter.advance(seconds: 1, rate: 0.75)
+        let position = filter.value, velocity = filter.velocity
+        filter.setTarget(16, duration: 5)
+        XCTAssertEqual(filter.value, position); XCTAssertEqual(filter.velocity, velocity)
+        let next = filter.advance(seconds: 1.0 / 120, rate: 0.75)
+        XCTAssertEqual(log2(next / position) * 120, velocity, accuracy: 0.05)
+        let reversingVelocity = filter.velocity, reversingPosition = filter.value
+        filter.setTarget(1, duration: 2)
+        XCTAssertEqual(filter.velocity, reversingVelocity)
+        XCTAssertGreaterThan(filter.advance(seconds: 1.0 / 120, rate: 0.75), reversingPosition)
+        _ = filter.advance(seconds: 2, rate: 0.75)
+        XCTAssertEqual(filter.value, 1, accuracy: 0.000001); XCTAssertEqual(filter.velocity, 0)
+        filter.setTarget(8, duration: 3); _ = filter.advance(seconds: 1, rate: 0.75)
+        let takeoverVelocity = filter.velocity, takeoverPosition = filter.value
+        filter.setTarget(16)
+        XCTAssertFalse(filter.isTimed); XCTAssertEqual(filter.velocity, takeoverVelocity); XCTAssertEqual(filter.value, takeoverPosition)
+        let step = filter.advance(seconds: 0.00001, rate: 0.35)
+        XCTAssertEqual(log2(step / takeoverPosition) / 0.00001, takeoverVelocity, accuracy: 0.001)
+    }
+    func testManualDollySpeedChangesDecelerateWithoutClampingVelocity() throws {
+        for speed in [SmoothZoomSpeed.slow, .normal] {
+            var filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 0.5, maximum: 32))
+            filter.setTarget(8)
+            for _ in 0..<30 { _ = filter.advance(seconds: 1.0 / 60, rate: SmoothZoomSpeed.fast.rate) }
+            let previous = filter.value, velocity = filter.velocity
+            _ = filter.advance(seconds: 0.00001, rate: speed.rate)
+            XCTAssertEqual(filter.velocity, velocity, accuracy: 0.001)
+            XCTAssertGreaterThan(filter.velocity, Double(speed.rate), "A slower setting eases down rather than snapping speed")
+            XCTAssertEqual(log2(filter.value / previous) / 0.00001, velocity, accuracy: 0.001)
+            for _ in 0..<1800 { _ = filter.advance(seconds: 1.0 / 60, rate: speed.rate) }
+            XCTAssertEqual(filter.value, 8, accuracy: 0.00001); XCTAssertTrue(filter.isSettled)
+        }
+    }
+    func testDollyRangeChangesKeepVelocityDurationAndSafeBounds() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 0.5, maximum: 16))
+        filter.setTarget(8, duration: 3); _ = filter.advance(seconds: 1, rate: 0.75)
+        let position = filter.value, velocity = filter.velocity
+        XCTAssertTrue(filter.reconfigure(current: position, minimum: 1, maximum: 12))
+        XCTAssertEqual(filter.velocity, velocity); XCTAssertEqual(try XCTUnwrap(filter.remainingDuration), 2, accuracy: 0.000001)
+        _ = filter.advance(seconds: 2, rate: 0.75)
+        XCTAssertEqual(filter.value, 8, accuracy: 0.000001)
+        filter.setTarget(12)
+        for _ in 0..<30 { _ = filter.advance(seconds: 1.0 / 60, rate: 0.75) }
+        let manualVelocity = filter.velocity
+        XCTAssertTrue(filter.reconfigure(current: filter.value, minimum: 1, maximum: 16))
+        XCTAssertEqual(filter.velocity, manualVelocity)
+        XCTAssertTrue(filter.reconfigure(current: 4, minimum: 1, maximum: 4))
+        XCTAssertEqual(filter.value, 4); XCTAssertEqual(filter.target, 4); XCTAssertEqual(filter.velocity, 0)
+        XCTAssertFalse(filter.reconfigure(current: .nan, minimum: 1, maximum: 4))
+    }
+    func testDollyClockPausesRatherThanJumpingAfterQueueStalls() throws {
+        var clock = SmoothZoomClock(), filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 0.5, maximum: 16))
+        clock.reset(at: 10); filter.setTarget(8, duration: 1)
+        var time = 10.0
+        for _ in 0..<30 { time += 1.0 / 60; _ = filter.advance(seconds: clock.step(at: time), rate: 0.75) }
+        let previous = filter.value; time += 1
+        let step = clock.step(at: time)
+        XCTAssertEqual(step, 1.0 / 30, accuracy: 0.000001)
+        _ = filter.advance(seconds: step, rate: 0.75)
+        XCTAssertLessThan(log2(filter.value / previous), 3 * 1.875 / 30 + 0.00001)
+        XCTAssertFalse(filter.isSettled); XCTAssertGreaterThan(try XCTUnwrap(filter.remainingDuration), 0.4)
+        XCTAssertEqual(clock.step(at: time), 0); XCTAssertEqual(clock.step(at: time - 1), 0); XCTAssertEqual(clock.step(at: .nan), 0)
+        clock.reset(); XCTAssertEqual(clock.step(at: 100), 0)
+    }
+    func testManualDollyMotionIsConsistentAtThirtySixtyAndOneTwentyHz() throws {
+        for speed in SmoothZoomSpeed.allCases {
+            for (start, end) in [(0.5, 8.0), (8.0, 0.5), (1.0, 16.0), (16.0, 1.0)] {
+                var results: [Double] = []
+                for cadence in [30, 60, 120] {
+                    var filter = try XCTUnwrap(SmoothZoomFilter(current: start, minimum: 0.5, maximum: 32))
+                    filter.setTarget(end)
+                    for _ in 0..<(cadence * 2) { _ = filter.advance(seconds: 1 / Double(cadence), rate: speed.rate) }
+                    results.append(filter.value)
+                }
+                XCTAssertEqual(results[0], results[1], accuracy: 0.000001); XCTAssertEqual(results[1], results[2], accuracy: 0.000001)
+            }
+        }
+    }
     private func livePreviewFrame(format: OSType = kCVPixelFormatType_32BGRA) throws -> CVPixelBuffer {
         var pixel: CVPixelBuffer?
         let attributes: [String: Any] = [kCVPixelBufferMetalCompatibilityKey as String: true,
@@ -372,12 +484,14 @@ final class PipelineTests: XCTestCase {
         var fast = slow; slow.setTarget(16); fast.setTarget(16)
         for _ in 0..<20 { _ = slow.advance(seconds: 0.05, rate: SmoothZoomSpeed.slow.rate); _ = fast.advance(seconds: 0.05, rate: SmoothZoomSpeed.fast.rate) }
         XCTAssertGreaterThan(fast.value, slow.value)
-        fast.setTarget(1)
+        let incomingVelocity = fast.velocity
+        fast.setTarget(1); XCTAssertEqual(fast.velocity, incomingVelocity)
         var previous = fast.value
-        for _ in 0..<200 {
+        for index in 0..<200 {
             let value = fast.advance(seconds: 0.05, rate: SmoothZoomSpeed.fast.rate)
-            XCTAssertLessThanOrEqual(value, previous); XCTAssertGreaterThanOrEqual(value, 1)
-            XCTAssertLessThanOrEqual(log2(previous / value), Double(SmoothZoomSpeed.fast.rate) * 0.05 + 0.0002)
+            if index >= 3 { XCTAssertLessThanOrEqual(value, previous) }
+            XCTAssertGreaterThanOrEqual(value, 1)
+            XCTAssertLessThanOrEqual(abs(log2(previous / value)), Double(SmoothZoomSpeed.fast.rate) * 0.05 + 0.0002)
             previous = value
         }
         XCTAssertEqual(fast.value, 1, accuracy: 0.001)

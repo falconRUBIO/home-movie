@@ -16,6 +16,7 @@ struct CameraView: View {
     @State private var liveCube: ColorCube?
     @State private var liveOriginal = false
     @State private var liveLookStatus = LiveLookStatus.inactive
+    @State private var manualZoomTargetShown = false
     @State private var looks: [LUTReference] = []
     @State private var addingLook = false
     @State private var changingLook = false
@@ -139,13 +140,17 @@ struct CameraView: View {
                 cancelCountdown()
             }
             zoomDragging = false
+            if state != .ready && state != .recording { manualZoomTargetShown = false }
             if smoothZoomOpen, state == .ready { camera.beginSmoothZoom() }
         }
         .onChange(of: camera.options?.isFront) { _, _ in
             cancelCountdown(); preparedDollyStart = nil; preparedDollyTarget = nil
         }
         .onChange(of: camera.options?.zoom) { _, _ in
-            if !zoomDragging { syncSmoothPosition() }
+            if !zoomDragging && !manualZoomTargetShown { syncSmoothPosition() }
+        }
+        .onChange(of: camera.options?.smoothMoving) { _, moving in
+            if moving == false, !zoomDragging { manualZoomTargetShown = false; syncSmoothPosition() }
         }
         .onDisappear { cancelCountdown(); zoomDragging = false; camera.suspend() }
         .onChange(of: scenePhase) { _, phase in
@@ -269,6 +274,7 @@ struct CameraView: View {
             ForEach(options.lenses) { lens in
                 let selected = abs(lens.factor - options.zoom) < 0.06
                 Button {
+                    manualZoomTargetShown = false
                     if smoothZoomOpen, handsFreeStart, camera.state == .ready {
                         if preparedDollyStart == nil || preparedDollyTarget != nil {
                             preparedDollyStart = lens.factor; preparedDollyTarget = nil
@@ -288,6 +294,7 @@ struct CameraView: View {
             }
             if options.maximum > options.minimum || smoothZoomOpen {
                 Button {
+                    manualZoomTargetShown = false
                     preparedDollyStart = nil; preparedDollyTarget = nil
                     if smoothZoomOpen { camera.endSmoothZoom(); smoothZoomOpen = false }
                     else { syncSmoothPosition(); smoothZoomOpen = true; camera.beginSmoothZoom() }
@@ -319,6 +326,7 @@ struct CameraView: View {
                     }
                     Circle().fill(.white).frame(width: 14, height: 14)
                         .offset(x: 1 + CGFloat(smoothPosition) * width)
+                        .animation(zoomDragging ? nil : .linear(duration: 0.05), value: smoothPosition)
                 }.frame(height: 34).contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 0).onChanged { value in
                         zoomDragging = true
@@ -355,6 +363,7 @@ struct CameraView: View {
         guard smoothZoomOpen, countdown == nil, position.isFinite else { return }
         preparedDollyStart = nil; preparedDollyTarget = nil
         smoothPosition = min(1, max(0, position))
+        manualZoomTargetShown = true
         camera.smoothZoom(to: CGFloat(SmoothZoomFilter.factor(smoothPosition, minimum: Double(options.minimum), maximum: Double(options.maximum))))
     }
     private func syncSmoothPosition() {
@@ -418,7 +427,13 @@ struct CameraView: View {
                     guard countdown == nil, camera.state == .ready || camera.state == .recording, let options = camera.options else { return }
                     if pinchBase == nil { pinchBase = options.zoom }
                     if Date().timeIntervalSince(lastZoomAt) > 0.05 {
-                        camera.zoom((pinchBase ?? options.zoom) * value); lastZoomAt = Date()
+                        let target = (pinchBase ?? options.zoom) * value
+                        if smoothZoomOpen {
+                            manualZoomTargetShown = false
+                            preparedDollyStart = nil; preparedDollyTarget = nil
+                            camera.smoothZoom(to: target)
+                        } else { camera.zoom(target) }
+                        lastZoomAt = Date()
                     }
                 }.onEnded { _ in pinchBase = nil })
             if let countdown {
