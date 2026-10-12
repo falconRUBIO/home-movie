@@ -20,6 +20,10 @@ struct LibraryView: View {
         Array(repeating: GridItem(.flexible(minimum: 0), spacing: 16, alignment: .top),
               count: app.activeMovies.count >= 4 ? 2 : 1)
     }
+    private func openMovie(_ movie: Movie) {
+        lastMovieID = movie.id.uuidString
+        path.append(movie.id)
+    }
     var body: some View {
         NavigationStack(path: $path) {
             Group {
@@ -46,13 +50,14 @@ struct LibraryView: View {
                             ForEach(app.activeMovies) { movie in
                                 VStack(alignment: .leading, spacing: 9) {
                                     ZStack(alignment: .bottomLeading) {
-                                        Button { lastMovieID = movie.id.uuidString; path.append(movie.id) } label: {
+                                        Button { openMovie(movie) } label: {
                                             SceneThumbnail(scene: movie.activeScenes.first, root: app.store.root, movie: movie)
                                                 .frame(height: 210).clipShape(RoundedRectangle(cornerRadius: 22))
                                                 .overlay(alignment: .bottomTrailing) {
                                                     Text(durationLabel(movie.duration)).font(.caption.monospacedDigit())
                                                         .padding(.horizontal, 9).padding(.vertical, 5).homeGlass(interactive: false).padding(12)
                                                 }
+                                                .contentShape(RoundedRectangle(cornerRadius: 22))
                                         }.buttonStyle(.plain).accessibilityLabel("Record into \(movie.name), \(durationLabel(movie.duration))")
                                             .accessibilityHint("Opens the camera to add scenes")
                                         if !movie.activeScenes.isEmpty {
@@ -67,11 +72,16 @@ struct LibraryView: View {
                                         }
                                     }
                                     HStack(alignment: .top) {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(movie.name).font(.headline)
-                                            Text(movie.activeScenes.count == 1 ? "1 scene" : "\(movie.activeScenes.count) scenes").font(.caption).foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
+                                        Button { openMovie(movie) } label: {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(movie.name).font(.headline)
+                                                Text(movie.activeScenes.count == 1 ? "1 scene" : "\(movie.activeScenes.count) scenes").font(.caption).foregroundStyle(.secondary)
+                                            }
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .contentShape(Rectangle())
+                                        }.buttonStyle(.plain)
+                                            .accessibilityLabel("Record into \(movie.name)")
+                                            .accessibilityHint("Opens the camera to add scenes")
                                         MovieOverflowMenu(movieName: movie.name,
                                             canExport: !movie.activeScenes.isEmpty,
                                             onExport: { exportMovie = movie },
