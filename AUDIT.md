@@ -303,3 +303,5 @@ https://developer.apple.com/documentation/avfoundation/avcapturedevice/primaryco
 - Set ten-bit live preview buffers after selecting the capture format. Validate recording codecs after the session starts and again at the take boundary; camera switching uses the same checks.
 - Setup explains ProRes storage, camera settings show actual recording format, Log take preflight reserves 1 GB and ProRes output retains 500 MB free-space headroom.
 - Smooth Zoom source 0376b859 passed 42 native tests with no app-source warnings. New codec selection regression makes 43 tests; native correction build pending. Hardware recording/bit depth/metadata remain unverified.
+
+Readiness follow-up: camera option updates now require a configured, running, uninterrupted session and a valid active Log color space/codec. Late zoom/rotation/metering callbacks cannot re-enable Record after failed preparation.

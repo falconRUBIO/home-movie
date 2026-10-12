@@ -319,7 +319,17 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         }
     }
     private func options() throws -> CameraOptions {
+        // Late metering/rotation/zoom callbacks must not revive failed preparation.
+        guard configured, session.isRunning, !session.isInterrupted else {
+            throw HomeMovieError.message("The camera is not ready.")
+        }
         guard let camera = videoInput?.device else { throw HomeMovieError.message("Camera not configured.") }
+        if configuredProfile == .appleLog {
+            guard camera.activeColorSpace == .appleLog,
+                  LogRecordingCodec.preferred(in: output.availableVideoCodecTypes) != nil else {
+                throw HomeMovieError.message("The Log recording format is not ready.")
+            }
+        }
         let multiplier = camera.displayVideoZoomFactorMultiplier
         let switches = camera.virtualDeviceSwitchOverVideoZoomFactors.map { CGFloat(truncating: $0) }
         var secondary = camera.activeFormat.secondaryNativeResolutionZoomFactors
