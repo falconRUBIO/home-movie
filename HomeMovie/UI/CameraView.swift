@@ -23,9 +23,7 @@ struct CameraView: View {
     @State private var smoothZoomOpen = false
     @State private var smoothPosition = 0.0
     @State private var zoomDragging = false
-    @State private var countdown: Int?
-    @State private var countdownTask: Task<Void, Never>?
-    @State private var startRequestID = UUID()
+    @StateObject private var recordingCountdown = RecordingCountdown()
     @State private var preparedDollyStart: CGFloat?
     @State private var preparedDollyTarget: CGFloat?
     @State private var queuedDolly: (target: CGFloat, seconds: Int)?
@@ -40,6 +38,7 @@ struct CameraView: View {
         self.app = app; _movieID = State(initialValue: movieID)
         _camera = StateObject(wrappedValue: CameraModel(app: app))
     }
+    private var countdown: Int? { recordingCountdown.remaining }
     private var movie: Movie? { app.movie(movieID) }
     private var establishedFormat: MovieFormat? { movie?.recordingFormat ?? (camera.busy ? camera.takeFormat : nil) }
     var body: some View {
@@ -234,7 +233,7 @@ struct CameraView: View {
     private func captureIndicators(movie: Movie) -> some View {
         VStack(spacing: 6) {
             if movie.captureProfile == .appleLog {
-                let graded = !liveOriginal && liveCube != nil && [.ready, .starting, .recording].contains(camera.state)
+                let graded = !liveOriginal && liveCube != nil && camera.state.showsLiveLook
                 LogLookBadge(lookName: graded ? movie.lookName : "Original")
             }
             if camera.options?.focusLocked == true {
@@ -401,7 +400,7 @@ struct CameraView: View {
             CameraPreview(session: camera.service.session, angle: camera.options?.angle ?? 90, front: camera.options?.isFront ?? false,
                 options: camera.options, liveFrames: camera.service.liveFrames,
                 liveCube: liveOriginal ? nil : liveCube,
-                liveActive: movie?.captureProfile == .appleLog && [.ready, .starting, .recording].contains(camera.state),
+                liveActive: movie?.captureProfile == .appleLog && camera.state.showsLiveLook,
                 fixedFormat: establishedFormat,
                 onFocus: { camera.focus(at: $0, locked: $1) }, onExposure: { camera.exposure($0) })
                 .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
@@ -547,30 +546,15 @@ struct CameraView: View {
             camera.zoom(start)
             queuedDolly = (target, DollyZoomDuration.validated(dollySeconds))
         } else { camera.endSmoothZoom(); queuedDolly = nil }
-        let request = UUID(); startRequestID = request
-        countdown = 3
-        countdownTask = Task { @MainActor in
-            var requestedRecording = false
-            defer {
-                if startRequestID == request {
-                    countdown = nil; countdownTask = nil
-                    if !requestedRecording { queuedDolly = nil }
-                }
-            }
-            for number in stride(from: 3, through: 1, by: -1) {
-                guard !Task.isCancelled, startRequestID == request, camera.state == .ready, scenePhase == .active else { return }
-                countdown = number
-                do { try await Task.sleep(for: .seconds(1)) } catch { return }
-            }
-            guard !Task.isCancelled, startRequestID == request, camera.state == .ready, scenePhase == .active else { return }
-            countdown = nil; countdownTask = nil
+        recordingCountdown.start(canStart: {
+            camera.state == .ready && scenePhase == .active
+        }, onStart: {
             camera.record(movieID: movieID)
-            requestedRecording = camera.state == .starting
-        }
+            if camera.state != .starting { queuedDolly = nil }
+        })
     }
     private func cancelCountdown() {
-        startRequestID = UUID(); countdownTask?.cancel(); countdownTask = nil
-        countdown = nil; queuedDolly = nil
+        recordingCountdown.cancel(); queuedDolly = nil
     }
     private func openWatch(sceneID: UUID? = nil) {
         guard !camera.busy else { return }

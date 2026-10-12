@@ -131,10 +131,15 @@ actor ProjectStore {
             let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent)
             if let id, fm.fileExists(atPath: root.appendingPathComponent("Journal/\(id.uuidString).json").path) { continue }
             do {
-                _ = try await MediaInspector.inspect(file)
-                var recovered = catalog.movies.first(where: { $0.name == "Recovered Recordings" && $0.deletedAt == nil })
-                if recovered == nil { recovered = try create(name: "Recovered Recordings", format: .landscape) }
-                let ticket = CaptureTicket(sceneID: id ?? UUID(), movieID: recovered!.id, sequence: recovered!.nextSequence)
+                let info = try await MediaInspector.inspect(file)
+                let profile = info.profile ?? .standard
+                let name = profile == .appleLog ? "Recovered Log Recordings" : "Recovered Recordings"
+                var recovered = catalog.movies.first(where: {
+                    $0.name == name && $0.deletedAt == nil && $0.captureProfile == profile
+                })
+                if recovered == nil { recovered = try create(name: name, format: .landscape, profile: profile) }
+                let ticket = CaptureTicket(sceneID: id ?? UUID(), movieID: recovered!.id,
+                    sequence: recovered!.nextSequence, profile: profile)
                 let destination = try url(ticket.staging)
                 let durable = try url(ticket.source)
                 if file != destination && file != durable { try fm.copyItem(at: file, to: destination) }

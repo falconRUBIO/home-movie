@@ -2,7 +2,40 @@ import SwiftUI
 import AVFoundation
 import UIKit
 
-enum CameraState: Equatable { case preparing, ready, starting, recording, finalizing, denied, interrupted, failed }
+enum CameraState: Equatable {
+    case preparing, ready, starting, recording, finalizing, denied, interrupted, failed
+    var showsLiveLook: Bool { [.ready, .starting, .recording, .finalizing].contains(self) }
+}
+
+@MainActor final class RecordingCountdown: ObservableObject {
+    @Published private(set) var remaining: Int?
+    private var task: Task<Void, Never>?
+    private var requestID = UUID()
+    private let tick: Duration
+    init(tick: Duration = .seconds(1)) { self.tick = tick }
+
+    func start(canStart: @escaping @MainActor () -> Bool, onStart: @escaping @MainActor () -> Void) {
+        guard remaining == nil, canStart() else { return }
+        let request = UUID(); requestID = request; remaining = 3
+        task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.requestID == request { self.remaining = nil; self.task = nil }
+            }
+            for number in stride(from: 3, through: 1, by: -1) {
+                guard !Task.isCancelled, self.requestID == request, canStart() else { return }
+                self.remaining = number
+                do { try await Task.sleep(for: self.tick) } catch { return }
+            }
+            guard !Task.isCancelled, self.requestID == request, canStart() else { return }
+            self.remaining = nil; self.task = nil
+            onStart()
+        }
+    }
+    func cancel() {
+        requestID = UUID(); task?.cancel(); task = nil; remaining = nil
+    }
+}
 
 @MainActor final class CameraModel: ObservableObject {
     let service = CaptureService()
@@ -102,11 +135,11 @@ enum CameraState: Equatable { case preparing, ready, starting, recording, finali
     func exposure(_ bias: Float) { if active, [.ready, .recording].contains(state) { service.exposure(bias) } }
     func toggleTorch() { if active, [.ready, .recording].contains(state) { service.toggleTorch() } }
     func flip() { guard active, state == .ready else { return }; state = .preparing; service.flip() }
-    private func receive(_ event: CaptureEvent) async {
+    func receive(_ event: CaptureEvent) async {
         switch event {
         case .ready(let options):
             self.options = options; rememberedFront = options.isFront
-            if !busy && active && interruption == nil { state = .ready }
+            if (state == .preparing || state == .ready), active, interruption == nil { state = .ready }
         case .started(let sceneID):
             guard activeSceneID == sceneID else { return }
             if state == .recording { return }

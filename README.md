@@ -4,9 +4,13 @@ A SwiftUI iPhone application for recording multiple ongoing movies, scene by sce
 
 ## Status — read this first
 
-Source `785eae90` compiled and passed all 43 native simulator tests in GitHub Actions run `38193140949`, with no application-source warnings. This includes Smooth Zoom filtering and Apple Log format/codec negotiation. Version 0.2.0 build 1041 successfully uploaded to TestFlight, but its physical-device screenshot confirmed a missing-HEVC readiness failure. The correction probes native Log formats/codecs, prefers HEVC and uses ProRes LT/422 when needed, reserves storage, shows recording format in settings and prevents late callbacks from reviving failed preparation. Start a new TestFlight upload from main to deliver these changes. The camera-layout follow-up now preserves a 9:16 portrait / 16:9 landscape preview, overlays lens/zoom/record controls, and places total runtime below Watch Movie. Camera layout source 72921223 passed all 43 native tests in run 38198100101. The library-cover Play follow-up opens full-screen playback of every scene from the beginning; its native build is pending. Actual camera recording, framing, lens lock, Log bit depth/metadata and live preview still require phone verification. See `AUDIT.md`, `VALIDATION.json` and `DEVICE_TESTS.md`.
+Source `d086c06d` compiled and passed all 51 native simulator tests with zero failures in [GitHub Actions run 38210671928](https://github.com/falconRUBIO/home-movie/actions/runs/38210671928). This covers Apple Log identifier recognition, Cinema LUT samples/backup, graded thumbnails, playback/export color consistency, Dolly duration math and existing save/recovery behavior. Genuine camera recording and live-LUT color accuracy still require an updated TestFlight build and phone acceptance.
 
-The supplied LUT is named Cinema. Tapping + starts New Movie in Standard on every phone; Apple Log with Cinema is available by explicit selection. Existing movies keep their recording profile and look. Native CI and physical-device acceptance for this revision are pending.
+The October 12 audit corrects late readiness callbacks hiding recording failures, early/elapsed-time Dolly completion, mixed-profile orphan recovery, the live grade dropping during saving and playback changes during buffering. It adds direct Hands-Free countdown cancellation/restart coverage. Native testing of these audit changes is pending.
+
+Tapping + opens New Movie in Standard on every phone. Apple Log is opt-in on supported cameras; the supplied LUT is called Cinema and is already bundled. The camera and Watch Movie show LOG · Cinema or LOG · Original to match the viewing mode. Dolly has one shared control bar and a right-side 1/2/3/5/8/10-second selector (3 by default). Hands-Free Start is an optional three-second countdown, with cancellation and a prepared Dolly move starting only after recording begins. Saving/Saved/Undo remain beside the recent-take thumbnail. The library action menu attaches to its ellipsis; Watch Movie autoplays from the recording page.
+
+See `AUDIT.md`, `VALIDATION.json`, and `DEVICE_TESTS.md` for evidence and limitations.
 
 ## Automatic GitHub build tests
 

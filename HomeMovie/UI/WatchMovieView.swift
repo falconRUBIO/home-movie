@@ -106,7 +106,7 @@ struct WatchMovieView: View {
                 .task(id: "\(movie.revision)-\(showOriginalLog)") {
                     let requestID = UUID(); playbackRequestID = requestID
                     let position = player?.currentTime() ?? .zero
-                    let wasPlaying = player?.rate != 0 && player != nil
+                    let wasPlaying = player.map { $0.timeControlStatus != .paused } ?? false
                     player?.pause(); loading = true; problem = nil
                     defer { if playbackRequestID == requestID { loading = false } }
                     do {

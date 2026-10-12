@@ -19,6 +19,11 @@ struct SmoothZoomFilter: Sendable {
     private var timedDuration = 0.0
     private var timedElapsed = 0.0
     var isTimed: Bool { timedStart != nil }
+    var remainingDuration: Double? { isTimed ? max(0, timedDuration - timedElapsed) : nil }
+    var isSettled: Bool {
+        if isTimed { return timedElapsed >= timedDuration - 0.000001 }
+        return abs(log2(value / target)) < 0.0002
+    }
     let minimum: Double
     let maximum: Double
     init?(current: Double, minimum: Double, maximum: Double) {
@@ -39,7 +44,7 @@ struct SmoothZoomFilter: Sendable {
         guard seconds.isFinite, seconds > 0, rate.isFinite, rate > 0 else { return value }
         let dt = min(seconds, 0.1)
         if let start = timedStart {
-            timedElapsed = min(timedDuration, timedElapsed + dt)
+            timedElapsed = min(timedDuration, timedElapsed + seconds)
             let t = timedElapsed / timedDuration
             // Quintic easing has zero speed and acceleration at both endpoints.
             let progress = min(1, max(0, t * t * t * (t * (t * 6 - 15) + 10)))

@@ -5,6 +5,92 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    @MainActor func testLateCameraReadyUpdatesDoNotHideFailureOrInterruption() async throws {
+        let app = AppModel(store: try await makeStore())
+        // Keep the model's weak application owner alive for the complete test.
+        let ownedCamera = CameraModel(app: app)
+        let options = CameraOptions(lenses: [], zoom: 1, minimum: 1, maximum: 8, multiplier: 1,
+            isFront: false, angle: 90, profile: .standard, canMeter: false, canLock: false,
+            focusLocked: false, exposureBias: 0, minimumExposureBias: 0, maximumExposureBias: 0,
+            canFlip: false, hasTorch: false, torchOn: false, canStayOnLens: false,
+            smoothMoving: false, recordingFormat: "Standard · H.264")
+        for state in [CameraState.failed, .interrupted, .denied, .starting, .recording, .finalizing] {
+            ownedCamera.state = state; ownedCamera.message = "Preserved recording error"
+            await ownedCamera.receive(.ready(options))
+            XCTAssertEqual(ownedCamera.state, state)
+            XCTAssertEqual(ownedCamera.message, "Preserved recording error")
+        }
+        ownedCamera.state = .preparing
+        await ownedCamera.receive(.ready(options))
+        XCTAssertEqual(ownedCamera.state, .ready, "An explicit retry can become ready")
+    }
+    func testLiveLogLookRemainsEnabledWhileSaving() {
+        for state in [CameraState.ready, .starting, .recording, .finalizing] { XCTAssertTrue(state.showsLiveLook) }
+        for state in [CameraState.preparing, .failed, .denied, .interrupted] { XCTAssertFalse(state.showsLiveLook) }
+    }
+    @MainActor func testHandsFreeCountdownCancellationRestartAndDuplicateStart() async {
+        let countdown = RecordingCountdown(tick: .milliseconds(1))
+        var cancelledStarts = 0, completedStarts = 0
+        countdown.start(canStart: { true }, onStart: { cancelledStarts += 1 })
+        XCTAssertEqual(countdown.remaining, 3)
+        countdown.cancel(); XCTAssertNil(countdown.remaining)
+        let started = expectation(description: "Only the new countdown starts recording")
+        countdown.start(canStart: { true }, onStart: { completedStarts += 1; started.fulfill() })
+        countdown.start(canStart: { true }, onStart: { XCTFail("A second Record tap must not create another start") })
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertEqual(cancelledStarts, 0)
+        XCTAssertEqual(completedStarts, 1)
+        XCTAssertNil(countdown.remaining)
+    }
+    @MainActor func testHandsFreeCountdownRechecksCameraAvailability() async {
+        let countdown = RecordingCountdown(tick: .milliseconds(1))
+        var available = true
+        let unexpected = expectation(description: "Unavailable camera must not start")
+        unexpected.isInverted = true
+        countdown.start(canStart: { available }, onStart: { unexpected.fulfill() })
+        available = false
+        await fulfillment(of: [unexpected], timeout: 0.2)
+        XCTAssertNil(countdown.remaining)
+        countdown.start(canStart: { false }, onStart: { XCTFail("Do not schedule an unavailable camera") })
+        XCTAssertNil(countdown.remaining)
+    }
+    func testTimedDollyWaitsForFullDurationEvenNearTarget() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 1, maximum: 16))
+        filter.setTarget(8, duration: 10)
+        _ = filter.advance(seconds: 9.99, rate: 0.75)
+        XCTAssertLessThan(abs(log2(filter.value / filter.target)), 0.0002)
+        XCTAssertFalse(filter.isSettled, "A small zoom error must not cut short the requested duration")
+        XCTAssertEqual(try XCTUnwrap(filter.remainingDuration), 0.01, accuracy: 0.000001)
+        _ = filter.advance(seconds: 0.01, rate: 0.75)
+        XCTAssertTrue(filter.isSettled); XCTAssertEqual(filter.value, 8, accuracy: 0.00001)
+    }
+    func testTimedDollyUsesElapsedTimeAndPreservesRemainingTimeOnRangeChange() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 1, maximum: 16))
+        filter.setTarget(8, duration: 3)
+        _ = filter.advance(seconds: 1.5, rate: 0.75)
+        XCTAssertEqual(filter.value, sqrt(8), accuracy: 0.0001)
+        var changed = try XCTUnwrap(SmoothZoomFilter(current: filter.value, minimum: 1, maximum: 8))
+        changed.setTarget(filter.target, duration: filter.remainingDuration)
+        _ = changed.advance(seconds: 1.5, rate: 0.75)
+        XCTAssertTrue(changed.isSettled); XCTAssertEqual(changed.value, 8, accuracy: 0.0001)
+    }
+    func testOrphanRecoveryKeepsStandardOutOfAnExistingLogRecoveryMovie() async throws {
+        let store = try await makeStore()
+        let logMovie = try await store.create(name: "Recovered Recordings", format: .portrait, profile: .appleLog)
+        let orphan = store.root.appendingPathComponent("Staging/\(UUID().uuidString).mov")
+        try await footage(orphan)
+        let bytes = try Data(contentsOf: orphan)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let movies = await reopened.snapshot()
+        let existing = try XCTUnwrap(movies.first { $0.id == logMovie.id })
+        XCTAssertTrue(existing.scenes.isEmpty); XCTAssertEqual(existing.captureProfile, .appleLog)
+        let recovered = try XCTUnwrap(movies.first { $0.id != logMovie.id && $0.name == "Recovered Recordings" })
+        XCTAssertEqual(recovered.captureProfile, .standard)
+        let scene = try XCTUnwrap(recovered.activeScenes.first)
+        XCTAssertEqual(scene.profile, .standard)
+        XCTAssertEqual(try Data(contentsOf: store.root.appendingPathComponent(scene.source)), bytes)
+    }
+
     func testLogCodecPrefersHEVCAndSupportsNativeProResWithoutSDRFallback() {
         XCTAssertEqual(LogRecordingCodec.preferred(in: [LogRecordingCodec.proRes422, .hevc, LogRecordingCodec.proResLT]), .hevc)
         XCTAssertEqual(LogRecordingCodec.preferred(in: [LogRecordingCodec.proRes422, LogRecordingCodec.proResLT]), LogRecordingCodec.proResLT)

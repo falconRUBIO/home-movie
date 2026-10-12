@@ -441,9 +441,10 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             self.smoothSpeed = speed; self.stayOnLens = stayOnLens
             if changedLock, self.smoothOpen {
                 let target = self.smoothFilter?.target
+                let duration = self.smoothFilter?.remainingDuration
                 self.stopSmoothZoomOnQueue()
                 self.beginSmoothZoomOnQueue()
-                if let target { self.setSmoothTargetOnQueue(CGFloat(target)) }
+                if let target { self.setSmoothTargetOnQueue(CGFloat(target), duration: duration) }
             }
         }
     }
@@ -512,11 +513,12 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
               var filter = smoothFilter else { stopSmoothZoomOnQueue(); return }
         if filter.minimum != Double(camera.minAvailableVideoZoomFactor) || filter.maximum != Double(camera.maxAvailableVideoZoomFactor) {
             guard var updated = SmoothZoomFilter(current: Double(camera.videoZoomFactor), minimum: Double(camera.minAvailableVideoZoomFactor), maximum: Double(camera.maxAvailableVideoZoomFactor)) else { stopSmoothZoomOnQueue(); return }
-            updated.setTarget(filter.target); filter = updated
+            updated.setTarget(filter.target, duration: filter.remainingDuration); filter = updated
         }
         do {
             let now = ProcessInfo.processInfo.systemUptime
-            let seconds = min(0.1, max(0.001, now - (smoothLastTick ?? now - 0.05)))
+            let elapsed = max(0.001, now - (smoothLastTick ?? now - 0.05))
+            let seconds = filter.isTimed ? elapsed : min(0.1, elapsed)
             smoothLastTick = now
             let next = filter.advance(seconds: seconds, rate: smoothSpeed.rate); smoothFilter = filter
             try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
@@ -529,7 +531,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 camera.ramp(toVideoZoomFactor: target, withRate: rampRate)
                 smoothRampTarget = target; smoothRampRate = rampRate
             }
-            if abs(log2(filter.value / filter.target)) < 0.0002,
+            if filter.isSettled,
                abs(log2(Double(camera.videoZoomFactor) / filter.target)) < 0.001 {
                 smoothTimer?.cancel(); smoothTimer = nil; smoothGeneration = UUID(); smoothLastTick = nil
                 if let options = try? options() { onEvent?(.ready(options)) }
