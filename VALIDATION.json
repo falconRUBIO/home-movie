@@ -51,20 +51,21 @@
   ],
   "date": "2026-10-12",
   "native_tests_supplied": 37,
-  "native_tests_run": 36,
-  "native_build_status": "Native camera controls and lens cleanup pass portable validation; 37-test native run pending. Previous Log readiness 41e45583 passed 36 tests.",
+  "native_tests_run": 37,
+  "native_build_status": "Source revision 9b4efe10 compiled on Xcode 26.6 and passed all 37 native simulator tests with no application-source warnings.",
   "previous_cloud_build": {
-    "commit": "468bb983a8cf4408752d9a91a0fb04121141304d",
+    "commit": "6750e2065d3790e3d14da2bc999e33183a0110e9",
     "provider": "GitHub Actions",
-    "run_id": 38183715011,
+    "run_id": 38188431667,
     "status": "PASS",
-    "tests_run": 34,
-    "tests_passed": 34,
+    "tests_run": 36,
+    "tests_passed": 36,
     "tests_failed": 0,
-    "test_execution_seconds": 176.806
+    "test_execution_seconds": 80.61,
+    "application_source_warnings": 0
   },
   "testflight_uploaded": true,
-  "native_tests_passed": 36,
+  "native_tests_passed": 37,
   "native_tests_failed": 0,
   "signed_archive_created": true,
   "apple_package_validation_status": "PASS for 7ba9e7ca; signed upload succeeded",
@@ -79,14 +80,14 @@
   },
   "current_revision_testflight_uploaded": false,
   "latest_cloud_build": {
-    "commit": "6750e2065d3790e3d14da2bc999e33183a0110e9",
+    "commit": "9b4efe102f99b4267fc8a070e5cb2d4f85c45a54",
     "provider": "GitHub Actions",
-    "run_id": 38188431667,
+    "run_id": 38190065020,
     "status": "PASS",
-    "tests_run": 36,
-    "tests_passed": 36,
+    "tests_run": 37,
+    "tests_passed": 37,
     "tests_failed": 0,
-    "test_execution_seconds": 80.61,
+    "test_execution_seconds": 162.796,
     "application_source_warnings": 0
   },
   "audit_initial_cloud_build": {
@@ -106,5 +107,6 @@
     "status": "PASS",
     "tests_run": 36,
     "tests_failed": 0
-  }
+  },
+  "reported_device": "iPhone 17 family; user reports latest iOS update, exact variant/version unconfirmed"
 }

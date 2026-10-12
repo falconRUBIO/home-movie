@@ -275,3 +275,7 @@ Apple references:
 https://developer.apple.com/documentation/avfoundation/avcapturedevice/virtualdeviceswitchovervideozoomfactors
 https://developer.apple.com/documentation/avfoundation/avcapturedevice/format/secondarynativeresolutionzoomfactors
 https://developer.apple.com/documentation/avfoundation/avcapturemoviefileoutput/isprimaryconstituentdeviceswitchingbehaviorforrecordingenabled
+
+## Native camera polish verified — 2026-10-12
+
+Source 9b4efe102f99b4267fc8a070e5cb2d4f85c45a54 compiled on Xcode 26.6 and passed all 37 tests, with zero failures and no skipped tests, in GitHub run 38190065020 (162.796 seconds). No application-source warnings were reported. The added internal-switch-boundary regression passes, and prior storage/original-preservation, Log compositor, backup and preview-handoff tests still pass. The automatic constituent selection APIs compiled successfully. The result update changes documentation only. Actual black-panel layout, lens switching during recording and the reported Log failure still require verification on the user’s iPhone with a new TestFlight build. Build 1031 predates these changes.
