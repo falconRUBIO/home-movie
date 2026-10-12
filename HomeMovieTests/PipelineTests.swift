@@ -48,9 +48,11 @@ final class PipelineTests: XCTestCase {
             try audioFile.write(from: buffer)
         }
         let composition = AVMutableComposition()
-        let videoTracks = try await AVURLAsset(url: video).loadTracks(withMediaType: .video)
+        let videoAsset = AVURLAsset(url: video), audioAsset = AVURLAsset(url: wave)
+        defer { withExtendedLifetime((videoAsset, audioAsset)) {} }
+        let videoTracks = try await videoAsset.loadTracks(withMediaType: .video)
         let audioTracks: [AVAssetTrack]
-        do { audioTracks = try await AVURLAsset(url: wave).loadTracks(withMediaType: .audio) }
+        do { audioTracks = try await audioAsset.loadTracks(withMediaType: .audio) }
         catch { XCTFail("AAC fixture load failed: \(error)"); throw error }
         let sourceVideo = try XCTUnwrap(videoTracks.first), sourceAudio = try XCTUnwrap(audioTracks.first)
         let videoTrack = try XCTUnwrap(composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
