@@ -1,3 +1,18 @@
+# Camera polish acceptance — current revision
+
+All physical-device rows below remain NOT RUN. Simulator regressions cannot measure sensor startup, thermal behavior, lens handoff, or perceived audio continuity.
+
+| Priority | Test on the updated TestFlight build | Pass condition | Result |
+|---|---|---|---|
+| 1 | Front camera: start, immediately cancel, start again; flip both ways during an audible Standard take | Immediate starting feedback; one cancellable take; no duplicate scene, rotated frames, black join or audio gap | NOT RUN |
+| 2 | PiP: Small/Medium, all corners, portrait and both landscape directions; inspect live, saved clip and export | Same 4:3 geometry and readable unmirrored text; full rear canvas; no decorative border | NOT RUN |
+| 3 | Dolly: 15/20/25/30 seconds both ways, refine endpoint mid-move, bright/dim scenes and AE/AF Lock | Smooth measured progress, no catch-up jump or app-induced exposure reset; inspect saved footage | NOT RUN |
+| 4 | Light: drag rapidly while paused and playing, Before/Reset, Save, reopen, export one clip and whole movie | Latest value wins, responsive sliders, remembered per-clip settings, preview/export agree | NOT RUN |
+| 5 | Record/Stop rapidly during preparation and saving; change apps during start | Clear starting/saving feedback; one committed or safely abandoned take; originals preserved | NOT RUN |
+| 6 | Ten-minute PiP take and repeated ordinary takes; long export; low storage | Bounded memory, clear thermal/storage fallback, continuous rear/audio, validated export or actionable error | NOT RUN |
+
+Record phone model, iOS, installed build number, outcome and any failing original/export. Compare lens transitions with native Camera under the same lighting and frame rate.
+
 # Device acceptance — not yet executed
 
 Dolly lens/light handoff follow-up (NOT RUN): record 1× → 8× → 1× in bright and dim light, with focus/exposure unlocked and with AE/AF Lock settled on a stationary subject. Compare Standard and supported Log, preview and saved clips, with the native Camera on the same phone and equivalent SDR frame rate. Ordinary camera must retain automatic physical-lens selection and low-light/focus fallback while Dolly is open; recording must use the same device policy as preview. Confirm no exposure-bias reset or re-metering by the app during a locked move. Assess brightness and framing near actual sensor boundaries, not a hardcoded 4×. Repeat explicit Stay on This Lens and dual-camera/PiP mode separately; dual-camera rear zoom may be digital. Smooth autofocus must only be enabled on supported devices. These source changes do not prove native-Camera parity or eliminate physical parallax/exposure limits.
