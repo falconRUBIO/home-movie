@@ -133,7 +133,7 @@ struct WatchMovieView: View {
                 .sheet(isPresented: $exporting) { ExportView(movie: movie).environmentObject(app) }
             } else { ContentUnavailableView("Movie unavailable", systemImage: "film") }
         }
-        .background(MovieOrientation(format: movie?.recordingFormat).frame(width: 0, height: 0))
+        .background(MovieOrientation(format: .portrait).frame(width: 0, height: 0))
         .preferredColorScheme(playbackOnly ? .dark : nil)
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { player?.pause() }
@@ -180,95 +180,6 @@ struct WatchMovieView: View {
             Button { player?.pause(); dismiss() } label: { Label("Continue Recording", systemImage: "video").frame(minHeight: 44) }
                 .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).padding(.bottom, 8)
         }.fixedSize(horizontal: false, vertical: true).background(.bar)
-    }
-}
-
-struct SceneReviewView: View {
-    @EnvironmentObject private var app: AppModel
-    @Environment(\.dismiss) private var dismiss
-    let movieID: UUID
-    let scene: Scene
-    @State private var player: AVPlayer?
-    @State private var start: Double
-    @State private var end: Double
-    @State private var originalStart = CMTime.zero
-    @State private var saving = false
-    @State private var confirmRemove = false
-    @State private var error: String?
-    init(movieID: UUID, scene: Scene) {
-        self.movieID = movieID; self.scene = scene
-        _start = State(initialValue: scene.trimStart.seconds); _end = State(initialValue: scene.trimEnd.seconds)
-    }
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-            VStack(spacing: 20) {
-                if let player { VideoPlayer(player: player).frame(height: 260) }
-                TrimRangeControl(scene: scene, root: app.store.root, start: $start, end: $end, movie: app.movie(movieID))
-                    .frame(height: 64).padding(.horizontal, 22)
-                HStack {
-                    Text(durationLabel(CMTime(seconds: start, preferredTimescale: 600)))
-                    Spacer(); Text(durationLabel(CMTime(seconds: end, preferredTimescale: 600)))
-                }.font(.caption.monospacedDigit()).foregroundStyle(.secondary).padding(.horizontal, 24)
-                Text("Drag either edge to trim. Your original recording stays intact.")
-                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 25)
-                Button("Reset to Original") { start = 0; end = scene.sourceDuration.seconds }
-                if let error { Text(error).font(.footnote).foregroundStyle(.red).padding(.horizontal) }
-                Button("Remove Scene", role: .destructive) { confirmRemove = true }.frame(minHeight: 44).disabled(saving)
-            }
-            }
-            .navigationTitle("Review Scene").navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { player?.pause(); dismiss() }.disabled(saving) }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        saving = true
-                        Task {
-                            do {
-                                try await app.store.trim(movieID: movieID, sceneID: scene.id,
-                                    start: CMTime(seconds: start, preferredTimescale: 600), end: CMTime(seconds: end, preferredTimescale: 600))
-                                await app.refresh(); player?.pause(); dismiss()
-                            } catch { self.error = error.localizedDescription; saving = false }
-                        }
-                    }.disabled(saving)
-                }
-            }
-            .alert("Remove this scene?", isPresented: $confirmRemove) {
-                Button("Cancel", role: .cancel) { confirmRemove = false }
-                Button("Move to Recently Deleted", role: .destructive) {
-                    saving = true
-                    Task {
-                        do { try await app.store.setSceneDeleted(movieID: movieID, sceneID: scene.id, deleted: true); await app.refresh(); player?.pause(); dismiss() }
-                        catch { self.error = error.localizedDescription; saving = false }
-                    }
-                }
-            } message: { Text("Restore it later from Settings. Its original file will be kept.") }
-            .task {
-                if var movie = app.movie(movieID), movie.captureProfile == .appleLog {
-                    do {
-                        var fullScene = scene; fullScene.trimStart = MediaTime(.zero); fullScene.trimEnd = fullScene.sourceDuration
-                        movie.scenes = [fullScene]
-                        let bundle = try await app.assembler.build(movie: movie, root: app.store.root)
-                        guard !Task.isCancelled else { return }
-                        let item = AVPlayerItem(asset: bundle.asset); item.videoComposition = bundle.videoComposition; item.audioMix = bundle.audioMix
-                        item.forwardPlaybackEndTime = scene.trimEnd.cmTime
-                        originalStart = .zero; player = AVPlayer(playerItem: item)
-                        _ = await player?.seek(to: scene.trimStart.cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
-                    } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
-                    return
-                }
-                let asset = AVURLAsset(url: app.store.root.appendingPathComponent(scene.source))
-                if let tracks = try? await asset.loadTracks(withMediaType: .video), let track = tracks.first,
-                   let range = try? await track.load(.timeRange) { originalStart = range.start }
-                guard !Task.isCancelled else { return }
-                let item = AVPlayerItem(asset: asset)
-                item.forwardPlaybackEndTime = CMTimeAdd(originalStart, scene.trimEnd.cmTime)
-                player = AVPlayer(playerItem: item)
-                _ = await player?.seek(to: CMTimeAdd(originalStart, scene.trimStart.cmTime), toleranceBefore: .zero, toleranceAfter: .zero)
-            }
-            .onChange(of: start) { _, value in player?.pause(); player?.seek(to: CMTimeAdd(originalStart, CMTime(seconds: value, preferredTimescale: 600)), toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: { _ in }) }
-            .onChange(of: end) { _, value in player?.pause(); player?.currentItem?.forwardPlaybackEndTime = CMTimeAdd(originalStart, CMTime(seconds: value, preferredTimescale: 600)); player?.seek(to: CMTimeAdd(originalStart, CMTime(seconds: max(start, value - 1 / 30), preferredTimescale: 600)), toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: { _ in }) }
-        }.interactiveDismissDisabled(saving).onDisappear { player?.pause() }
     }
 }
 

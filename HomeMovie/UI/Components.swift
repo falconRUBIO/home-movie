@@ -40,14 +40,14 @@ actor ThumbnailService {
     private let cache = NSCache<NSString, UIImage>()
     init() { cache.countLimit = 48; cache.totalCostLimit = 32 * 1024 * 1024 }
     func image(scene: Scene, root: URL, movie: Movie? = nil) async throws -> UIImage {
-        let key = "\(root.path)-\(scene.id)-\(scene.trimStart.value)-\(scene.trimStart.scale)-\(movie?.revision ?? 0)-\(movie?.look?.id.uuidString ?? "standard")" as NSString
+        let key = "\(root.path)-\(scene.id)-\(scene.trimStart.value)-\(scene.trimStart.scale)-\(movie?.revision ?? 0)-\(movie?.look?.id.uuidString ?? "standard")-\(scene.lightAdjustments.exposure)-\(scene.lightAdjustments.shadows)-\(scene.lightAdjustments.highlights)" as NSString
         if let image = cache.object(forKey: key) { return image }
         let generator: AVAssetImageGenerator
         let time: CMTime
-        if (scene.profile ?? movie?.captureProfile ?? .standard) == .appleLog {
+        if (scene.profile ?? movie?.captureProfile ?? .standard) == .appleLog || scene.lightAdjustments.isActive {
             var preview = movie ?? Movie(name: "Preview", format: scene.width > scene.height ? .landscape : .portrait)
             preview.scenes = [scene]
-            preview.profile = .appleLog
+            preview.profile = scene.profile ?? movie?.captureProfile ?? .standard
             let bundle = try await MediaAssembler().build(movie: preview, root: root)
             generator = AVAssetImageGenerator(asset: bundle.asset)
             generator.videoComposition = bundle.videoComposition
@@ -82,7 +82,7 @@ struct SceneThumbnail: View {
             }
         }
         .accessibilityHidden(true)
-        .task(id: scene.map { "\($0.id)-\($0.trimStart.value)-\($0.trimStart.scale)-\(movie?.revision ?? 0)-\(movie?.look?.id.uuidString ?? "standard")" }) {
+        .task(id: scene.map { "\($0.id)-\($0.trimStart.value)-\($0.trimStart.scale)-\(movie?.revision ?? 0)-\(movie?.look?.id.uuidString ?? "standard")-\($0.lightAdjustments.exposure)-\($0.lightAdjustments.shadows)-\($0.lightAdjustments.highlights)" }) {
             image = nil
             guard let scene, !scene.missing else { return }
             let result = try? await ThumbnailService.shared.image(scene: scene, root: root, movie: movie)

@@ -41,7 +41,7 @@ import AVKit
         composition.instructions = template.instructions.map { instruction in
             guard let source = instruction as? ColorInstruction else { return instruction }
             return ColorInstruction(range: source.timeRange, trackID: source.trackID, transform: source.transform,
-                                    cube: source.cube, filmEffects: settings)
+                                    cube: source.cube, filmEffects: settings, adjustments: source.adjustments)
         }
         item.videoComposition = composition
         // Running playback picks up the new recipe without pausing or replacing its item.

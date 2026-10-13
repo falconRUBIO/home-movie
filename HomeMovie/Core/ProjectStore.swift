@@ -48,6 +48,7 @@ actor ProjectStore {
                 throw HomeMovieError.message("The movie catalog is inconsistent. Its file has been preserved.")
             }
             for scene in movie.scenes {
+                try scene.lightAdjustments.validate()
                 guard scene.validTrim, scene.sequence >= 0 && scene.sequence < 1_000_000_000,
                       scene.source == "Originals/\(scene.id.uuidString).mov",
                       scene.width.isFinite && scene.height.isFinite && scene.width > 0 && scene.height > 0 && scene.bytes >= 0 && scene.bytes <= Int64.max / 4 else {
@@ -82,6 +83,17 @@ actor ProjectStore {
         let filmicaURL = root.appendingPathComponent(LUTReference.filmica.path)
         if !fm.fileExists(atPath: filmicaURL.path) {
             try encoder.encode(filmica).write(to: filmicaURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
+        for (reference, resource) in LUTReference.additionalBundledLooks {
+            let destination = root.appendingPathComponent(reference.path)
+            if !fm.fileExists(atPath: destination.path) {
+                guard let bundled = Bundle.main.url(forResource: resource, withExtension: "json") else {
+                    throw HomeMovieError.message("The \(reference.name) look is unavailable.")
+                }
+                let cube = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: bundled))
+                try cube.validate()
+                try encoder.encode(cube).write(to: destination, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            }
         }
         if !cleanedTransfers {
             // These are app-owned temporary copies, never the source recordings.
@@ -299,6 +311,21 @@ actor ProjectStore {
         next.movies[i].lastRecordedAt = ticket.capturedAt; next.movies[i].revision += 1
         try write(next)
         try? fm.removeItem(at: url(ticket.journal))
+    }
+    func editScene(movieID: UUID, sceneID: UUID, start: CMTime, end: CMTime, adjustments: SceneAdjustments) throws {
+        try requireIdle(); try adjustments.validate()
+        let m = try index(movieID)
+        guard catalog.movies[m].deletedAt == nil,
+              let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID && $0.deletedAt == nil }) else {
+            throw HomeMovieError.message("This scene is no longer available.")
+        }
+        var next = catalog
+        next.movies[m].scenes[c].trimStart = MediaTime(start)
+        next.movies[m].scenes[c].trimEnd = MediaTime(end)
+        next.movies[m].scenes[c].adjustments = adjustments.isActive ? adjustments : nil
+        guard next.movies[m].scenes[c].validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
+        guard next.movies[m].scenes[c] != catalog.movies[m].scenes[c] else { return }
+        next.movies[m].revision += 1; try write(next)
     }
     func trim(movieID: UUID, sceneID: UUID, start: CMTime, end: CMTime) throws {
         try requireIdle()

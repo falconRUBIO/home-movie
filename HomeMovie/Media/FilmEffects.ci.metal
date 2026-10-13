@@ -1,7 +1,7 @@
 #include <CoreImage/CoreImage.h>
 using namespace metal;
 
-// Original shaders: no grading, LUTs, vignette, exposure changes, or damage effects.
+// Original optical shaders and a separate per-scene light-adjustment stage.
 float3 decode709(float3 c) {
     c = max(c, 0.0);
     return select(pow((c + 0.099) / 1.099, float3(1.0 / 0.45)), c / 4.5, c < 0.081);
@@ -43,6 +43,23 @@ float particles(float2 p, float size, uint seed, uint salt) {
 }
 
 extern "C" { namespace coreimage {
+    float4 sceneLight(sample_t input, float exposure, float shadows, float highlights) {
+        float3 rgb = clamp(input.rgb, 0.0, 1.0);
+        float l = luminance(rgb);
+        // Gentle luminance-only changes. Smooth tonal masks avoid hard thresholds;
+        // endpoint headroom keeps whites and blacks stable and limits hue shifts.
+        float shadowMask = 1.0 - smoothstep(0.15, 0.55, l);
+        float highlightMask = smoothstep(0.45, 0.85, l);
+        float delta = l * (1.0 - l) * (exposure * 0.3 + shadows * shadowMask * 0.4 + highlights * highlightMask * 0.4);
+        float target = clamp(l + delta, 0.0, 1.0);
+        float3 result;
+        if (target >= l) {
+            result = rgb + (1.0 - rgb) * ((target - l) / max(1.0 - l, 0.00001));
+        } else {
+            result = rgb * (target / max(l, 0.00001));
+        }
+        return float4(result, input.a);
+    }
     float4 filmLinear(sample_t input) { return float4(decode709(input.rgb), input.a); }
     float4 filmHighlights(sample_t input, float threshold, float warm) {
         float t = decode709(float3(threshold)).x;

@@ -16,14 +16,14 @@ enum SmoothZoomSpeed: String, CaseIterable, Identifiable, Sendable {
     var rate: Float { switch self { case .slow: 0.35; case .normal: 0.75; case .fast: 1.5 } }
 }
 enum DollyZoomDuration {
-    static let choices = [1, 2, 3, 5, 8, 10]
+    static let choices = [1, 2, 3, 5, 8, 10, 15, 20, 25, 30]
     static func validated(_ seconds: Int) -> Int { choices.contains(seconds) ? seconds : 3 }
 }
 // Presentation follows measured zoom, never a separate timer or pretend animation.
 struct DollyZoomRoute: Equatable {
     let id = UUID()
     let start: Double
-    let destination: Double
+    private(set) var destination: Double
     let seconds: Int
     init?(start: Double, destination: Double, seconds: Int) {
         guard start.isFinite, destination.isFinite, start > 0, destination > 0,
@@ -31,9 +31,17 @@ struct DollyZoomRoute: Equatable {
         self.start = start; self.destination = destination
         self.seconds = DollyZoomDuration.validated(seconds)
     }
+    func adjustingDestination(to zoom: Double) -> Self {
+        guard zoom.isFinite, zoom > 0 else { return self }
+        var adjusted = self
+        adjusted.destination = zoom
+        return adjusted
+    }
     func progress(at zoom: Double) -> Double {
         guard zoom.isFinite, zoom > 0 else { return 0 }
-        return min(1, max(0, log2(zoom / start) / log2(destination / start)))
+        let distance = log2(destination / start)
+        guard abs(distance) > 0.00001 else { return hasArrived(at: zoom) ? 1 : 0 }
+        return min(1, max(0, log2(zoom / start) / distance))
     }
     func hasArrived(at zoom: Double) -> Bool {
         zoom.isFinite && zoom > 0 && abs(log2(zoom / destination)) < 0.005
@@ -90,6 +98,10 @@ struct SmoothZoomFilter: Sendable {
                 endVelocity: 0, acceleration: timedBridge == nil ? acceleration : 0, duration: duration - timedBridgeDuration)
             timedDuration = duration; timedElapsed = 0
         } else { timedCurve = nil; timedBridge = nil }
+    }
+    mutating func adjustTimedDestination(to target: Double) {
+        guard let remaining = remainingDuration, remaining > 0 else { return }
+        setTarget(target, duration: remaining)
     }
     private static func curve(start: Double, end: Double, velocity: Double, endVelocity: Double,
                               acceleration: Double, duration: Double) -> [Double] {

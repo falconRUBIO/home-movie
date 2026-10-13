@@ -660,6 +660,15 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             self.setSmoothTargetOnQueue(factor, duration: Double(DollyZoomDuration.validated(seconds)))
         }
     }
+    func adjustDollyDestination(to factor: CGFloat) {
+        guard factor.isFinite, factor > 0 else { return }
+        queue.async {
+            guard self.session.isRunning, !self.session.isInterrupted,
+                  self.smoothFilter?.isTimed == true else { return }
+            self.smoothFilter?.adjustTimedDestination(to: Double(factor))
+            self.startSmoothTimerOnQueue()
+        }
+    }
     func smoothZoom(to factor: CGFloat, inputTime: Double? = nil, inputEnded: Bool = false) {
         guard factor.isFinite, factor > 0 else { return }
         queue.async {

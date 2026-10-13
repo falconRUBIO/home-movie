@@ -258,6 +258,10 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("About") {
+                    LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
+                    LabeledContent("Build", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")
+                }
                 Section("Launch") { Toggle("Open last movie", isOn: $openLastMovie) }
                 Section { NavigationLink("Privacy", destination: PrivacyView()) }
                 Section("Protection") {
