@@ -44,7 +44,9 @@ final class ContinuousTakeWriter {
     @discardableResult func appendVideo(_ buffer: CVPixelBuffer, at time: CMTime, sourceAngle: CGFloat? = nil) -> Bool {
         if writer.status == .failed { failure = writer.error; return false }
         guard !finishing, failure == nil, time.isNumeric, lastVideo.map({ time > $0 }) ?? true else { return false }
-        guard video.isReadyForMoreMediaData, let pool = pixels.pixelBufferPool else { return false }
+        guard video.isReadyForMoreMediaData else { return false }
+        if start == nil { writer.startSession(atSourceTime: time); start = time }
+        guard let pool = pixels.pixelBufferPool else { return false }
         var destination: CVPixelBuffer?
         guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &destination) == kCVReturnSuccess,
               let destination else { return false }
@@ -53,7 +55,6 @@ final class ContinuousTakeWriter {
             target: size, angle: sourceAngle ?? angle, front: false)).cropped(to: CGRect(origin: .zero, size: size))
         context.render(image, to: destination, bounds: CGRect(origin: .zero, size: size),
             colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
-        if start == nil { writer.startSession(atSourceTime: time); start = time }
         guard pixels.append(destination, withPresentationTime: time) else {
             failure = writer.error ?? HomeMovieError.message("Video could not be saved."); return false
         }
