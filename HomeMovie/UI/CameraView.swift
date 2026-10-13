@@ -609,20 +609,20 @@ struct CameraView: View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 dollyStartDelayMenu
-                dollyZoomValue(options: options)
-                dollyTrack(options: options).frame(minWidth: 88)
-                dollyDurationMenu
+                dollyZoomValue(options: options).disabled(countdown != nil)
+                dollyTrack(options: options).frame(minWidth: 88).disabled(countdown != nil)
+                dollyDurationMenu.disabled(countdown != nil)
                 dollyPlaybackButton
             }
             VStack(spacing: 0) {
                 HStack {
                     dollyStartDelayMenu
-                    dollyZoomValue(options: options)
+                    dollyZoomValue(options: options).disabled(countdown != nil)
                     Spacer(minLength: 8)
-                    dollyDurationMenu
+                    dollyDurationMenu.disabled(countdown != nil)
                 }
                 HStack(spacing: 8) {
-                    dollyTrack(options: options)
+                    dollyTrack(options: options).disabled(countdown != nil)
                     dollyPlaybackButton
                 }
             }
