@@ -49,6 +49,32 @@ final class SceneAdjustmentsTests: XCTestCase {
         XCTAssertEqual(sample(try all.apply(to: gray(0)))[0], 0, accuracy: 0.0001)
         XCTAssertEqual(sample(try all.apply(to: gray(1)))[0], 1, accuracy: 0.0001)
     }
+    func testCombinedExtremeControlsNeverInvertOrClipTheTonalRamp() throws {
+        let width = 256
+        var rgba: [Float] = []
+        for x in 0..<width {
+            let level = Float(x) / Float(width - 1)
+            rgba.append(contentsOf: [level, level, level, 1])
+        }
+        let image = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
+            size: CGSize(width: width, height: 1), format: .RGBAf, colorSpace: nil)
+        let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
+        for exposure in [-1.0, 1.0] {
+            for shadows in [-1.0, 1.0] {
+                for highlights in [-1.0, 1.0] {
+                    let output = try SceneAdjustments(exposure: exposure, shadows: shadows, highlights: highlights).apply(to: image)
+                    var pixels = [Float](repeating: 0, count: width * 4)
+                    pixels.withUnsafeMutableBytes {
+                        context.render(output, toBitmap: $0.baseAddress!, rowBytes: width * 16,
+                            bounds: image.extent, format: .RGBAf, colorSpace: nil)
+                    }
+                    let ramp = stride(from: 0, to: pixels.count, by: 4).map { pixels[$0] }
+                    XCTAssertTrue(ramp.allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 1 })
+                    XCTAssertTrue(zip(ramp, ramp.dropFirst()).allSatisfy { $1 >= $0 })
+                }
+            }
+        }
+    }
     func testOldSceneCatalogDecodesWithNeutralLight() throws {
         let scene = Scene(id: UUID(), sequence: 0, source: "fixture", capturedAt: Date(), timeZone: "UTC",
             sourceDuration: MediaTime(seconds: 2), trimStart: MediaTime(seconds: 0), trimEnd: MediaTime(seconds: 2),

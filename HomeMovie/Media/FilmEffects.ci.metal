@@ -50,7 +50,7 @@ extern "C" { namespace coreimage {
         // endpoint headroom keeps whites and blacks stable and limits hue shifts.
         float shadowMask = 1.0 - smoothstep(0.15, 0.55, l);
         float highlightMask = smoothstep(0.45, 0.85, l);
-        float delta = l * (1.0 - l) * (exposure * 0.45 + shadows * shadowMask * 0.6 + highlights * highlightMask * 0.6);
+        float delta = l * (1.0 - l) * (exposure * 0.3 + shadows * shadowMask * 0.4 + highlights * highlightMask * 0.4);
         float target = clamp(l + delta, 0.0, 1.0);
         float3 result;
         if (target >= l) {
