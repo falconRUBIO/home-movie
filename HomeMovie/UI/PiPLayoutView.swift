@@ -46,7 +46,7 @@ struct PiPLayoutView: View {
                         .frame(height: min(300, geometry.size.height * 0.43))
                         .background(.black)
                     Form {
-                        Section("Presenter") {
+                        Section {
                             Picker("Orientation", selection: $layout.orientation) {
                                 ForEach(PiPOrientation.allCases) { orientation in
                                     Text(orientation.title).tag(orientation)
@@ -55,32 +55,32 @@ struct PiPLayoutView: View {
                             Picker("Size", selection: $layout.size) {
                                 ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
                             }.pickerStyle(.segmented)
-                        } footer: {
+                        } header: { Text("Presenter") } footer: {
                             Text("The inset has its own shape, independent of the main video. Your presenter stays upright and unmirrored.")
                         }
-                Section("Position") {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: dynamicTypeSize.isAccessibilitySize ? 1 : 2), spacing: 8) {
-                        ForEach(PiPCorner.allCases) { corner in
-                            Button { layout.corner = corner } label: {
-                                HStack {
-                                    Image(systemName: layout.corner == corner ? "checkmark.circle.fill" : "circle")
-                                    Text(corner.title).font(.subheadline)
-                                    Spacer(minLength: 0)
-                                }.frame(minHeight: 44)
-                            }.buttonStyle(.plain).foregroundStyle(layout.corner == corner ? Color.accentColor : .primary)
-                                .accessibilityAddTraits(layout.corner == corner ? .isSelected : [])
+                        Section("Position") {
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: dynamicTypeSize.isAccessibilitySize ? 1 : 2), spacing: 8) {
+                                ForEach(PiPCorner.allCases) { corner in
+                                    Button { layout.corner = corner } label: {
+                                        HStack {
+                                            Image(systemName: layout.corner == corner ? "checkmark.circle.fill" : "circle")
+                                            Text(corner.title).font(.subheadline)
+                                            Spacer(minLength: 0)
+                                        }.frame(minHeight: 44)
+                                    }.buttonStyle(.plain).foregroundStyle(layout.corner == corner ? Color.accentColor : .primary)
+                                        .accessibilityAddTraits(layout.corner == corner ? .isSelected : [])
+                                }
+                            }
+                        }
+                        if !ready {
+                            Section {
+                                if logMode { Text(CameraCompatibility.logPiPExplanation) }
+                                else { Button("Use Dual Camera", action: onPrepare).disabled(!canPrepare) }
+                            } footer: {
+                                Text(logMode ? "PiP is available in Standard movies." : canPrepare ? "Turn on both cameras for a live preview. PiP records at 1080p, 30 fps." : "Dual Camera is unavailable on this iPhone.")
+                            }
                         }
                     }
-                }
-                if !ready {
-                    Section {
-                        if logMode { Text(CameraCompatibility.logPiPExplanation) }
-                        else { Button("Use Dual Camera", action: onPrepare).disabled(!canPrepare) }
-                    } footer: {
-                        Text(logMode ? "PiP is available in Standard movies." : canPrepare ? "Turn on both cameras for a live preview. PiP records at 1080p, 30 fps." : "Dual Camera is unavailable on this iPhone.")
-                    }
-                }
-            }
                 }
             }
             .navigationTitle("Picture in Picture").navigationBarTitleDisplayMode(.inline)
