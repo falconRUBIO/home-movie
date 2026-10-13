@@ -24,15 +24,19 @@ struct PiPLayout: Codable, Equatable, Sendable {
     var corner = PiPCorner.bottomRight
     var size = PiPSize.small
     var orientation = PiPOrientation.landscape
-    init(corner: PiPCorner = .bottomRight, size: PiPSize = .small, orientation: PiPOrientation = .landscape) {
-        self.corner = corner; self.size = size; self.orientation = orientation
+    var zoom: CGFloat = 1
+    var framingZoom: CGFloat { Self.clampedZoom(zoom) }
+    static func clampedZoom(_ value: CGFloat) -> CGFloat { value.isFinite ? min(2, max(1, value)) : 1 }
+    init(corner: PiPCorner = .bottomRight, size: PiPSize = .small, orientation: PiPOrientation = .landscape, zoom: CGFloat = 1) {
+        self.corner = corner; self.size = size; self.orientation = orientation; self.zoom = Self.clampedZoom(zoom)
     }
-    private enum CodingKeys: String, CodingKey { case corner, size, orientation }
+    private enum CodingKeys: String, CodingKey { case corner, size, orientation, zoom }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         corner = try values.decode(PiPCorner.self, forKey: .corner)
         size = try values.decode(PiPSize.self, forKey: .size)
         orientation = try values.decodeIfPresent(PiPOrientation.self, forKey: .orientation) ?? .landscape
+        zoom = Self.clampedZoom(try values.decodeIfPresent(CGFloat.self, forKey: .zoom) ?? 1)
     }
 }
 struct PiPPresentation: Equatable, Sendable {
@@ -41,8 +45,15 @@ struct PiPPresentation: Equatable, Sendable {
     var enabled = false
     var corner = PiPCorner.bottomRight
     var isPlaceable = true
+    var zoom: CGFloat = 1
 }
 enum PiPGeometry {
+    static func fittedPreview(canvas: CGSize, available: CGSize) -> CGSize {
+        guard canvas.width > 0, canvas.height > 0, available.width > 0, available.height > 0,
+              canvas.width.isFinite, canvas.height.isFinite, available.width.isFinite, available.height.isFinite else { return .zero }
+        let scale = min(available.width / canvas.width, available.height / canvas.height)
+        return CGSize(width: canvas.width * scale, height: canvas.height * scale)
+    }
     static func extent(canvas: CGSize, size: PiPSize, orientation: PiPOrientation = .landscape) -> CGSize {
         let longEdge = canvas.width * size.fraction
         return orientation == .portrait
@@ -135,7 +146,7 @@ struct PiPTimeline {
     func presentation(at time: CMTime, canvas: CGSize, obstacles: [CGRect] = []) -> PiPPresentation {
         let rect = PiPGeometry.safeRect(center: currentCenter(at: time, canvas: canvas), canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles)
             ?? PiPGeometry.rect(layout: layout, canvas: canvas)
-        return PiPPresentation(rect: rect ?? .zero, opacity: rect == nil ? 0 : opacity(at: time), enabled: enabled, corner: layout.corner, isPlaceable: rect != nil)
+        return PiPPresentation(rect: rect ?? .zero, opacity: rect == nil ? 0 : opacity(at: time), enabled: enabled, corner: layout.corner, isPlaceable: rect != nil, zoom: layout.framingZoom)
     }
 }
 // Choose a recent front frame from the same capture clock without waiting for it.
@@ -167,7 +178,11 @@ enum PiPCompositor {
         let rect = CGRect(x: unit.minX * canvas.width, y: (1 - unit.maxY) * canvas.height,
             width: unit.width * canvas.width, height: unit.height * canvas.height)
         let front = CIImage(cvPixelBuffer: presenter)
+        let zoom = PiPLayout.clampedZoom(presentation.zoom)
+        let zoomTransform = CGAffineTransform(a: zoom, b: 0, c: 0, d: zoom,
+            tx: rect.width * (1 - zoom) / 2, ty: rect.height * (1 - zoom) / 2)
         var inset = front.transformed(by: LiveLookGeometry.transform(source: front.extent.size, target: rect.size, angle: presenterAngle, front: false))
+            .transformed(by: zoomTransform)
             .transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY)).cropped(to: rect)
         if let mask = CIFilter(name: "CIRoundedRectangleGenerator", parameters: [
             "inputExtent": CIVector(cgRect: rect), "inputRadius": min(canvas.width, canvas.height) * 0.003,
@@ -208,3 +223,4 @@ final class PiPFrameRenderer {
         return buffer
     }
 }
+
