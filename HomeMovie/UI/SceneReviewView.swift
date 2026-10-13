@@ -82,11 +82,6 @@ struct SceneReviewView: View {
         edited.adjustments = adjustments.isActive ? adjustments : nil
         return edited
     }
-    private var previewMovie: Movie? {
-        guard var snapshot = movie else { return nil }
-        snapshot.scenes = [editedScene]
-        return snapshot
-    }
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -168,7 +163,7 @@ struct SceneReviewView: View {
     }
     private var trimControls: some View {
         VStack(spacing: 12) {
-            TrimRangeControl(scene: editedScene, root: app.store.root, start: $start, end: $end, movie: previewMovie)
+            TrimRangeControl(scene: scene, root: app.store.root, start: $start, end: $end, movie: movie)
                 .frame(height: 64).padding(.horizontal, 22).disabled(busy)
             HStack {
                 Text(durationLabel(CMTime(seconds: start, preferredTimescale: 600)))
