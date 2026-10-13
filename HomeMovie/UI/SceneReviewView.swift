@@ -31,10 +31,10 @@ import AVKit
                 Task { @MainActor in self?.error = message; self?.player?.pause() }
             }
             _ = await player?.seek(to: scene.trimStart.cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
-        } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+        } catch { if !Task.isCancelled, requestID == request { self.error = error.localizedDescription } }
     }
     func update(adjustments: SceneAdjustments) async {
-        guard let template, let player, let item = player.currentItem,
+        guard !Task.isCancelled, let template, let player, let item = player.currentItem,
               let composition = template.mutableCopy() as? AVMutableVideoComposition else { return }
         composition.instructions = template.instructions.map { instruction in
             guard let source = instruction as? ColorInstruction else { return instruction }
@@ -46,7 +46,10 @@ import AVKit
             _ = await player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
         }
     }
-    func stop() { requestID = UUID(); player?.pause() }
+    func stop() {
+        requestID = UUID(); player?.pause(); statusObservation = nil
+        player = nil; template = nil; loading = false
+    }
 }
 
 struct SceneReviewView: View {
@@ -126,7 +129,11 @@ struct SceneReviewView: View {
                 await preview.prepare(movie: movie, scene: scene, app: app)
                 if !Task.isCancelled { await preview.update(adjustments: shownAdjustments) }
             }
-            .task(id: shownAdjustments) { await preview.update(adjustments: shownAdjustments) }
+            .task(id: shownAdjustments) {
+                // Coalesce slider changes and abandon obsolete paused-frame seeks.
+                do { try await Task.sleep(for: .milliseconds(40)) } catch { return }
+                await preview.update(adjustments: shownAdjustments)
+            }
             .onChange(of: start) { _, value in
                 invalidateExport(); preview.player?.pause()
                 preview.player?.seek(to: CMTime(seconds: value, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
@@ -201,6 +208,7 @@ struct SceneReviewView: View {
             Slider(value: value, in: -1...1, step: 0.01)
                 .frame(minHeight: 44).disabled(busy || comparing)
                 .accessibilityLabel(title)
+                .accessibilityValue(Text(value.wrappedValue * 100, format: .number.precision(.fractionLength(0))))
         }
     }
     private var photosFooter: some View {

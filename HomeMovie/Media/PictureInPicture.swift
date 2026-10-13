@@ -162,7 +162,9 @@ final class PiPFrameRenderer {
     private var pool: CVPixelBufferPool?
     private var canvas = CGSize.zero
     func render(_ image: CIImage, canvas: CGSize) -> CVPixelBuffer? {
-        if self.canvas != canvas {
+        guard canvas.width.isFinite, canvas.height.isFinite, canvas.width > 0, canvas.height > 0,
+              canvas.width <= 4096, canvas.height <= 4096 else { return nil }
+        if self.canvas != canvas || pool == nil {
             pool = nil; self.canvas = canvas
             let attributes: [String: Any] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
                 kCVPixelBufferWidthKey as String: Int(canvas.width), kCVPixelBufferHeightKey as String: Int(canvas.height),

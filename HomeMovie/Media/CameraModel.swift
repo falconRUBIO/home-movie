@@ -4,6 +4,7 @@ import UIKit
 
 enum CameraState: Equatable {
     case preparing, ready, starting, recording, finalizing, denied, interrupted, failed
+    var canStopTake: Bool { self == .starting || self == .recording }
     var showsLiveLook: Bool { [.ready, .starting, .recording, .finalizing].contains(self) }
 }
 
@@ -85,7 +86,7 @@ struct RecordingFlipHandoff {
     private var preparationID = UUID()
     @AppStorage("frontCamera") var rememberedFront = false
     var busy: Bool { recordingFlip != nil || [.starting, .recording, .finalizing].contains(state) }
-    var recordingSessionActive: Bool { state == .recording || recordingFlip != nil || state == .starting && continuingRecording }
+    var recordingSessionActive: Bool { state.canStopTake || recordingFlip != nil }
 
     init(app: AppModel) {
         self.app = app

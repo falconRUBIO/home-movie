@@ -82,6 +82,27 @@ final class PictureInPictureTests: XCTestCase {
         XCTAssertEqual(timeline.opacity(at: CMTime(seconds: 12.09, preferredTimescale: 600)), 0.5, accuracy: 0.001)
         XCTAssertEqual(timeline.opacity(at: CMTime(seconds: 12.18, preferredTimescale: 600)), 0, accuracy: 0.001)
     }
+    func testRendererRejectsInvalidCanvasAndRecoversForValidFrames() throws {
+        let renderer = PiPFrameRenderer()
+        let image = CIImage(color: .red)
+        for canvas in [CGSize.zero, CGSize(width: -1, height: 360), CGSize(width: CGFloat.nan, height: 360), CGSize(width: 100_000, height: 360)] {
+            XCTAssertNil(renderer.render(image, canvas: canvas))
+        }
+        let buffer = try XCTUnwrap(renderer.render(image, canvas: CGSize(width: 640, height: 360)))
+        XCTAssertEqual(CVPixelBufferGetWidth(buffer), 640)
+        XCTAssertEqual(CVPixelBufferGetHeight(buffer), 360)
+        let portrait = try XCTUnwrap(renderer.render(image, canvas: CGSize(width: 360, height: 640)))
+        XCTAssertEqual(CVPixelBufferGetHeight(portrait), 640)
+    }
+    func testRendererBoundsRetainedFramesAndResumesAfterRelease() throws {
+        let renderer = PiPFrameRenderer()
+        let canvas = CGSize(width: 64, height: 36)
+        var retained: [CVPixelBuffer] = []
+        for _ in 0..<8 { retained.append(try XCTUnwrap(renderer.render(CIImage(color: .red), canvas: canvas))) }
+        XCTAssertNil(renderer.render(CIImage(color: .red), canvas: canvas))
+        retained.removeAll()
+        XCTAssertNotNil(renderer.render(CIImage(color: .blue), canvas: canvas))
+    }
     func testFrameMatchingRejectsLateAndFutureFramesWithoutWaitingForFront() throws {
         let old = try frame(red: 30, green: 0, blue: 0), current = try frame(red: 120, green: 0, blue: 0), future = try frame(red: 220, green: 0, blue: 0)
         var matcher = PiPFrameMatcher()

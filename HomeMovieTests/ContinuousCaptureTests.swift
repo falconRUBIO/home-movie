@@ -94,6 +94,12 @@ final class ContinuousCaptureTests: XCTestCase {
         XCTAssertEqual(first.width, 1920); XCTAssertEqual(second.height, 1080)
         XCTAssertNotEqual(first.dataProvider?.data as Data?, second.dataProvider?.data as Data?)
     }
+    func testOnlyStartingAndRecordingCanStopATake() {
+        for state in [CameraState.starting, .recording] { XCTAssertTrue(state.canStopTake) }
+        for state in [CameraState.preparing, .ready, .finalizing, .denied, .interrupted, .failed] {
+            XCTAssertFalse(state.canStopTake)
+        }
+    }
     func testStoppingBeforeFirstFrameReturnsRecoverableError() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
         defer { try? FileManager.default.removeItem(at: url) }

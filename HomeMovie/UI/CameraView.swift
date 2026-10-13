@@ -797,7 +797,9 @@ struct CameraView: View {
             ZStack {
                 Circle().fill(.black.opacity(0.25)).frame(width: 78, height: 78)
                 Circle().strokeBorder(.white, lineWidth: 3).frame(width: 78, height: 78)
-                if countdown != nil {
+                if camera.state == .starting || camera.state == .finalizing {
+                    ProgressView().tint(.white)
+                } else if countdown != nil {
                     Image(systemName: "xmark").font(.system(size: 24, weight: .medium)).foregroundStyle(.white)
                 } else {
                     RoundedRectangle(cornerRadius: camera.recordingSessionActive ? 5 : 32)
@@ -807,7 +809,7 @@ struct CameraView: View {
         }.buttonStyle(.plain)
             .disabled(pipConfiguring || undoingTake || !camera.recordingSessionActive && camera.state != .ready)
             .opacity(!camera.recordingSessionActive && camera.state != .ready ? 0.4 : 1)
-            .accessibilityLabel(countdown != nil ? "Cancel countdown" : camera.recordingSessionActive ? "Stop recording" : "Record next scene")
+            .accessibilityLabel(countdown != nil ? "Cancel countdown" : camera.state == .starting ? "Cancel starting recording" : camera.state == .finalizing ? "Saving recording" : camera.recordingSessionActive ? "Stop recording" : "Record next scene")
     }
     @ViewBuilder private func reviewControls(movie: Movie, landscape: Bool) -> some View {
         let recent = Button { openWatch(sceneID: movie.activeScenes.last?.id) } label: {

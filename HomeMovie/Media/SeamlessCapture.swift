@@ -44,8 +44,9 @@ final class ContinuousTakeWriter {
     @discardableResult func appendVideo(_ buffer: CVPixelBuffer, at time: CMTime, sourceAngle: CGFloat? = nil) -> Bool {
         if writer.status == .failed { failure = writer.error; return false }
         guard !finishing, failure == nil, time.isNumeric, lastVideo.map({ time > $0 }) ?? true else { return false }
+        guard video.isReadyForMoreMediaData else { return false }
         if start == nil { writer.startSession(atSourceTime: time); start = time }
-        guard video.isReadyForMoreMediaData, let pool = pixels.pixelBufferPool else { return false }
+        guard let pool = pixels.pixelBufferPool else { return false }
         var destination: CVPixelBuffer?
         guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &destination) == kCVReturnSuccess,
               let destination else { return false }
@@ -65,8 +66,8 @@ final class ContinuousTakeWriter {
         guard CVPixelBufferGetWidth(buffer) == Int(size.width), CVPixelBufferGetHeight(buffer) == Int(size.height) else {
             failure = HomeMovieError.message("The camera composition changed size during recording."); return false
         }
-        if start == nil { writer.startSession(atSourceTime: time); start = time }
         guard video.isReadyForMoreMediaData else { return false }
+        if start == nil { writer.startSession(atSourceTime: time); start = time }
         guard pixels.append(buffer, withPresentationTime: time) else {
             failure = writer.error ?? HomeMovieError.message("The camera composition could not be saved."); return false
         }
@@ -284,6 +285,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         presenterDisabled = true
         timeline.setEnabled(false, at: eventTime)
         frontOutput.connection(with: .video)?.isEnabled = false
+        frontFrame = nil; matcher.clear(); presenterFrames.clear()
         if front { front = false; onSelectionChanged?() }
         onReady?(); onNotice?("PiP paused to keep this recording safe as the iPhone warms up. Rear video and audio continue.")
     }
