@@ -6,6 +6,41 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    @MainActor func testSharedPreviewShowsRearAndPresenterAtBothDisplaySizes() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let renderer = try XCTUnwrap(PiPLayoutRenderer(device: device))
+        let rear = try frame(red: 0, green: 0, blue: 230)
+        let front = try frame(red: 230, green: 0, blue: 0)
+        for canvas in [CGSize(width: 320, height: 180), CGSize(width: 960, height: 540),
+                       CGSize(width: 540, height: 960)] {
+            for size in PiPSize.allCases {
+                for orientation in PiPOrientation.allCases {
+                    let layout = PiPLayout(size: size, orientation: orientation)
+                    let rect = try XCTUnwrap(PiPGeometry.rect(layout: layout, canvas: canvas))
+                    let image = renderer.image(background: rear, presenter: front, canvas: canvas,
+                        backgroundAngle: 0, presenterAngle: 0,
+                        presentation: PiPPresentation(rect: rect, opacity: 1, enabled: true))
+                    XCTAssertGreaterThan(sample(image, point: CGPoint(x: canvas.width * 0.2, y: canvas.height * 0.8))[2], 180)
+                    XCTAssertGreaterThan(sample(image, point: CGPoint(x: rect.midX * canvas.width,
+                        y: (1 - rect.midY) * canvas.height))[0], 180)
+                }
+            }
+        }
+    }
+    @MainActor func testPreviewDrawableResizesFromSmallToLargeAndBack() throws {
+        let view = PiPMetalView(frame: CGRect(x: 0, y: 0, width: 160, height: 90),
+                               device: try XCTUnwrap(MTLCreateSystemDefaultDevice()))
+        view.autoResizeDrawable = false
+        for size in [CGSize(width: 160, height: 90), CGSize(width: 800, height: 450),
+                     CGSize(width: 300, height: 700), CGSize(width: 160, height: 90)] {
+            view.frame.size = size
+            view.resizeDrawable()
+            XCTAssertEqual(view.drawableSize, PiPFrameRenderer.previewCanvas(for:
+                CGSize(width: size.width * 2, height: size.height * 2)))
+            XCTAssertLessThanOrEqual(max(view.drawableSize.width, view.drawableSize.height), 960)
+        }
+    }
+
     func testPresenterMatchingResumesAfterTemporaryGapWithoutReset() throws {
         var matcher = PiPFrameMatcher()
         let old = try frame(red: 40, green: 0, blue: 0)

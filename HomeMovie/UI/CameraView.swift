@@ -764,7 +764,7 @@ struct CameraView: View {
                 liveCube: liveOriginal ? nil : liveCube,
                 liveActive: movie?.captureProfile == .appleLog && camera.state.showsLiveLook,
                 samplePreview: camera.options?.samplePreview == true,
-                displayPaused: showingPiPLayout,
+                displayPaused: showingPiPLayout || camera.options?.dualCameraPrepared == true,
                 onLiveLookStatus: { status in
                     Task { @MainActor in liveLookStatus = status }
                 },
@@ -788,6 +788,16 @@ struct CameraView: View {
                         lastZoomAt = Date()
                     }
                 }.onEnded { _ in pinchBase = nil; if smoothZoomOpen { camera.endSmoothInput() } })
+            if camera.options?.dualCameraPrepared == true {
+                PiPCompositionPreview(rearFrames: camera.service.pipRearFrames,
+                    frontFrames: camera.service.pipPresenterFrames, layout: camera.pipLayout,
+                    format: movie?.recordingFormat ?? activeTakeFormat ??
+                        MovieFormat.captureFormat(angle: camera.options?.angle ?? 90) ?? .portrait,
+                    liveFrames: camera.service.liveFrames, paused: showingPiPLayout,
+                    sourceFront: camera.options?.isFront == true)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
             if let countdown {
                 Text("\(countdown)").font(.system(size: 64, weight: .light, design: .rounded))
                     .foregroundStyle(.white).shadow(color: .black.opacity(0.5), radius: 8)
