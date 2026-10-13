@@ -38,9 +38,11 @@ final class PictureInPictureTests: XCTestCase {
             texture.getBytes(&bgra, bytesPerRow: 4, from: MTLRegionMake2D(x, y, 1, 1), mipmapLevel: 0)
             return bgra
         }
-        XCTAssertGreaterThan(pixel(9, 16)[0], 180) // Mirrored blue side remains on the left.
-        XCTAssertGreaterThan(pixel(27, 16)[1], 180) // Upright green top-right.
-        XCTAssertGreaterThan(pixel(27, 48)[2], 180) // Upright red bottom-right.
+        // CVPixelBuffer rows are top-down; Core Image's image coordinates are bottom-up.
+        let topLeft = pixel(9, 16), topRight = pixel(27, 16), bottomLeft = pixel(9, 48)
+        XCTAssertGreaterThan(topRight[0], 180, "Blue side: topLeft=\(topLeft), topRight=\(topRight)")
+        XCTAssertGreaterThan(topLeft[1], 180, "Upright green: \(topLeft)")
+        XCTAssertGreaterThan(bottomLeft[2], 180, "Upright red: \(bottomLeft)")
         frames.push(source, angle: 90, front: false)
         XCTAssertEqual(frames.snapshot()?.front, false)
         frames.clear(); XCTAssertNil(frames.snapshot())
