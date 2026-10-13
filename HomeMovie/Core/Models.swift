@@ -51,6 +51,8 @@ struct Scene: Codable, Identifiable, Equatable, Sendable {
     var photosCopiedAt: Date?
     var missing = false
     var profile: CaptureProfile? = nil
+    var adjustments: SceneAdjustments? = nil
+    var lightAdjustments: SceneAdjustments { adjustments ?? .neutral }
     var playableDuration: CMTime { CMTimeSubtract(trimEnd.cmTime, trimStart.cmTime) }
     var validTrim: Bool {
         trimStart.isValid && trimEnd.isValid && sourceDuration.isValid &&

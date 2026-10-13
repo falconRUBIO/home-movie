@@ -5,6 +5,9 @@ import CryptoKit
 
 struct LUTReference: Codable, Equatable, Sendable {
     static let filmica = LUTReference(id: UUID(uuidString: "BAA6B811-4136-44D8-92ED-56C78AF001CA")!, name: "Cinema")
+    static let cinemaTwo = LUTReference(id: UUID(uuidString: "2FAA1534-0DAD-41F0-928C-AC4B9E014422")!, name: "Cinema II")
+    static let cinemaThree = LUTReference(id: UUID(uuidString: "3FAA1534-0DAD-41F0-928C-AC4B9E014433")!, name: "Cinema III")
+    static let additionalBundledLooks: [(reference: LUTReference, resource: String)] = [(.cinemaTwo, "CinemaTwo"), (.cinemaThree, "CinemaThree")]
     var id: UUID
     var name: String
     var displayName: String { id == Self.filmica.id ? "Cinema" : name }
@@ -126,10 +129,15 @@ final class ColorInstruction: NSObject, AVVideoCompositionInstructionProtocol, @
     let trackID: CMPersistentTrackID
     let transform: CGAffineTransform
     let cube: ColorCube?
+    let adjustments: SceneAdjustments
     let filmEffects: FilmEffectsSettings
-    init(range: CMTimeRange, trackID: CMPersistentTrackID, transform: CGAffineTransform, cube: ColorCube?, filmEffects: FilmEffectsSettings = .off) {
-        timeRange = range; self.trackID = trackID; self.transform = transform; self.cube = cube; self.filmEffects = filmEffects
+    init(range: CMTimeRange, trackID: CMPersistentTrackID, transform: CGAffineTransform, cube: ColorCube?, filmEffects: FilmEffectsSettings = .off, adjustments: SceneAdjustments = .neutral) {
+        timeRange = range; self.trackID = trackID; self.transform = transform; self.cube = cube; self.filmEffects = filmEffects; self.adjustments = adjustments
         requiredSourceTrackIDs = [NSNumber(value: trackID)]
+    }
+    func applyingColor(to source: CIImage) throws -> CIImage {
+        let looked = try cube?.apply(to: source) ?? source
+        return try adjustments.apply(to: looked)
     }
 }
 final class LogVideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
@@ -159,7 +167,7 @@ final class LogVideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendabl
                     throw HomeMovieError.message("A video frame could not be prepared.")
                 }
                 var image = CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()])
-                if let cube = instruction.cube { image = try cube.apply(to: image) }
+                image = try instruction.applyingColor(to: image)
                 let sourceFlip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: CGFloat(CVPixelBufferGetHeight(source)))
                 let outputFlip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: request.renderContext.size.height)
                 image = image.transformed(by: sourceFlip.concatenating(instruction.transform).concatenating(outputFlip))

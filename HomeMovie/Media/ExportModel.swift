@@ -34,7 +34,17 @@ import UIKit
     }
     deinit { if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) } }
     static func cachePrefix(movie: Movie) -> String {
-        "\(movie.id)-r\(movie.revision)-audio2-film\(FilmEffectsSettings.engineVersion)-\(movie.exportEffects.cacheIdentity)-"
+        "\(movie.id)-r\(movie.revision)-audio2-light\(SceneAdjustments.engineVersion)-film\(FilmEffectsSettings.engineVersion)-\(movie.exportEffects.cacheIdentity)-"
+    }
+    static func singleSceneMovie(movie: Movie, scene: Scene) throws -> Movie {
+        guard movie.activeScenes.contains(where: { $0.id == scene.id }), scene.deletedAt == nil,
+              !scene.missing, scene.validTrim else { throw HomeMovieError.message("This scene is unavailable.") }
+        try scene.lightAdjustments.validate()
+        var clip = movie
+        // Scene identity separates clip caches from the full movie and other clips.
+        clip.id = scene.id; clip.scenes = [scene]; clip.filmEffects = nil
+        clip.name = "Scene \(scene.sequence + 1)"
+        return clip
     }
     func invalidate() {
         guard !running else { return }

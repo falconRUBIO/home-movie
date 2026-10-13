@@ -30,7 +30,7 @@ for paths, refs, builds in [(app_sources, app_files, app_build), (tests, test_fi
         ref = add(relative, 'PBXFileReference', lastKnownFileType='sourcecode.swift', path=relative, sourceTree='<group>')
         refs.append(ref); builds.append(add(relative + ':build', 'PBXBuildFile', fileRef=ref))
 resources = []
-for path, filetype in [('HomeMovie/PrivacyInfo.xcprivacy', 'text.xml'), ('HomeMovie/Assets.xcassets', 'folder.assetcatalog'), ('HomeMovie/Resources/AppleLogToRec709.lut', 'file'), ('HomeMovie/Resources/Filmica.json', 'text.json')]:
+for path, filetype in [('HomeMovie/PrivacyInfo.xcprivacy', 'text.xml'), ('HomeMovie/Assets.xcassets', 'folder.assetcatalog'), ('HomeMovie/Resources/AppleLogToRec709.lut', 'file'), ('HomeMovie/Resources/Filmica.json', 'text.json'), ('HomeMovie/Resources/CinemaTwo.json', 'text.json'), ('HomeMovie/Resources/CinemaThree.json', 'text.json')]:
     ref = add(path, 'PBXFileReference', lastKnownFileType=filetype, path=path, sourceTree='<group>')
     app_files.append(ref); resources.append(add(path + ':build', 'PBXBuildFile', fileRef=ref))
 app = add('app-product', 'PBXFileReference', explicitFileType='wrapper.application', path='HomeMovie.app', sourceTree='BUILT_PRODUCTS_DIR')

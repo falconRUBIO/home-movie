@@ -217,6 +217,10 @@ struct CameraView: View {
         }
         .onChange(of: camera.options?.zoom) { _, _ in
             if !zoomDragging && !manualZoomTargetShown { syncSmoothPosition() }
+            if smoothZoomOpen, preparedDollyTarget == nil, activeDolly == nil,
+               camera.state == .ready, countdown == nil {
+                preparedDollyStart = camera.options?.zoom
+            }
         }
         .task(id: camera.options?.smoothMoving) { await finishDollyIfIdle() }
         .onChange(of: camera.options?.isPiPEnabled) { _, enabled in if enabled == true { enablePiPAfterPreparation = false } }
@@ -407,6 +411,9 @@ struct CameraView: View {
         guard !Task.isCancelled, camera.options?.smoothMoving == false, !zoomDragging,
               activeDolly?.id == observedRouteID else { return }
         manualZoomTargetShown = false; syncSmoothPosition()
+        if smoothZoomOpen, preparedDollyTarget == nil, activeDolly == nil {
+            preparedDollyStart = camera.options?.zoom
+        }
         let actualZoom = Double(camera.options?.zoom ?? 0)
         if let route = activeDolly, route.hasArrived(at: actualZoom) {
             dollyGuidanceLearned = true
@@ -453,8 +460,8 @@ struct CameraView: View {
         UISelectionFeedbackGenerator().selectionChanged()
         if dollyDelayedStart, camera.state == .ready {
             activeDolly = nil
-            if preparedDollyStart == nil {
-                preparedDollyStart = camera.options?.zoom; preparedDollyTarget = nil
+            if preparedDollyTarget == nil {
+                preparedDollyStart = camera.options?.zoom
             }
             if let start = preparedDollyStart, abs(start - factor) > 0.001 {
                 preparedDollyTarget = factor
@@ -484,7 +491,7 @@ struct CameraView: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 } else if dollyDelayedStart, camera.state == .ready, preparedDollyStart != nil {
-                    Text("Choose the destination lens")
+                    Text("Pinch or drag to refine the start, then choose a destination")
                         .font(.caption).foregroundStyle(.secondary)
                 } else if zoomDragging || pinchBase != nil {
                     Text("Manual Dolly").font(.caption).foregroundStyle(.secondary)
@@ -542,7 +549,8 @@ struct CameraView: View {
             List {
                 Section("Move between lenses") {
                     Text("Your current zoom is the starting point. Tap another lens to move smoothly to it. The outlined lens is your destination, and the dot follows the camera’s actual zoom.")
-                    Text("Tap a different lens during a move to change the destination. Drag the track or pinch the viewfinder to take manual control.")
+                    Text("Tap a different lens during a move to choose a new destination. With no destination selected, dragging or pinching controls zoom manually.")
+                    Text("Pinch or drag to fine-tune your start before selecting a destination. After selecting it, pinch or drag to fine-tune the end. The route shows your adjusted zoom values. During a move, adjustments preserve its remaining time.")
                     Text("Opening or closing Dolly does not start or stop recording.")
                     Text("Tap the video to focus, including during a Dolly move. Lens and Dolly controls adjust zoom without changing focus.")
                 }
@@ -610,6 +618,10 @@ struct CameraView: View {
                         Rectangle().fill(.white.opacity(0.45)).frame(width: 1, height: 6)
                             .offset(x: 8 + CGFloat(SmoothZoomFilter.position(Double(lens.factor), minimum: Double(options.minimum), maximum: Double(options.maximum))) * width)
                     }
+                    if let target = preparedDollyTarget, activeDolly == nil {
+                        Circle().strokeBorder(.yellow, lineWidth: 2).frame(width: 18, height: 18)
+                            .offset(x: CGFloat(SmoothZoomFilter.position(Double(target), minimum: Double(options.minimum), maximum: Double(options.maximum))) * width - 1)
+                    }
                     Circle().fill(activeDolly == nil ? .white : .yellow).frame(width: 14, height: 14)
                         .offset(x: 1 + CGFloat(actualPosition) * width)
                 }.frame(height: 44).contentShape(Rectangle())
@@ -625,7 +637,7 @@ struct CameraView: View {
                 .accessibilityElement(children: .ignore).accessibilityLabel("Zoom")
                 .accessibilityValue(String(format: "%.1f times", Double(options.zoom * options.multiplier)))
                 .accessibilityAdjustableAction { direction in
-                    let factor = Double(options.zoom) * pow(2, direction == .increment ? 0.25 : -0.25)
+                    let factor = Double(preparedDollyTarget ?? activeDolly.map { CGFloat($0.destination) } ?? options.zoom) * pow(2, direction == .increment ? 0.05 : -0.05)
                     setSmoothPosition(SmoothZoomFilter.position(factor, minimum: Double(options.minimum), maximum: Double(options.maximum)), options: options)
                 }
     }
@@ -671,10 +683,21 @@ struct CameraView: View {
     }
     private func setSmoothPosition(_ position: Double, options: CameraOptions, inputTime: Double? = nil, inputEnded: Bool = false) {
         guard smoothZoomOpen, countdown == nil, position.isFinite else { return }
-        preparedDollyStart = nil; preparedDollyTarget = nil; activeDolly = nil
         smoothPosition = min(1, max(0, position))
-        manualZoomTargetShown = true
-        camera.smoothZoom(to: CGFloat(SmoothZoomFilter.factor(smoothPosition, minimum: Double(options.minimum), maximum: Double(options.maximum))), inputTime: inputTime, inputEnded: inputEnded)
+        let factor = CGFloat(SmoothZoomFilter.factor(smoothPosition, minimum: Double(options.minimum), maximum: Double(options.maximum)))
+        if let route = activeDolly {
+            activeDolly = route.adjustingDestination(to: Double(factor))
+            camera.adjustDollyDestination(to: factor)
+        } else if preparedDollyTarget != nil {
+            // Preview the adjusted end without losing the stored start.
+            preparedDollyTarget = factor
+            manualZoomTargetShown = true
+            camera.smoothZoom(to: factor, inputTime: inputTime, inputEnded: inputEnded)
+        } else {
+            preparedDollyStart = factor
+            manualZoomTargetShown = true
+            camera.smoothZoom(to: factor, inputTime: inputTime, inputEnded: inputEnded)
+        }
     }
     private func syncSmoothPosition() {
         guard let options = camera.options else { return }
@@ -736,13 +759,11 @@ struct CameraView: View {
                 .accessibilityAction(named: "Decrease brightness") { camera.exposure((camera.options?.exposureBias ?? 0) - 0.5) }
                 .gesture(MagnificationGesture().onChanged { value in
                     guard countdown == nil, camera.state == .ready || camera.state == .recording, let options = camera.options else { return }
-                    if pinchBase == nil { pinchBase = options.zoom }
+                    if pinchBase == nil { pinchBase = smoothZoomOpen ? (preparedDollyTarget ?? activeDolly.map { CGFloat($0.destination) } ?? options.zoom) : options.zoom }
                     if Date().timeIntervalSince(lastZoomAt) > 0.05 {
                         let target = (pinchBase ?? options.zoom) * value
                         if smoothZoomOpen {
-                            manualZoomTargetShown = false
-                            preparedDollyStart = nil; preparedDollyTarget = nil; activeDolly = nil
-                            camera.smoothZoom(to: target, inputTime: Date().timeIntervalSinceReferenceDate)
+                            setSmoothPosition(SmoothZoomFilter.position(Double(target), minimum: Double(options.minimum), maximum: Double(options.maximum)), options: options, inputTime: Date().timeIntervalSinceReferenceDate)
                         } else { camera.zoom(target) }
                         lastZoomAt = Date()
                     }

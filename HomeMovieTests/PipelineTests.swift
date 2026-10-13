@@ -5,6 +5,55 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    @MainActor func testSceneLightEditsPersistIndependentlyAndClipExportKeepsOnlySelectedTrim() async throws {
+        let store = try await makeStore()
+        let project = try await store.create(name: "Clip light", format: .landscape)
+        _ = try await record(project, into: store); _ = try await record(project, into: store)
+        let beforeSnapshots = await store.snapshot()
+        let before = try XCTUnwrap(beforeSnapshots.first)
+        let first = try XCTUnwrap(before.activeScenes.first), last = try XCTUnwrap(before.activeScenes.last)
+        let originalURL = store.root.appendingPathComponent(first.source)
+        let bytes = try Data(contentsOf: originalURL)
+        let lutURL = store.root.appendingPathComponent(LUTReference.filmica.path)
+        let lutBytes = try Data(contentsOf: lutURL)
+        let recipe = SceneAdjustments(exposure: 0.1, shadows: 0.2, highlights: -0.3)
+        try await store.editScene(movieID: project.id, sceneID: first.id,
+            start: CMTime(seconds: 0.25, preferredTimescale: 600), end: CMTime(seconds: 1.75, preferredTimescale: 600), adjustments: recipe)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let snapshots = await reopened.snapshot()
+        let movie = try XCTUnwrap(snapshots.first)
+        let edited = try XCTUnwrap(movie.activeScenes.first)
+        XCTAssertEqual(edited.lightAdjustments, recipe)
+        XCTAssertEqual(movie.activeScenes.last?.id, last.id)
+        XCTAssertEqual(movie.activeScenes.last?.lightAdjustments, .neutral)
+        XCTAssertEqual(try Data(contentsOf: originalURL), bytes)
+        XCTAssertEqual(try Data(contentsOf: lutURL), lutBytes)
+        let watch = try await MediaAssembler().build(movie: movie, root: store.root)
+        let firstInstruction = try XCTUnwrap(watch.videoComposition.instructions.first as? ColorInstruction)
+        XCTAssertEqual(firstInstruction.adjustments, recipe)
+        let clip = try ExportModel.singleSceneMovie(movie: movie, scene: edited)
+        XCTAssertEqual(clip.activeScenes.map(\.id), [first.id])
+        XCTAssertEqual(clip.duration.seconds, 1.5, accuracy: 0.0001)
+        XCTAssertNotEqual(ExportModel.cachePrefix(movie: clip), ExportModel.cachePrefix(movie: movie))
+        let export = try await MediaAssembler().build(movie: clip, root: store.root, filmEffects: clip.exportEffects)
+        XCTAssertEqual(export.duration.seconds, 1.5, accuracy: 0.0001)
+        XCTAssertEqual((export.videoComposition.instructions.first as? ColorInstruction)?.adjustments, recipe)
+        XCTAssertEqual(export.videoComposition.renderSize, movie.format.canvas)
+        let original = try await MediaAssembler().build(movie: movie, root: store.root, showOriginalLog: true)
+        XCTAssertEqual((original.videoComposition.instructions.first as? ColorInstruction)?.adjustments, .neutral)
+    }
+    func testSuppliedLooksAreInstalledAndOriginalCinemaRemainsDefault() async throws {
+        let store = try await makeStore()
+        let looks = await store.availableLooks()
+        XCTAssertTrue([LUTReference.filmica.id, LUTReference.cinemaTwo.id, LUTReference.cinemaThree.id].allSatisfy { id in looks.contains { $0.id == id } })
+        let movie = try await store.create(name: "Default look", format: .landscape, profile: .appleLog)
+        XCTAssertEqual(movie.look?.id, LUTReference.filmica.id)
+        for (reference, _) in LUTReference.additionalBundledLooks {
+            let cube = try ColorCube.load(reference, root: store.root)
+            XCTAssertEqual(cube.dimension, 65); try cube.validate()
+        }
+    }
+
     func testFilmEffectsStandardPreviewAndExportShareRenderingWhileWatchStaysClean() async throws {
         let store = try await makeStore()
         let original = try await store.create(name: "Effects integration", format: .landscape)
@@ -735,6 +784,37 @@ final class PipelineTests: XCTestCase {
             previous = value
         }
         XCTAssertEqual(fast.value, 1, accuracy: 0.001)
+    }
+    func testDollyFineAdjustmentKeepsStartAndCompletionIdentity() throws {
+        let route = try XCTUnwrap(DollyZoomRoute(start: 1.3, destination: 8, seconds: 30))
+        let adjusted = route.adjustingDestination(to: 7.6)
+        XCTAssertEqual(adjusted.id, route.id)
+        XCTAssertEqual(adjusted.start, 1.3)
+        XCTAssertEqual(adjusted.destination, 7.6)
+        XCTAssertEqual(adjusted.seconds, 30)
+        XCTAssertTrue(adjusted.hasArrived(at: 7.6))
+        XCTAssertFalse(adjusted.hasArrived(at: 8))
+        XCTAssertEqual(adjusted.adjustingDestination(to: .nan), adjusted)
+        XCTAssertEqual(route.adjustingDestination(to: 1.3).progress(at: 1.3), 1)
+    }
+    func testDollyEndpointRefinementPreservesRemainingTimeAndMomentum() throws {
+        for duration in [15, 20, 25, 30] {
+            XCTAssertEqual(DollyZoomDuration.validated(duration), duration)
+            for (start, end, refined) in [(1.3, 8.0, 7.6), (8.0, 1.0, 1.3)] {
+                var filter = try XCTUnwrap(SmoothZoomFilter(current: start, minimum: 0.5, maximum: 16))
+                filter.setTarget(end, duration: Double(duration))
+                _ = filter.advance(seconds: Double(duration) / 3, rate: 0.75)
+                let position = filter.value, velocity = filter.velocity
+                let remaining = try XCTUnwrap(filter.remainingDuration)
+                filter.adjustTimedDestination(to: refined)
+                XCTAssertEqual(filter.value, position)
+                XCTAssertEqual(filter.velocity, velocity)
+                XCTAssertEqual(try XCTUnwrap(filter.remainingDuration), remaining, accuracy: 0.000001)
+                for _ in 0..<600 { _ = filter.advance(seconds: remaining / 600, rate: 0.75) }
+                XCTAssertEqual(filter.value, refined, accuracy: 0.0001)
+                XCTAssertTrue(filter.isSettled)
+            }
+        }
     }
     func testDollyDurationControlsFullMoveInBothDirections() throws {
         XCTAssertEqual(DollyZoomDuration.validated(99), 3)

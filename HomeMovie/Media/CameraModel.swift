@@ -166,6 +166,9 @@ struct RecordingFlipHandoff {
         if active, [.ready, .recording].contains(state) { service.smoothZoom(to: factor, inputTime: inputTime, inputEnded: inputEnded) }
     }
     func endSmoothInput() { service.endSmoothInput() }
+    func adjustDollyDestination(to factor: CGFloat) {
+        if active, [.ready, .recording].contains(state) { service.adjustDollyDestination(to: factor) }
+    }
     func dollyZoom(to factor: CGFloat, seconds: Int) { if active, [.ready, .recording].contains(state) { service.dollyZoom(to: factor, seconds: seconds) } }
     func endSmoothZoom() { service.endSmoothZoom() }
     func focus(at point: CGPoint, locked: Bool = false) -> Bool {

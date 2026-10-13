@@ -60,6 +60,7 @@ actor MediaAssembler {
         guard !scenes.isEmpty else { throw HomeMovieError.message("Record a scene first.") }
         let usesLog = movie.captureProfile == .appleLog || scenes.contains { $0.profile == .appleLog }
         let cube: ColorCube? = usesLog && !showOriginalLog ? try movie.look.map { try ColorCube.load($0, root: root) } ?? ColorCube.appleStandard.get() : nil
+        let usesCustomCompositor = usesLog || effects.isActive || forFilmEffectsPreview || scenes.contains { $0.lightAdjustments.isActive }
         let composition = AVMutableComposition()
         guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
             throw HomeMovieError.message("Could not prepare movie tracks.")
@@ -71,6 +72,7 @@ actor MediaAssembler {
         var instructions: [AVVideoCompositionInstructionProtocol] = []
         for scene in scenes {
             try Task.checkCancellation()
+            try scene.lightAdjustments.validate()
             guard !scene.missing, scene.validTrim else { throw HomeMovieError.message("A scene is missing or has an invalid trim. Restore or remove it before playing this movie.") }
             let asset = AVURLAsset(url: root.appendingPathComponent(scene.source))
             guard let sourceVideo = try await asset.loadTracks(withMediaType: .video).first else { throw HomeMovieError.message("A scene has no video track.") }
@@ -110,10 +112,11 @@ actor MediaAssembler {
             instruction.timeRange = CMTimeRange(start: cursor, duration: scene.playableDuration)
             instruction.backgroundColor = CGColor(gray: 0, alpha: 1)
             instruction.layerInstructions = [layer]
-            if usesLog || effects.isActive || forFilmEffectsPreview {
+            if usesCustomCompositor {
                 instructions.append(ColorInstruction(range: instruction.timeRange, trackID: videoTrack.trackID,
                     transform: Self.fitTransform(size: naturalSize, preferred: preferred, canvas: movie.format.canvas),
-                    cube: (scene.profile ?? movie.captureProfile) == .appleLog ? cube : nil, filmEffects: effects))
+                    cube: (scene.profile ?? movie.captureProfile) == .appleLog ? cube : nil, filmEffects: effects,
+                    adjustments: showOriginalLog ? .neutral : scene.lightAdjustments))
             } else { instructions.append(instruction) }
             cursor = CMTimeAdd(cursor, scene.playableDuration)
         }
@@ -122,7 +125,7 @@ actor MediaAssembler {
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
         videoComposition.sourceTrackIDForFrameTiming = videoTrack.trackID
         videoComposition.instructions = instructions
-        if usesLog || effects.isActive || forFilmEffectsPreview {
+        if usesCustomCompositor {
             videoComposition.customVideoCompositorClass = LogVideoCompositor.self
             videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
             videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
