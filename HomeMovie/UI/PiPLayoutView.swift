@@ -117,27 +117,49 @@ struct PiPCompositionPreview: UIViewRepresentable {
     let layout: PiPLayout
     let format: MovieFormat
     var obstacles: [CGRect] = []
+    var liveFrames: LiveFrames? = nil
+    var paused = false
+    var sourceFront = false
     func makeCoordinator() -> PiPLayoutRenderer? {
         MTLCreateSystemDefaultDevice().flatMap { PiPLayoutRenderer(device: $0) }
     }
     func makeUIView(context: Context) -> MTKView {
-        let view = MTKView(frame: .zero, device: context.coordinator?.device)
+        let view = PiPMetalView(frame: .zero, device: context.coordinator?.device)
         view.framebufferOnly = false; view.colorPixelFormat = .bgra8Unorm
         view.isUserInteractionEnabled = false; view.preferredFramesPerSecond = 30
+        view.autoResizeDrawable = false; view.enableSetNeedsDisplay = false
+        view.isOpaque = true; view.backgroundColor = .black
+        (view.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         view.delegate = context.coordinator; return view
     }
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator?.rear = rearFrames; context.coordinator?.front = frontFrames
         context.coordinator?.layout = layout; context.coordinator?.format = format
         context.coordinator?.obstacles = obstacles
+        context.coordinator?.live = liveFrames
+        context.coordinator?.sourceFront = sourceFront
+        view.isPaused = paused
+        (view as? PiPMetalView)?.resizeDrawable()
     }
     static func dismantleUIView(_ view: MTKView, coordinator: PiPLayoutRenderer?) { view.isPaused = true; view.delegate = nil }
+}
+// Size from view bounds before acquiring a drawable, never from last frame's texture.
+final class PiPMetalView: MTKView {
+    func resizeDrawable() {
+        let scale = window?.screen.scale ?? 2
+        let size = PiPFrameRenderer.previewCanvas(for: CGSize(width: bounds.width * scale, height: bounds.height * scale))
+        if size != .zero, drawableSize != size { drawableSize = size }
+    }
+    override func layoutSubviews() { super.layoutSubviews(); resizeDrawable() }
+    override func didMoveToWindow() { super.didMoveToWindow(); resizeDrawable() }
 }
 @MainActor final class PiPLayoutRenderer: NSObject, MTKViewDelegate {
     let device: MTLDevice
     private let queue: MTLCommandQueue
     private let context: CIContext
     private var rendering = false
+    var sourceFront = false
+    var live: LiveFrames?
     var rear: LiveFrames?
     var front: LiveFrames?
     var layout = PiPLayout()
@@ -148,16 +170,32 @@ struct PiPCompositionPreview: UIViewRepresentable {
         self.device = device; self.queue = queue
         context = CIContext(mtlCommandQueue: queue, options: [.cacheIntermediates: false, .name: "HomeMovie.PiPLayout"]); super.init()
     }
+    func image(background: CVPixelBuffer, presenter: CVPixelBuffer?, canvas: CGSize,
+               backgroundAngle: CGFloat, presenterAngle: CGFloat, presentation: PiPPresentation) -> CIImage {
+        PiPCompositor.image(background: background, presenter: presenter, canvas: canvas,
+            backgroundAngle: backgroundAngle, presenterAngle: presenterAngle, presentation: presentation)
+    }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { }
     func draw(in view: MTKView) {
-        let previewSize = PiPFrameRenderer.previewCanvas(for: view.drawableSize)
-        if previewSize != .zero, view.drawableSize != previewSize { view.drawableSize = previewSize }
-        guard !rendering, let rear = rear?.snapshot(), let drawable = view.currentDrawable, let command = queue.makeCommandBuffer() else { return }
-        let front = front?.snapshot(), canvas = CGSize(width: drawable.texture.width, height: drawable.texture.height)
-        let presentation = PiPPresentation(rect: PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero, opacity: 1, enabled: true, corner: layout.corner)
-        let image = PiPCompositor.image(background: rear.buffer, presenter: front?.buffer, canvas: canvas,
-            backgroundAngle: (MovieFormat.captureFormat(angle: rear.angle ?? 90) ?? .portrait).recordingAngle(observed: rear.angle ?? 90),
-            presenterAngle: (MovieFormat.captureFormat(angle: front?.angle ?? 90) ?? .portrait).recordingAngle(observed: front?.angle ?? 90), presentation: presentation)
+        (view as? PiPMetalView)?.resizeDrawable()
+        guard !rendering, !view.isPaused, view.bounds.width > 0, view.bounds.height > 0 else { return }
+        let liveSource = live?.snapshot()
+        guard let background = liveSource ?? rear?.snapshot(),
+              let drawable = view.currentDrawable, let command = queue.makeCommandBuffer() else { return }
+        let presenter = front?.snapshot()
+        let canvas = CGSize(width: drawable.texture.width, height: drawable.texture.height)
+        var image = image(background: background.buffer, presenter: live != nil ? liveSource?.pip?.presenter : presenter?.buffer,
+            canvas: canvas,
+            backgroundAngle: liveSource?.pip?.backgroundAngle ?? (live != nil ? background.angle ?? 90 :
+                (MovieFormat.captureFormat(angle: background.angle ?? 90) ?? .portrait).recordingAngle(observed: background.angle ?? 90)),
+            presenterAngle: liveSource?.pip?.presenterAngle ??
+                (MovieFormat.captureFormat(angle: presenter?.angle ?? 90) ?? .portrait).recordingAngle(observed: presenter?.angle ?? 90),
+            presentation: live != nil ? (liveSource?.pip?.presentation ?? PiPPresentation()) :
+                PiPPresentation(rect: PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero,
+                    opacity: 1, enabled: true, corner: layout.corner))
+        if live != nil, sourceFront, liveSource?.pip == nil {
+            image = image.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: canvas.width, ty: 0))
+        }
         let destination = CIRenderDestination(mtlTexture: drawable.texture, commandBuffer: command)
         destination.isFlipped = true; destination.colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
         do {
