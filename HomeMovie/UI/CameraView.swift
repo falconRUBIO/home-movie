@@ -248,7 +248,8 @@ struct CameraView: View {
                 format: movie?.recordingFormat ?? MovieFormat.captureFormat(angle: camera.options?.angle ?? 90) ?? .portrait,
                 rearFrames: camera.service.pipRearFrames, frontFrames: camera.service.pipPresenterFrames,
                 ready: camera.options?.piPAvailable == true, canPrepare: camera.options?.canPreparePiP == true,
-                logMode: movie?.captureProfile == .appleLog, onPrepare: { enableDualCamera() })
+                logMode: movie?.captureProfile == .appleLog, obstacles: normalizedPiPObstacles,
+                onPrepare: { enableDualCamera() })
         }
         .sheet(isPresented: $showingPiPCompatibility) { pipCompatibility }
         .alert("Recording Details", isPresented: $showingErrorDetails) {

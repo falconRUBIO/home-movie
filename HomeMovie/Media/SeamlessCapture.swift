@@ -358,6 +358,8 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     }
     func captureOutput(_ output: AVCaptureOutput, didOutput sample: CMSampleBuffer, from connection: AVCaptureConnection) {
         if output === audioOutput { take?.appendAudio(sample); return }
+        // Disabling a connection does not cancel frames already queued for delivery.
+        guard output !== frontOutput || !presenterDisabled else { return }
         guard let source = CMSampleBufferGetImageBuffer(sample),
               let image = (output === frontOutput ? frontCopies : backCopies).copy(source) else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sample)

@@ -93,7 +93,7 @@ struct PiPLayoutView: View {
                 layout: layout, format: format, obstacles: obstacles)
             if !ready {
                 GeometryReader { geometry in
-                    let rect = PiPGeometry.rect(layout: layout, canvas: geometry.size, obstacles: obstacles) ?? .zero
+                    let rect = PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero
                     ZStack {
                         Color(white: 0.12)
                         Image(systemName: format == .portrait ? "rectangle.portrait" : "rectangle")
@@ -154,7 +154,7 @@ struct PiPCompositionPreview: UIViewRepresentable {
         if previewSize != .zero, view.drawableSize != previewSize { view.drawableSize = previewSize }
         guard !rendering, let rear = rear?.snapshot(), let drawable = view.currentDrawable, let command = queue.makeCommandBuffer() else { return }
         let front = front?.snapshot(), canvas = CGSize(width: drawable.texture.width, height: drawable.texture.height)
-        let presentation = PiPPresentation(rect: PiPGeometry.rect(layout: layout, canvas: canvas, obstacles: obstacles) ?? .zero, opacity: 1, enabled: true, corner: layout.corner)
+        let presentation = PiPPresentation(rect: PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero, opacity: 1, enabled: true, corner: layout.corner)
         let image = PiPCompositor.image(background: rear.buffer, presenter: front?.buffer, canvas: canvas,
             backgroundAngle: (MovieFormat.captureFormat(angle: rear.angle ?? 90) ?? .portrait).recordingAngle(observed: rear.angle ?? 90),
             presenterAngle: (MovieFormat.captureFormat(angle: front?.angle ?? 90) ?? .portrait).recordingAngle(observed: front?.angle ?? 90), presentation: presentation)
