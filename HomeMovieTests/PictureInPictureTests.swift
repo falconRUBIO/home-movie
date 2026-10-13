@@ -6,6 +6,30 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testLegacyLayoutKeepsLandscapeAndNewOrientationRoundTrips() throws {
+        let legacy = Data(#"{"corner":"bottomRight","size":"small"}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(PiPLayout.self, from: legacy).orientation, .landscape)
+        let portrait = PiPLayout(corner: .topLeft, size: .medium, orientation: .portrait)
+        XCTAssertEqual(try JSONDecoder().decode(PiPLayout.self, from: JSONEncoder().encode(portrait)), portrait)
+    }
+    func testBothInsetShapesFitBothMovieOrientationsAndSettleWithoutChangingShape() throws {
+        for canvas in [CGSize(width: 1920, height: 1080), CGSize(width: 1080, height: 1920)] {
+            for orientation in PiPOrientation.allCases {
+                for size in PiPSize.allCases {
+                    for corner in PiPCorner.allCases {
+                        let layout = PiPLayout(corner: corner, size: size, orientation: orientation)
+                        let rect = try XCTUnwrap(PiPGeometry.rect(layout: layout, canvas: canvas))
+                        XCTAssertTrue(CGRect(x: 0, y: 0, width: 1, height: 1).contains(rect))
+                        XCTAssertEqual(rect.width * canvas.width / (rect.height * canvas.height), orientation == .portrait ? 0.75 : 4.0 / 3, accuracy: 0.001)
+                        var timeline = PiPTimeline(); timeline.setLayout(layout)
+                        timeline.drag(to: CGPoint(x: 0.1, y: 0.1), at: .zero, canvas: canvas, obstacles: [])
+                        XCTAssertEqual(timeline.settle(at: .zero, canvas: canvas, obstacles: []).orientation, orientation)
+                    }
+                }
+            }
+        }
+    }
+
     func testLivePairIsAtomicAndClearedWhenReturningToOrdinaryFrames() throws {
         let rear = try frame(red: 0, green: 0, blue: 220), front = try frame(red: 220, green: 0, blue: 0)
         let frames = LiveFrames()

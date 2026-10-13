@@ -594,8 +594,24 @@ struct CameraView: View {
             .frame(maxWidth: 360).disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum || countdown != nil)
     }
     private func dollyZoomValue(options: CameraOptions) -> some View {
-        Text(zoomLabel(options.zoom, multiplier: options.multiplier))
-            .font(.caption.monospacedDigit()).frame(minWidth: 42)
+        Menu {
+            Section("Zoom") {
+                ForEach(options.lenses.filter { $0.factor >= options.minimum && $0.factor <= options.maximum }) { lens in
+                    Button(lens.label) { selectLens(lens.factor) }
+                }
+            }
+            Section("Extended zoom") {
+                ForEach(ExtendedZoomTargets.available(minimum: options.minimum, maximum: options.maximum,
+                    multiplier: options.multiplier), id: \.self) { factor in
+                    Button(zoomLabel(factor, multiplier: options.multiplier)) { selectLens(factor) }
+                }
+            }
+        } label: {
+            Text(zoomLabel(options.zoom, multiplier: options.multiplier))
+                .font(.caption.monospacedDigit()).frame(minWidth: 42, minHeight: 44)
+        }.accessibilityLabel("Zoom target")
+            .accessibilityValue(zoomLabel(options.zoom, multiplier: options.multiplier))
+            .accessibilityHint("Choose a lens or deeper zoom supported by this camera. Uses your Dolly duration.")
     }
     private func dollyTrack(options: CameraOptions) -> some View {
             GeometryReader { geometry in
@@ -983,7 +999,7 @@ struct CameraView: View {
     }
     private func movePiP(to corner: PiPCorner) {
         let format = movie?.recordingFormat ?? activeTakeFormat ?? MovieFormat.captureFormat(angle: camera.options?.angle ?? 90) ?? .portrait
-        let center = PiPGeometry.desiredCenter(corner: corner, canvas: format.canvas, size: camera.pipLayout.size)
+        let center = PiPGeometry.desiredCenter(corner: corner, canvas: format.canvas, size: camera.pipLayout.size, orientation: camera.pipLayout.orientation)
         camera.dragPiP(to: center, finished: true)
     }
     private var pipCompatibility: some View {

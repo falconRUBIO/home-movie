@@ -57,6 +57,16 @@ struct LensChoice: Identifiable, Equatable, Sendable {
         return choices
     }
 }
+enum ExtendedZoomTargets {
+    static func available(minimum: CGFloat, maximum: CGFloat, multiplier: CGFloat) -> [CGFloat] {
+        guard minimum.isFinite, maximum.isFinite, maximum > minimum,
+              multiplier.isFinite, multiplier > 0 else { return [] }
+        let stops: [CGFloat] = [10, 15, 20, 24, 30, 40, 60]
+        var factors = stops.map { $0 / multiplier }.filter { $0 >= minimum && $0 <= maximum }
+        if !factors.contains(where: { abs($0 - maximum) < 0.001 }) { factors.append(maximum) }
+        return factors.sorted()
+    }
+}
 enum LogRecordingCodec {
     // ProRes FourCCs avoid SDK spelling changes; each is checked against the output at runtime.
     static let proResLT = AVVideoCodecType(rawValue: "apcs")

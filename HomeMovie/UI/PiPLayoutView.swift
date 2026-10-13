@@ -39,19 +39,25 @@ struct PiPLayoutView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    ZStack {
-                        Color.black
-                        PiPCompositionPreview(rearFrames: rearFrames, frontFrames: frontFrames, layout: layout, format: format, obstacles: obstacles)
-                        if !ready {
-                            VStack(spacing: 6) {
-                                Image(systemName: "rectangle.on.rectangle").font(.title2)
-                                Text(logMode ? "Switch to Standard to use PiP" : "Enable Dual Camera for live framing").font(.caption).multilineTextAlignment(.center)
-                            }.foregroundStyle(.white.opacity(0.8)).padding()
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    preview
+                        .frame(maxWidth: .infinity)
+                        .frame(height: min(300, geometry.size.height * 0.43))
+                        .background(.black)
+                    Form {
+                        Section("Presenter") {
+                            Picker("Orientation", selection: $layout.orientation) {
+                                ForEach(PiPOrientation.allCases) { orientation in
+                                    Text(orientation.title).tag(orientation)
+                                }
+                            }.pickerStyle(.segmented)
+                            Picker("Size", selection: $layout.size) {
+                                ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
+                            }.pickerStyle(.segmented)
+                        } footer: {
+                            Text("The inset has its own shape, independent of the main video. Your presenter stays upright and unmirrored.")
                         }
-                    }.aspectRatio(format.aspect, contentMode: .fit).frame(maxHeight: 180).listRowInsets(EdgeInsets())
-                } footer: { Text("The presenter is unmirrored in both the preview and the saved clip. Placement is recorded into the footage.") }
                 Section("Position") {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: dynamicTypeSize.isAccessibilitySize ? 1 : 2), spacing: 8) {
                         ForEach(PiPCorner.allCases) { corner in
@@ -66,26 +72,43 @@ struct PiPLayoutView: View {
                         }
                     }
                 }
-                Section {
-                    Picker("Inset size", selection: $layout.size) {
-                        ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
-                    }.pickerStyle(.segmented)
-                } header: {
-                    Text("Size")
-                } footer: { Text("During a take, hold the inset briefly and drag it to another corner. Change its size before the next take.") }
                 if !ready {
                     Section {
                         if logMode { Text(CameraCompatibility.logPiPExplanation) }
                         else { Button("Use Dual Camera", action: onPrepare).disabled(!canPrepare) }
                     } footer: {
-                        Text(logMode ? "Choose a Standard movie before recording with PiP." : canPrepare ? "1080p · 30 fps · SDR · H.264. Uses the rear 1× wide camera with digital zoom and one microphone. Ordinary recording and Apple Log keep their existing setup." : "This iPhone cannot use the required front/rear camera combination. Ordinary recording remains available.")
+                        Text(logMode ? "PiP is available in Standard movies." : canPrepare ? "Turn on both cameras for a live preview. PiP records at 1080p, 30 fps." : "Dual Camera is unavailable on this iPhone.")
                     }
                 }
             }
-            .navigationTitle("PiP Layout").navigationBarTitleDisplayMode(.inline)
+                }
+            }
+            .navigationTitle("Picture in Picture").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-        }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+        }.presentationDetents([.large]).presentationDragIndicator(.visible)
     }
+    private var preview: some View {
+        ZStack {
+            PiPCompositionPreview(rearFrames: rearFrames, frontFrames: frontFrames,
+                layout: layout, format: format, obstacles: obstacles)
+            if !ready {
+                GeometryReader { geometry in
+                    let rect = PiPGeometry.rect(layout: layout, canvas: geometry.size, obstacles: obstacles) ?? .zero
+                    ZStack {
+                        Color(white: 0.12)
+                        Image(systemName: format == .portrait ? "rectangle.portrait" : "rectangle")
+                            .font(.largeTitle).foregroundStyle(.white.opacity(0.3))
+                        RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.2))
+                            .overlay { Image(systemName: "person.fill").foregroundStyle(.white) }
+                            .frame(width: rect.width * geometry.size.width, height: rect.height * geometry.size.height)
+                            .position(x: rect.midX * geometry.size.width, y: rect.midY * geometry.size.height)
+                    }
+                }
+            }
+        }.aspectRatio(format.aspect, contentMode: .fit)
+            .accessibilityLabel("\(format == .portrait ? "Portrait" : "Landscape") video with \(layout.orientation.title.lowercased()) presenter inset at \(layout.corner.title.lowercased())")
+    }
+
 }
 
 struct PiPCompositionPreview: UIViewRepresentable {
