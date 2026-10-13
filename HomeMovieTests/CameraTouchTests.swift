@@ -4,6 +4,37 @@ import AVFoundation
 @testable import HomeMovie
 
 final class CameraTouchTests: XCTestCase {
+    @MainActor func testDollyCountdownRunsDuringRecordingAndCanBeCancelledWithoutStoppingTake() async throws {
+        let model = CameraModel(app: AppModel())
+        model.state = .recording
+        let countdown = RecordingCountdown(tick: .milliseconds(10))
+        let started = expectation(description: "Dolly starts after delay")
+        var moves = 0
+        countdown.start(seconds: 3, canStart: { model.state == .recording }, onStart: {
+            moves += 1; started.fulfill()
+        })
+        XCTAssertEqual(countdown.remaining, 3)
+        XCTAssertEqual(moves, 0)
+        XCTAssertTrue(model.recordingSessionActive)
+        await fulfillment(of: [started], timeout: 1)
+        XCTAssertEqual(moves, 1); XCTAssertEqual(model.state, .recording)
+        countdown.start(seconds: 3, canStart: { model.state == .recording }, onStart: { moves += 1 })
+        countdown.cancel()
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertNil(countdown.remaining)
+        XCTAssertEqual(moves, 1); XCTAssertEqual(model.state, .recording)
+    }
+    @MainActor func testPendingDollyDoesNotStartAfterRecordingStops() async throws {
+        let model = CameraModel(app: AppModel())
+        model.state = .recording
+        let countdown = RecordingCountdown(tick: .milliseconds(10))
+        var moves = 0
+        countdown.start(seconds: 3, canStart: { model.state == .recording }, onStart: { moves += 1 })
+        model.state = .finalizing
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertEqual(moves, 0); XCTAssertNil(countdown.remaining)
+    }
+
     func testExtendedZoomUsesDisplayMultiplierAndActiveDeviceLimits() {
         let targets = ExtendedZoomTargets.available(minimum: 1, maximum: 48, multiplier: 0.5)
         XCTAssertEqual(targets, [20, 30, 40, 48])

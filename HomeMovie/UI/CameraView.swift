@@ -63,6 +63,7 @@ struct CameraView: View {
     @State private var smoothPosition = 0.0
     @State private var zoomDragging = false
     @StateObject private var recordingCountdown = RecordingCountdown()
+    @StateObject private var dollyCountdown = RecordingCountdown()
     @State private var preparedDollyStart: CGFloat?
     @State private var preparedDollyTarget: CGFloat?
     @State private var activeDolly: DollyZoomRoute?
@@ -89,7 +90,7 @@ struct CameraView: View {
         self.app = app; _movieID = State(initialValue: movieID)
         _camera = StateObject(wrappedValue: CameraModel(app: app))
     }
-    private var countdown: Int? { recordingCountdown.remaining }
+    private var countdown: Int? { recordingCountdown.remaining ?? dollyCountdown.remaining }
     private var startDelay: Int { DollyStartDelay.effective(handsFreeStart ? dollyStartDelaySeconds : 0, dollyOpen: smoothZoomOpen) }
     private var dollyDelayedStart: Bool { startDelay > 0 }
     private var movie: Movie? { app.movie(movieID) }
@@ -191,6 +192,7 @@ struct CameraView: View {
         configuredCamera
         .onChange(of: camera.state) { _, state in
             if state == .starting { addedSceneID = nil }
+            if state != .ready && state != .recording { dollyCountdown.cancel() }
             if state == .failed || state == .interrupted || state == .denied || state == .preparing {
                 cancelCountdown()
             }
@@ -469,6 +471,7 @@ struct CameraView: View {
         }
     }
     private func toggleDollyPlayback() {
+        if dollyCountdown.remaining != nil { dollyCountdown.cancel(); return }
         guard countdown == nil, !camera.switchingCamera,
               camera.state == .ready || camera.state == .recording else { return }
         if activeDolly != nil {
@@ -477,21 +480,28 @@ struct CameraView: View {
             manualZoomTargetShown = false
             UIAccessibility.post(notification: .announcement, argument: "Dolly stopped")
         } else if let target = preparedDollyTarget {
-            preparedDollyStart = nil; preparedDollyTarget = nil
-            beginDolly(to: target, seconds: dollySeconds)
+            let seconds = DollyZoomDuration.validated(dollySeconds)
+            dollyCountdown.start(seconds: startDelay, canStart: {
+                smoothZoomOpen && scenePhase == .active && !camera.switchingCamera &&
+                    (camera.state == .ready || camera.state == .recording) &&
+                    preparedDollyTarget == target
+            }, onStart: {
+                preparedDollyStart = nil; preparedDollyTarget = nil
+                beginDolly(to: target, seconds: seconds)
+            })
         }
     }
     private var dollyPlaybackButton: some View {
         Button(action: toggleDollyPlayback) {
-            Image(systemName: activeDolly == nil ? "play.fill" : "stop.fill")
+            Image(systemName: dollyCountdown.remaining != nil ? "xmark" : activeDolly == nil ? "play.fill" : "stop.fill")
                 .font(.body.weight(.semibold)).foregroundStyle(.yellow)
                 .frame(width: 44, height: 44)
                 .background(.white.opacity(0.1), in: Circle())
         }.buttonStyle(DollyLensButtonStyle())
-            .disabled(countdown != nil || camera.switchingCamera ||
+            .disabled(recordingCountdown.remaining != nil || camera.switchingCamera ||
                 camera.state != .ready && camera.state != .recording ||
                 activeDolly == nil && preparedDollyTarget == nil)
-            .accessibilityLabel(activeDolly == nil ? "Play Dolly" : "Stop Dolly")
+            .accessibilityLabel(dollyCountdown.remaining != nil ? "Cancel Dolly countdown" : activeDolly == nil ? "Play Dolly" : "Stop Dolly")
             .accessibilityHint("Controls the zoom move. Recording is controlled separately.")
     }
     private func beginDolly(to target: CGFloat, seconds: Int) {
@@ -509,7 +519,7 @@ struct CameraView: View {
                     Text("\(zoomLabel(CGFloat(route.start), multiplier: options.multiplier)) → \(zoomLabel(CGFloat(route.destination), multiplier: options.multiplier)) · \(route.seconds)s")
                         .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(.yellow)
                     if activeDolly == nil {
-                        Text(countdown != nil ? "Recording countdown" : "Ready · Tap ▶ to move")
+                        Text(dollyCountdown.remaining != nil ? "Dolly starts after countdown" : recordingCountdown.remaining != nil ? "Recording countdown" : "Ready · Tap ▶ to move")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 } else if preparedDollyStart != nil {
@@ -573,7 +583,7 @@ struct CameraView: View {
                     Text("Open Dolly at your current zoom, choose a destination lens, then tap Play. Selecting a lens does not move the camera. The outlined lens is your destination; the dot shows actual zoom.")
                     Text("Play becomes Stop during a move. Stop holds the current zoom. Choosing a different lens stops the move and selects the next destination; tap Play to move again.")
                     Text("Dragging or pinching always controls zoom immediately. It takes over from an automatic move and clears the selected destination. Choose a lens again for another automatic move.")
-                    Text("Record controls recording; Play controls Dolly. To capture a planned move, tap Record, wait for recording to begin, then tap Play. You can rehearse with Play before recording.")
+                    Text("Record controls recording; Play controls Dolly. Delay waits before either starts; Move sets the zoom duration. During a take, Play counts down without interrupting recording. Tap Play again to cancel that countdown, or the red Stop button to end the take.")
                     Text("Tap the video to focus, including during a Dolly move. Lens and Dolly controls adjust zoom without changing focus.")
                 }
                 Section("Automatic duration") {
@@ -583,7 +593,7 @@ struct CameraView: View {
                     Text("Drag faster or slower to control zoom. Slow gives a gentler response, Normal is balanced, and Fast responds more quickly. This setting does not change the automatic duration.")
                 }
                 Section("Start Delay") {
-                    Text("The timer on the left sets an optional 3, 5 or 7 second delay before recording. The duration on the right controls the Dolly move itself. The delay applies to Record only while Dolly is open. Your selected destination stays ready; tap Play after recording begins.")
+                    Text("The timer on the left sets an optional 3, 5 or 7 second delay before recording. The duration on the right controls the Dolly move itself. The delay applies to Record only while Dolly is open. Your selected destination stays ready; tap Play after recording begins. Play uses the same delay, while recording continues. Tap Play again to cancel the pending move without stopping recording.")
                 }
                 Section {
                     Button("Show Dolly Tips Again") { dollyGuidanceLearned = false; showingDollyHelp = false }
@@ -613,7 +623,7 @@ struct CameraView: View {
             }
         }.padding(.horizontal, 12).padding(.vertical, 5)
             .contentShape(Rectangle()).onTapGesture { }
-            .frame(maxWidth: 360).disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum || countdown != nil)
+            .frame(maxWidth: 360).disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum || recordingCountdown.remaining != nil)
     }
     private func dollyZoomValue(options: CameraOptions) -> some View {
         Menu {
@@ -696,13 +706,13 @@ struct CameraView: View {
         } label: {
             HStack(spacing: 3) {
                 Image(systemName: "timer")
-                Text(startDelay == 0 ? "Off" : "\(startDelay)s").monospacedDigit()
+                Text(startDelay == 0 ? "Delay Off" : "Delay \(startDelay)s").monospacedDigit()
             }.font(.caption.weight(.medium)).foregroundStyle(dollyDelayedStart ? .yellow : .white)
                 .frame(minWidth: 44, minHeight: 44)
-        }.accessibilityLabel("Dolly start delay")
+        }.accessibilityLabel("Start delay")
             .accessibilityValue(startDelay == 0 ? "Off" : "\(startDelay) seconds")
-            .accessibilityHint("Delay before recording starts. Only applies while Dolly is open.")
-            .disabled(camera.state != .ready || countdown != nil)
+            .accessibilityHint("Wait before Record or Play starts. During recording, Play delays only the Dolly move.")
+            .disabled(camera.state != .ready && camera.state != .recording || countdown != nil)
     }
     private var dollyDurationMenu: some View {
             Menu {
@@ -714,7 +724,7 @@ struct CameraView: View {
                 }
             } label: {
                 HStack(spacing: 3) {
-                    Text("\(DollyZoomDuration.validated(dollySeconds))s").monospacedDigit()
+                    Text("Move \(DollyZoomDuration.validated(dollySeconds))s").monospacedDigit()
                     Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
                 }.font(.caption.weight(.medium)).frame(minWidth: 44, minHeight: 44)
             }.accessibilityLabel("Dolly duration")
@@ -814,10 +824,15 @@ struct CameraView: View {
                     .accessibilityHidden(true)
             }
             if let countdown {
-                Text("\(countdown)").font(.system(size: 64, weight: .light, design: .rounded))
-                    .foregroundStyle(.white).shadow(color: .black.opacity(0.5), radius: 8)
-                    .contentTransition(.numericText()).allowsHitTesting(false)
-                    .accessibilityLabel("Recording in \(countdown) seconds")
+                VStack(spacing: 6) {
+                    Text(dollyCountdown.remaining != nil ? "Dolly starts in…" : "Recording starts in…")
+                        .font(.subheadline.weight(.medium))
+                    Text("\(countdown)").font(.system(size: 64, weight: .light, design: .rounded))
+                        .contentTransition(.numericText())
+                }.foregroundStyle(.white).shadow(color: .black.opacity(0.5), radius: 8)
+                    .allowsHitTesting(false)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(dollyCountdown.remaining != nil ? "Dolly" : "Recording") in \(countdown) seconds")
             }
             if camera.state == .preparing {
                 ProgressView("Preparing camera…").padding().background(.black.opacity(0.8), in: Capsule())
@@ -835,8 +850,8 @@ struct CameraView: View {
     }
     private var recordControl: some View {
         Button {
-            if countdown != nil { cancelCountdown() }
-            else if camera.recordingSessionActive { camera.stop() }
+            if camera.recordingSessionActive { cancelCountdown(); camera.stop() }
+            else if recordingCountdown.remaining != nil { recordingCountdown.cancel() }
             else { startRecording() }
         } label: {
             ZStack {
@@ -844,7 +859,7 @@ struct CameraView: View {
                 Circle().strokeBorder(.white, lineWidth: 3).frame(width: 78, height: 78)
                 if camera.state == .starting || camera.state == .finalizing {
                     ProgressView().tint(.white)
-                } else if countdown != nil {
+                } else if recordingCountdown.remaining != nil {
                     Image(systemName: "xmark").font(.system(size: 24, weight: .medium)).foregroundStyle(.white)
                 } else {
                     RoundedRectangle(cornerRadius: camera.recordingSessionActive ? 5 : 32)
@@ -852,9 +867,11 @@ struct CameraView: View {
                 }
             }
         }.buttonStyle(.plain)
-            .disabled(camera.switchingCamera || pipConfiguring || undoingTake || !camera.recordingSessionActive && camera.state != .ready)
+            .disabled(camera.switchingCamera || pipConfiguring || undoingTake ||
+                dollyCountdown.remaining != nil && !camera.recordingSessionActive ||
+                !camera.recordingSessionActive && camera.state != .ready)
             .opacity(!camera.recordingSessionActive && camera.state != .ready ? 0.4 : 1)
-            .accessibilityLabel(countdown != nil ? "Cancel countdown" : camera.state == .starting ? "Cancel starting recording" : camera.state == .finalizing ? "Saving recording" : camera.recordingSessionActive ? "Stop recording" : "Record next scene")
+            .accessibilityLabel(recordingCountdown.remaining != nil ? "Cancel recording countdown" : camera.state == .starting ? "Cancel starting recording" : camera.state == .finalizing ? "Saving recording" : camera.recordingSessionActive ? "Stop recording" : "Record next scene")
     }
     @ViewBuilder private func reviewControls(movie: Movie, landscape: Bool) -> some View {
         let recent = Button { openWatch(sceneID: movie.activeScenes.last?.id) } label: {
@@ -955,7 +972,7 @@ struct CameraView: View {
         })
     }
     private func cancelCountdown() {
-        recordingCountdown.cancel()
+        recordingCountdown.cancel(); dollyCountdown.cancel()
     }
     private func openWatch(sceneID: UUID? = nil) {
         guard !camera.busy else { return }
