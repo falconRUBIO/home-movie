@@ -12,10 +12,24 @@ final class CameraTouchTests: XCTestCase {
         XCTAssertTrue(ExtendedZoomTargets.available(minimum: 1, maximum: .infinity, multiplier: 1).isEmpty)
     }
 
-    func testDualCameraLiveOutputsNeverSelectAutomaticCinematicBuffering() {
-        XCTAssertEqual(CameraStabilization.dualCameraMode(front: true, supports: { _ in true }), .off)
-        XCTAssertEqual(CameraStabilization.dualCameraMode(front: false, supports: { _ in true }), .standard)
-        XCTAssertEqual(CameraStabilization.dualCameraMode(front: false, supports: { _ in false }), .off)
+    func testDualCameraStabilizesBothStreamsWithoutCinematicOrPreviewOnlyModes() {
+        for front in [true, false] {
+            XCTAssertEqual(CameraStabilization.dualCameraMode(front: front, supports: { $0 == .standard }), .standard)
+            XCTAssertEqual(CameraStabilization.dualCameraMode(front: front, supports: { _ in false }), .off)
+            XCTAssertEqual(CameraStabilization.dualCameraMode(front: front, supports: {
+                [.auto, .cinematic, .cinematicExtended, .previewOptimized].contains($0)
+            }), .off)
+            if #available(iOS 26.0, *) {
+                XCTAssertEqual(CameraStabilization.dualCameraMode(front: front, supports: { _ in true }), .lowLatency)
+            }
+        }
+    }
+    func testFrontRecordingPrefersSupportedLowLatencyWithoutChangingRearPolicy() {
+        if #available(iOS 26.0, *) {
+            XCTAssertEqual(CameraStabilization.preferredMode(preview: false, front: true, supports: { _ in true }), .lowLatency)
+            XCTAssertEqual(CameraStabilization.preferredMode(preview: false, front: false, supports: { _ in true }), .auto)
+        }
+        XCTAssertEqual(CameraStabilization.preferredMode(preview: false, front: true, supports: { $0 == .standard }), .auto)
     }
 
     func testRecordingDoesNotOverridePreviewLensSelectionWithASeparateRestrictedPolicy() {

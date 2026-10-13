@@ -16,19 +16,24 @@ enum CameraVideoTuning {
 enum CameraStabilization {
     // Let Apple negotiate recording stabilization for the actual device, format and
     // frame rate. Keep live interaction responsive with its dedicated preview mode.
-    static func preferredMode(preview: Bool, supports: (AVCaptureVideoStabilizationMode) -> Bool) -> AVCaptureVideoStabilizationMode {
-        guard preview else { return .auto }
+    static func preferredMode(preview: Bool, front: Bool = false, supports: (AVCaptureVideoStabilizationMode) -> Bool) -> AVCaptureVideoStabilizationMode {
+        guard preview else {
+            if front, #available(iOS 26.0, *), supports(.lowLatency) { return .lowLatency }
+            return .auto
+        }
         if supports(.previewOptimized) { return .previewOptimized }
         if supports(.standard) { return .standard }
         return .auto
     }
     static func dualCameraMode(front: Bool, supports: (AVCaptureVideoStabilizationMode) -> Bool) -> AVCaptureVideoStabilizationMode {
-        // Avoid automatic cinematic buffering on the outputs that also feed live PiP.
-        !front && supports(.standard) ? .standard : .off
+        // Both streams feed preview AND recording. Never select preview-only or
+        // automatic cinematic buffering here; stabilize the presenter as well.
+        if #available(iOS 26.0, *), supports(.lowLatency) { return .lowLatency }
+        return supports(.standard) ? .standard : .off
     }
-    static func configure(_ connection: AVCaptureConnection, format: AVCaptureDevice.Format?, preview: Bool) {
+    static func configure(_ connection: AVCaptureConnection, format: AVCaptureDevice.Format?, preview: Bool, front: Bool = false) {
         guard connection.isVideoStabilizationSupported, let format else { return }
-        let mode = preferredMode(preview: preview, supports: { format.isVideoStabilizationModeSupported($0) })
+        let mode = preferredMode(preview: preview, front: front, supports: { format.isVideoStabilizationModeSupported($0) })
         // Avoid renegotiating the pipeline on every zoom/UI update.
         if connection.preferredVideoStabilizationMode != mode { connection.preferredVideoStabilizationMode = mode }
     }
@@ -454,7 +459,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             throw HomeMovieError.message("This camera could not provide a compatible Apple Log recording format. Tap Resume Camera to reconnect.")
         }
         output.setOutputSettings([AVVideoCodecKey: codec], for: connection)
-        CameraStabilization.configure(connection, format: camera.activeFormat, preview: false)
+        CameraStabilization.configure(connection, format: camera.activeFormat, preview: false, front: camera.position == .front)
         output.minFreeDiskSpaceLimit = codec == .hevc ? 200_000_000 : 500_000_000
         guard camera.activeColorSpace == .appleLog else {
             throw HomeMovieError.message("The recording output changed the camera’s Apple Log mode. Tap Resume Camera to reconnect.")
@@ -792,7 +797,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         guard let connection = output.connection(with: .video) else { return }
         connection.automaticallyAdjustsVideoMirroring = false
         if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
-        CameraStabilization.configure(connection, format: videoInput?.device.activeFormat, preview: false)
+        CameraStabilization.configure(connection, format: videoInput?.device.activeFormat, preview: false, front: isFront)
         if let live = liveOutput.connection(with: .video) {
             if live.isVideoRotationAngleSupported(0) { live.videoRotationAngle = 0 }
             live.automaticallyAdjustsVideoMirroring = false
@@ -837,18 +842,25 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 guard let camera = self.device(front: !oldFront) else { throw HomeMovieError.message("No other camera is available.") }
                 let next = try AVCaptureDeviceInput(device: camera)
                 self.turnOffTorch()
-                try self.replaceInput(old, with: next)
-                self.videoInput = next; self.isFront = !oldFront
-                do { try self.configureFormat(camera); try self.ensureLogCaptureReady() }
-                catch {
-                    try self.replaceInput(next, with: old)
-                    self.videoInput = old; self.isFront = oldFront
-                    try self.configureFormat(old.device)
-                    try self.ensureLogCaptureReady()
-                    self.setCoordinator(old.device); self.configureVideoConnection()
-                    throw error
+                // Commit input, format and stabilization together. Nested input
+                // replacement transactions do not restart an intermediate graph.
+                do {
+                    self.session.beginConfiguration()
+                    defer { self.session.commitConfiguration() }
+                    try self.replaceInput(old, with: next)
+                    self.videoInput = next; self.isFront = !oldFront
+                    do { try self.configureFormat(camera); try self.ensureLogCaptureReady() }
+                    catch {
+                        try self.replaceInput(next, with: old)
+                        self.videoInput = old; self.isFront = oldFront
+                        try self.configureFormat(old.device)
+                        try self.ensureLogCaptureReady()
+                        self.configureVideoConnection()
+                        throw error
+                    }
+                    self.configureVideoConnection()
                 }
-                self.setCoordinator(camera); self.configureVideoConnection()
+                self.setCoordinator(camera)
                 self.onEvent?(.cameraChanged(try self.options()))
             } catch {
                 if self.videoInput?.device.uniqueID == old.device.uniqueID,
