@@ -55,6 +55,22 @@ import AVKit
     }
 }
 
+private enum SceneReviewTool: String, CaseIterable, Identifiable {
+    case light = "Light", trim = "Trim"
+    var id: String { rawValue }
+}
+private enum SceneLightControl: String, CaseIterable, Identifiable {
+    case exposure = "Exposure", shadows = "Shadows", highlights = "Highlights"
+    var id: String { rawValue }
+    var keyPath: WritableKeyPath<SceneAdjustments, Double> {
+        switch self {
+        case .exposure: \.exposure
+        case .shadows: \.shadows
+        case .highlights: \.highlights
+        }
+    }
+}
+
 struct SceneReviewView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -67,6 +83,8 @@ struct SceneReviewView: View {
     @State private var end: Double
     @State private var adjustments: SceneAdjustments
     @State private var comparing = false
+    @State private var tool = SceneReviewTool.light
+    @State private var lightControl = SceneLightControl.exposure
     @State private var saving = false
     @State private var savingPhotos = false
     @State private var waitingForExport = false
@@ -80,6 +98,7 @@ struct SceneReviewView: View {
         _adjustments = State(initialValue: scene.lightAdjustments)
     }
     private var movie: Movie? { app.movie(movieID) }
+    private var reviewAspect: CGFloat { movie?.format.aspect ?? (scene.width > scene.height ? 16 / 9 : 9 / 16) }
     private var busy: Bool { saving || export.running || savingPhotos || waitingForExport }
     private var shownAdjustments: SceneAdjustments { comparing ? .neutral : adjustments }
     private var editedScene: Scene {
@@ -90,20 +109,21 @@ struct SceneReviewView: View {
     }
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    previewPanel
-                    trimControls
-                    lightControls
-                    if let message = error ?? preview.error ?? export.error {
-                        Text(message).font(.footnote).foregroundStyle(.red).padding(.horizontal)
+            GeometryReader { geometry in
+                if geometry.size.width > geometry.size.height {
+                    HStack(spacing: 0) {
+                        previewPanel.frame(width: geometry.size.width * 0.58, height: geometry.size.height)
+                            .background(.black)
+                        editingPanel.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    if let message = notice ?? export.notice {
-                        Text(message).font(.footnote).foregroundStyle(.secondary).padding(.horizontal)
+                } else {
+                    VStack(spacing: 0) {
+                        previewPanel.frame(maxWidth: .infinity)
+                            .frame(height: min(320, max(140, min(geometry.size.height * 0.48, geometry.size.width / reviewAspect))))
+                            .background(.black)
+                        editingPanel.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    Button("Remove Scene", role: .destructive) { confirmRemove = true }
-                        .frame(minHeight: 44).disabled(busy)
-                }.padding(.bottom, 16)
+                }
             }
             .safeAreaInset(edge: .bottom) { photosFooter }
             .navigationTitle("Review Scene").navigationBarTitleDisplayMode(.inline)
@@ -147,6 +167,7 @@ struct SceneReviewView: View {
                 preview.player?.seek(to: CMTime(seconds: max(start, value - 1 / 30), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
             }
             .onChange(of: adjustments) { _, _ in invalidateExport() }
+            .onChange(of: tool) { _, _ in comparing = false }
             .onChange(of: export.running) { _, running in
                 guard !running, waitingForExport else { return }
                 waitingForExport = false
@@ -157,13 +178,35 @@ struct SceneReviewView: View {
         .interactiveDismissDisabled(busy)
         .onDisappear { preview.stop(); export.cancel() }
     }
+    private var editingPanel: some View {
+        VStack(spacing: 0) {
+            Picker("Editing tool", selection: $tool) {
+                ForEach(SceneReviewTool.allCases) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.segmented).padding(.horizontal, 20).padding(.vertical, 12).disabled(busy)
+            ScrollView {
+                VStack(spacing: 12) {
+                    if tool == .light { lightControls } else { trimControls }
+                    if let message = error ?? preview.error ?? export.error {
+                        Text(message).font(.footnote).foregroundStyle(.red).padding(.horizontal)
+                    }
+                    if let message = notice ?? export.notice {
+                        Text(message).font(.footnote).foregroundStyle(.secondary).padding(.horizontal)
+                    }
+                    if tool == .trim {
+                        Button("Remove Scene", role: .destructive) { confirmRemove = true }
+                            .frame(minHeight: 44).disabled(busy)
+                    }
+                }.padding(.bottom, 16)
+            }
+        }
+    }
     private var previewPanel: some View {
         ZStack {
             Color.black
             if let player = preview.player { VideoPlayer(player: player) }
             if preview.loading { ProgressView().tint(.white) }
         }
-        .aspectRatio(movie?.format.aspect ?? (scene.width > scene.height ? 16 / 9 : 9 / 16), contentMode: .fit)
+        .aspectRatio(reviewAspect, contentMode: .fit)
         .frame(maxHeight: 360)
         .overlay(alignment: .topLeading) {
             if (scene.profile ?? movie?.captureProfile) == .appleLog {
@@ -184,22 +227,32 @@ struct SceneReviewView: View {
             Button("Reset Trim") { start = 0; end = scene.sourceDuration.seconds }.frame(minHeight: 44).disabled(busy)
         }
     }
+    private var lightComparisonControls: some View {
+        HStack(spacing: 12) {
+            Button(comparing ? "Show Adjusted" : "Before") { comparing.toggle() }
+                .frame(minWidth: 44, minHeight: 44).disabled(!adjustments.isActive || busy)
+                .accessibilityHint("Compare against the selected look before light adjustments")
+            Button("Reset") { adjustments = .neutral; comparing = false }
+                .frame(minWidth: 44, minHeight: 44).disabled(!adjustments.isActive || busy)
+        }
+    }
+    private var selectedLightValue: Binding<Double> {
+        let keyPath = lightControl.keyPath
+        return Binding(get: { adjustments[keyPath: keyPath] }, set: { adjustments[keyPath: keyPath] = $0 })
+    }
     private var lightControls: some View {
-        VStack(spacing: 14) {
-            HStack {
-                Text("Light").font(.headline); Spacer()
-                Button(comparing ? "Show Adjusted" : "Before") { comparing.toggle() }
-                    .frame(minWidth: 44, minHeight: 44).disabled(!adjustments.isActive || busy)
-                    .accessibilityHint("Compare against the selected look before light adjustments")
-                Button("Reset") { adjustments = .neutral; comparing = false }
-                    .frame(minWidth: 44, minHeight: 44).disabled(!adjustments.isActive || busy)
+        VStack(spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                HStack { Text("Light").font(.headline); Spacer(); lightComparisonControls }
+                VStack(alignment: .leading, spacing: 4) { Text("Light").font(.headline); lightComparisonControls }
             }
-            lightSlider("Exposure", value: $adjustments.exposure)
-            lightSlider("Shadows", value: $adjustments.shadows)
-            lightSlider("Highlights", value: $adjustments.highlights)
-            Text("Small adjustments for this scene. Save remembers them for movie playback and export.")
+            Picker("Light adjustment", selection: $lightControl) {
+                ForEach(SceneLightControl.allCases) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.segmented).disabled(busy)
+            lightSlider(lightControl.rawValue, value: selectedLightValue)
+            Text("Adjust this scene while watching the preview. Save remembers its light settings for playback and export.")
                 .font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(.horizontal, 24).disabled(preview.loading || preview.error != nil)
+        }.padding(.horizontal, 20).disabled(preview.loading || preview.error != nil)
     }
     private func lightSlider(_ title: String, value: Binding<Double>) -> some View {
         VStack(spacing: 4) {
