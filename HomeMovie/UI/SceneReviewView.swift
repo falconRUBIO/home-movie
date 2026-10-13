@@ -98,6 +98,7 @@ struct SceneReviewView: View {
         _adjustments = State(initialValue: scene.lightAdjustments)
     }
     private var movie: Movie? { app.movie(movieID) }
+    private var reviewAspect: CGFloat { movie?.format.aspect ?? (scene.width > scene.height ? 16 / 9 : 9 / 16) }
     private var busy: Bool { saving || export.running || savingPhotos || waitingForExport }
     private var shownAdjustments: SceneAdjustments { comparing ? .neutral : adjustments }
     private var editedScene: Scene {
@@ -118,7 +119,7 @@ struct SceneReviewView: View {
                 } else {
                     VStack(spacing: 0) {
                         previewPanel.frame(maxWidth: .infinity)
-                            .frame(height: min(320, max(140, geometry.size.height * 0.48)))
+                            .frame(height: min(320, max(140, min(geometry.size.height * 0.48, geometry.size.width / reviewAspect))))
                             .background(.black)
                         editingPanel.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -204,7 +205,7 @@ struct SceneReviewView: View {
             if let player = preview.player { VideoPlayer(player: player) }
             if preview.loading { ProgressView().tint(.white) }
         }
-        .aspectRatio(movie?.format.aspect ?? (scene.width > scene.height ? 16 / 9 : 9 / 16), contentMode: .fit)
+        .aspectRatio(reviewAspect, contentMode: .fit)
         .frame(maxHeight: 360)
         .overlay(alignment: .topLeading) {
             if (scene.profile ?? movie?.captureProfile) == .appleLog {
