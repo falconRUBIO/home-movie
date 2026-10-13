@@ -167,6 +167,7 @@ struct SceneReviewView: View {
                 preview.player?.seek(to: CMTime(seconds: max(start, value - 1 / 30), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
             }
             .onChange(of: adjustments) { _, _ in invalidateExport() }
+            .onChange(of: tool) { _, _ in comparing = false }
             .onChange(of: export.running) { _, running in
                 guard !running, waitingForExport else { return }
                 waitingForExport = false
