@@ -165,7 +165,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private var recordedPresenterAngle: CGFloat = 90
     private var recordedRearAngle: CGFloat = 90
     private var pendingPiPEnable = false
-    private var noSpaceReported = false
+    private var presenterStallReported = false
     private var timeline = PiPTimeline()
     private var matcher = PiPFrameMatcher()
     private let frontCopies = CaptureFrameCopy()
@@ -372,15 +372,12 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         }
         guard output === (front ? frontOutput : backOutput) else { return }
         lastVideoTime = time
-        if timeline.enabled, lastPresenterTime.isNumeric, CMTimeSubtract(time, lastPresenterTime).seconds > 0.3 {
-            timeline.setEnabled(false, at: time); onReady?()
-            onNotice?("The presenter camera paused. Rear video and audio are still recording.")
-        }
+        let presenterStalled = timeline.enabled && lastPresenterTime.isNumeric && CMTimeSubtract(time, lastPresenterTime).seconds > 0.5
+        if presenterStalled, !presenterStallReported {
+            presenterStallReported = true
+            onNotice?("The presenter camera paused. Rear video and audio continue; PiP resumes when fresh frames arrive.")
+        } else if !presenterStalled { presenterStallReported = false }
         let presentation = timeline.presentation(at: time, canvas: geometryCanvas, obstacles: obstacles)
-        if timeline.enabled, !presentation.isPlaceable, !noSpaceReported {
-            noSpaceReported = true
-            onNotice?("PiP is hidden while the camera controls cover its available space. Close Dolly or choose Small before the next take.")
-        } else if presentation.isPlaceable { noSpaceReported = false }
         if presentation != lastPresentation { lastPresentation = presentation; onPiPPresentation?(presentation) }
         let composing = timeline.enabled || presentation.opacity > 0
         if composing {

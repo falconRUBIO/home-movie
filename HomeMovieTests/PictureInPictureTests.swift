@@ -6,6 +6,16 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testPresenterMatchingResumesAfterTemporaryGapWithoutReset() throws {
+        var matcher = PiPFrameMatcher()
+        let old = try frame(red: 40, green: 0, blue: 0)
+        let fresh = try frame(red: 220, green: 0, blue: 0)
+        matcher.push(old, at: .zero)
+        XCTAssertNil(matcher.frame(at: CMTime(seconds: 1, preferredTimescale: 30)))
+        matcher.push(fresh, at: CMTime(seconds: 1, preferredTimescale: 30))
+        XCTAssertTrue(matcher.frame(at: CMTime(seconds: 1.01, preferredTimescale: 300)) === fresh)
+    }
+
     func testCaptureCopiesOwnPixelsAndBoundRetainedBuffers() throws {
         let source = try frame(red: 220, green: 0, blue: 0)
         let copier = CaptureFrameCopy()
