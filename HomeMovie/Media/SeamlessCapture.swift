@@ -48,7 +48,8 @@ final class ContinuousTakeWriter {
         if start == nil { writer.startSession(atSourceTime: time); start = time }
         guard let pool = pixels.pixelBufferPool else { return false }
         var destination: CVPixelBuffer?
-        guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &destination) == kCVReturnSuccess,
+        guard CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pool,
+            [kCVPixelBufferPoolAllocationThresholdKey as String: 8] as CFDictionary, &destination) == kCVReturnSuccess,
               let destination else { return false }
         let source = CIImage(cvPixelBuffer: buffer)
         let image = source.transformed(by: LiveLookGeometry.transform(source: source.extent.size,
@@ -269,7 +270,6 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         return (MovieFormat.captureFormat(angle: observed) ?? .portrait).recordingAngle(observed: observed)
     }
     private var geometryCanvas: CGSize { take?.canvas ?? (preferredCanvas ?? MovieFormat.captureFormat(angle: previewAngle) ?? .portrait).canvas }
-    private var canvas: CGSize { take?.canvas ?? PiPFrameRenderer.previewCanvas(for: geometryCanvas) }
     private var eventTime: CMTime { lastVideoTime.isNumeric ? lastVideoTime : CMClockGetTime(session.synchronizationClock ?? CMClockGetHostTimeClock()) }
     func setPiPEnabled(_ enabled: Bool) {
         if enabled, !readyToFlip, !presenterDisabled, take == nil { pendingPiPEnable = true; return }
@@ -334,17 +334,23 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             let angle = take == nil ? previewAngle : (front ? recordedPresenterAngle : recordedRearAngle)
             let frontObserved = frontRotation?.videoRotationAngleForHorizonLevelCapture ?? angle
             let frontAngle = take == nil ? (MovieFormat.captureFormat(angle: frontObserved) ?? .portrait).recordingAngle(observed: frontObserved) : recordedPresenterAngle
-            let composition = PiPCompositor.image(background: image, presenter: matcher.frame(at: time), canvas: canvas,
-                backgroundAngle: angle, presenterAngle: frontAngle, presentation: presentation)
-            if let rendered = compositor.render(composition, canvas: canvas) {
-                frames.push(rendered, composed: true)
-                accepted = take?.appendRenderedVideo(rendered, at: time) ?? false
-            } else {
-                // A failed optional composition must not stop the main picture/audio clock.
-                frames.push(image); accepted = take?.appendVideo(image, at: time, sourceAngle: angle) ?? false
-                if timeline.enabled {
-                    timeline.setEnabled(false, at: time); onReady?()
-                    onNotice?("PiP paused because the composition could not be rendered. Rear recording continues.")
+            let presenter = matcher.frame(at: time)
+            // Publish raw paired frames immediately. Display composition is independent
+            // of the full-resolution recording buffer and stays latest-frame-only.
+            frames.push(image, angle: previewAngle, pip: LivePiPFrame(presenter: presenter,
+                backgroundAngle: angle, presenterAngle: frontAngle, presentation: presentation))
+            if let take, !take.finishing {
+                let composition = PiPCompositor.image(background: image, presenter: presenter, canvas: take.canvas,
+                    backgroundAngle: angle, presenterAngle: frontAngle, presentation: presentation)
+                if let rendered = compositor.render(composition, canvas: take.canvas) {
+                    accepted = take.appendRenderedVideo(rendered, at: time)
+                } else {
+                    // Optional composition failure preserves the main video/audio clock.
+                    accepted = take.appendVideo(image, at: time, sourceAngle: angle)
+                    if timeline.enabled {
+                        timeline.setEnabled(false, at: time); onReady?()
+                        onNotice?("PiP paused because the composition could not be rendered. Rear recording continues.")
+                    }
                 }
             }
         } else {

@@ -2,9 +2,57 @@ import XCTest
 import AVFoundation
 import CoreImage
 import UIKit
+import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testLivePairIsAtomicAndClearedWhenReturningToOrdinaryFrames() throws {
+        let rear = try frame(red: 0, green: 0, blue: 220), front = try frame(red: 220, green: 0, blue: 0)
+        let frames = LiveFrames()
+        let presentation = PiPPresentation(rect: CGRect(x: 0.7, y: 0.7, width: 0.25, height: 0.2), opacity: 1, enabled: true)
+        frames.push(rear, angle: 0, pip: LivePiPFrame(presenter: front, backgroundAngle: 0, presenterAngle: 90, presentation: presentation))
+        let pair = try XCTUnwrap(frames.snapshot())
+        XCTAssertTrue(pair.buffer === rear); XCTAssertTrue(pair.pip?.presenter === front)
+        XCTAssertEqual(pair.pip?.presentation, presentation); XCTAssertEqual(pair.pip?.presenterAngle, 90)
+        frames.push(front, angle: 180)
+        let ordinary = try XCTUnwrap(frames.snapshot())
+        XCTAssertTrue(ordinary.buffer === front); XCTAssertNil(ordinary.pip); XCTAssertEqual(ordinary.angle, 180)
+        frames.clear(); XCTAssertNil(frames.snapshot())
+    }
+    @MainActor func testDirectGPUPreviewKeepsInsetPlacementAndDoesNotDoubleMirror() async throws {
+        let rear = try frame(red: 0, green: 0, blue: 220), front = try frame(red: 220, green: 0, blue: 0, split: true)
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let renderer = try XCTUnwrap(LiveLookRenderer(device: device))
+        renderer.configure(frames: LiveFrames(), cube: nil, active: true, passthrough: true)
+        // UI camera metadata must not rotate or mirror an already-composed recipe.
+        renderer.angle = 90; renderer.front = true
+        let canvas = CGSize(width: 640, height: 360)
+        let rect = try XCTUnwrap(PiPGeometry.rect(layout: PiPLayout(), canvas: canvas))
+        let presentation = PiPPresentation(rect: rect, opacity: 1, enabled: true)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 640, height: 360, mipmapped: false)
+        descriptor.storageMode = .shared; descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
+        let texture = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        let queue = try XCTUnwrap(device.makeCommandQueue()), command = try XCTUnwrap(queue.makeCommandBuffer())
+        try renderer.encode(rear, to: texture, command: command, pip: LivePiPFrame(presenter: front,
+            backgroundAngle: 0, presenterAngle: 0, presentation: presentation))
+        let completed = expectation(description: "Direct live PiP render")
+        command.addCompletedHandler { _ in completed.fulfill() }; command.commit()
+        await fulfillment(of: [completed], timeout: 15)
+        XCTAssertEqual(command.status, .completed)
+        func pixel(x: CGFloat, y: CGFloat) -> [UInt8] {
+            var bgra = [UInt8](repeating: 0, count: 4)
+            texture.getBytes(&bgra, bytesPerRow: 4, from: MTLRegionMake2D(Int(x), Int(y), 1, 1), mipmapLevel: 0)
+            return bgra
+        }
+        let y = rect.midY * canvas.height
+        let left = pixel(x: (rect.minX + rect.width * 0.25) * canvas.width, y: y)
+        let right = pixel(x: (rect.minX + rect.width * 0.75) * canvas.width, y: y)
+        XCTAssertGreaterThan(left[2], 180); XCTAssertLessThan(left[1], 30)
+        XCTAssertGreaterThan(right[1], 180); XCTAssertLessThan(right[2], 30)
+        let outside = pixel(x: rect.minX * canvas.width - 3, y: y)
+        XCTAssertGreaterThan(outside[0], 180); XCTAssertLessThan(outside[2], 30)
+    }
+
     func testIdlePreviewReducesPixelWorkWithoutChangingInsetGeometry() throws {
         for format in [MovieFormat.landscape, .portrait] {
             let full = format.canvas, preview = PiPFrameRenderer.previewCanvas(for: full)
