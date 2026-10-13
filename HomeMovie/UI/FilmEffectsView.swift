@@ -50,6 +50,13 @@ import AVKit
         guard updateID == id, !Task.isCancelled else { return }
     }
     func stop() { requestID = UUID(); updateID = UUID(); loading = false; player?.pause() }
+    func release() {
+        stop()
+        // A dismissed preview must not keep a second decoder/compositor alive during export.
+        statusObservation = nil
+        player?.replaceCurrentItem(with: nil)
+        player = nil; template = nil; preparedMovieID = nil
+    }
 }
 
 struct FilmEffectsView: View {
@@ -99,7 +106,7 @@ struct FilmEffectsView: View {
             } catch { }
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { comparing = false; preview.stop() } }
-        .onDisappear { if !fullscreen { preview.stop() } }
+        .onDisappear { if !fullscreen { preview.release() } }
         .fullScreenCover(isPresented: $fullscreen) {
             FilmEffectsFullscreen(preview: preview, aspect: movie.format.aspect, comparing: $comparing, settings: settings)
         }

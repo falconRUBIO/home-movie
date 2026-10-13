@@ -116,6 +116,45 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(info.size.width, 1920); XCTAssertEqual(info.size.height, 1080)
         XCTAssertEqual(movie.scenes.map(\.source), originalSources)
     }
+    @MainActor func testShortLogRecipeExportsAllEffectsFrom4KInBothOrientations() async throws {
+        let store = try await makeStore()
+        let source = store.root.appendingPathComponent("large-effects-fixture.mov")
+        // SDR synthetic pixels exercise the Log recipe and 4K decode; real Apple Log
+        // sensor/10-bit validation still requires an iPhone recording.
+        try await footage(source, width: 3840, height: 2160, frames: 12)
+        let sourceBytes = try Data(contentsOf: source)
+        for format in [MovieFormat.landscape, .portrait] {
+            var movie = Movie(name: "Short Log effects", format: format, profile: .appleLog)
+            movie.look = .cinemaTwo
+            movie.scenes = [Scene(id: UUID(), sequence: 0, source: source.lastPathComponent,
+                capturedAt: Date(), timeZone: "UTC", sourceDuration: MediaTime(seconds: 0.4),
+                trimStart: MediaTime(seconds: 0), trimEnd: MediaTime(seconds: 0.4),
+                width: 3840, height: 2160, hasAudio: false, bytes: Int64(sourceBytes.count),
+                profile: .appleLog)]
+            movie.scenes[0].adjustments = SceneAdjustments(exposure: 0.2, shadows: 0.3, highlights: -0.3)
+            var effects = FilmEffectsSettings.off
+            effects.grainEnabled = true; effects.grainAmount = 1; effects.grainTexture = .coarse16
+            effects.halationEnabled = true; effects.halationAmount = 1; effects.halationSpread = 1
+            effects.bloomEnabled = true; effects.bloomAmount = 1; effects.bloomSpread = 1
+            movie.filmEffects = effects
+            let bundle = try await MediaAssembler().build(movie: movie, root: store.root, filmEffects: effects)
+            let instruction = try XCTUnwrap(bundle.videoComposition.instructions.first as? ColorInstruction)
+            XCTAssertEqual(instruction.cube?.dimension, 65)
+            XCTAssertTrue(instruction.adjustments.isActive)
+            let destination = store.root.appendingPathComponent("short-log-\(format.rawValue).mp4")
+            let session = try XCTUnwrap(AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality))
+            session.videoComposition = bundle.videoComposition
+            try await session.export(to: destination, as: .mp4)
+            XCTAssertEqual(session.status, .completed)
+            let info = try await MediaInspector.inspect(destination)
+            XCTAssertTrue(ExportModel.matchesExport(info, movie: movie))
+            let decoded = try await AVAssetImageGenerator(asset: AVURLAsset(url: destination))
+                .image(at: CMTime(value: 6, timescale: 30)).image
+            XCTAssertEqual(decoded.width, Int(format.canvas.width))
+            XCTAssertEqual(decoded.height, Int(format.canvas.height))
+        }
+        XCTAssertEqual(try Data(contentsOf: source), sourceBytes)
+    }
     func testDollyClosePreservesMotionAndSettlesPromptlyInBothDirections() throws {
         for speed in SmoothZoomSpeed.allCases {
             for timed in [false, true] {
@@ -1298,30 +1337,30 @@ final class PipelineTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         return store
     }
-    private func footage(_ url: URL, rotated: Bool = false) async throws {
+    private func footage(_ url: URL, rotated: Bool = false, width: Int = 320, height: Int = 240, frames: Int = 60) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 240])
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height])
         if rotated { input.transform = CGAffineTransform(rotationAngle: .pi / 2) }
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input,
             sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferWidthKey as String: 320, kCVPixelBufferHeightKey as String: 240])
+                kCVPixelBufferWidthKey as String: width, kCVPixelBufferHeightKey as String: height])
         writer.add(input)
         guard writer.startWriting() else { throw writer.error ?? HomeMovieError.message("Fixture writer failed") }
         writer.startSession(atSourceTime: .zero)
-        for frame in 0..<60 {
+        for frame in 0..<frames {
             while !input.isReadyForMoreMediaData {
                 if writer.status == .failed { throw writer.error ?? HomeMovieError.message("Fixture writer failed") }
                 await Task.yield()
             }
             var buffer: CVPixelBuffer?
-            let result = CVPixelBufferCreate(kCFAllocatorDefault, 320, 240, kCVPixelFormatType_32BGRA, nil, &buffer)
+            let result = CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA, nil, &buffer)
             guard result == kCVReturnSuccess, let buffer else { throw HomeMovieError.message("Fixture buffer failed") }
             CVPixelBufferLockBaseAddress(buffer, [])
-            if let base = CVPixelBufferGetBaseAddress(buffer) { memset(base, frame % 2 == 0 ? 60 : 120, CVPixelBufferGetBytesPerRow(buffer) * 240) }
+            if let base = CVPixelBufferGetBaseAddress(buffer) { memset(base, frame % 2 == 0 ? 60 : 120, CVPixelBufferGetBytesPerRow(buffer) * height) }
             CVPixelBufferUnlockBaseAddress(buffer, [])
             guard adaptor.append(buffer, withPresentationTime: CMTime(value: Int64(frame), timescale: 30)) else { throw writer.error ?? HomeMovieError.message("Fixture append failed") }
         }
-        writer.endSession(atSourceTime: CMTime(value: 60, timescale: 30)); input.markAsFinished()
+        writer.endSession(atSourceTime: CMTime(value: Int64(frames), timescale: 30)); input.markAsFinished()
         await writer.finishWriting()
         guard writer.status == .completed else { throw writer.error ?? HomeMovieError.message("Fixture did not finish") }
     }
