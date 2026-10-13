@@ -1004,7 +1004,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         if publishPreview {
             // Angle and mirroring travel with this frame, independent of take rotation.
             liveFrames.push(image, angle: coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90, front: isFront)
-            if let options = try? options(), previewHandoff == nil, !previewHandoffAnnounced {
+            if !previewHandoffAnnounced, previewHandoff == nil, let options = try? options() {
                 previewHandoffAnnounced = true
                 onEvent?(.cameraChanged(options))
             }
