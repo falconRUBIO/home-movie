@@ -3,6 +3,74 @@ import AVFoundation
 @testable import HomeMovie
 
 final class ContinuousCaptureTests: XCTestCase {
+    func testAsynchronousPipelineKeepsAudioAndVideoAcrossPiPToggle() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let take = try ContinuousTakePipeline(url: url, angle: 0, callbackQueue: DispatchQueue(label: "test.pipelineCallbacks"))
+        let rear = try frame(red: true), front = try frame(red: false)
+        let presentation = PiPPresentation(rect: CGRect(x: 0.65, y: 0.65, width: 0.3, height: 0.3), opacity: 1, enabled: true)
+        for index in 0..<12 {
+            let time = CMTime(value: Int64(300 + index), timescale: 30)
+            var written = false
+            for _ in 0..<100 {
+                written = await withCheckedContinuation { continuation in
+                    let admitted = take.appendVideo(rear, presenter: front, presentation: index < 6 ? presentation : nil,
+                        at: time, angle: 0, presenterAngle: 0) { accepted, error in
+                            XCTAssertNil(error); continuation.resume(returning: accepted)
+                        }
+                    if !admitted { continuation.resume(returning: false) }
+                }
+                if written { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(written)
+            take.appendAudio(try audio(at: time))
+        }
+        let finished = expectation(description: "Asynchronous movie and audio finish")
+        take.finish { error in XCTAssertNil(error); finished.fulfill() }
+        await fulfillment(of: [finished], timeout: 30)
+        let asset = AVURLAsset(url: url)
+        let videos = try await asset.loadTracks(withMediaType: .video)
+        let audios = try await asset.loadTracks(withMediaType: .audio)
+        XCTAssertEqual(videos.count, 1); XCTAssertEqual(audios.count, 1)
+        let range = try await XCTUnwrap(audios.first).load(.timeRange)
+        XCTAssertGreaterThanOrEqual(range.duration.seconds, 0.35)
+        let generator = AVAssetImageGenerator(asset: asset); generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+        let (withPiP, _) = try await generator.image(at: CMTime(value: 1, timescale: 30))
+        let (withoutPiP, _) = try await generator.image(at: CMTime(value: 8, timescale: 30))
+        XCTAssertNotEqual(withPiP.dataProvider?.data as Data?, withoutPiP.dataProvider?.data as Data?)
+    }
+
+    func testSlowWriterCannotBuildVideoBacklogAndStopDrainsAcceptedFrame() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let writing = DispatchQueue(label: "test.blockedWriter")
+        let callbacks = DispatchQueue(label: "test.captureCallbacks")
+        let take = try ContinuousTakePipeline(url: url, angle: 0, callbackQueue: callbacks, writingQueue: writing)
+        let image = try frame(red: true)
+        writing.suspend()
+        let accepted = expectation(description: "Accepted frame written")
+        XCTAssertTrue(take.appendVideo(image, presenter: nil, presentation: nil, at: .zero,
+            angle: 0, presenterAngle: 0) { written, error in
+                XCTAssertTrue(written); XCTAssertNil(error); accepted.fulfill()
+            })
+        for index in 1...100 {
+            XCTAssertFalse(take.appendVideo(image, presenter: nil, presentation: nil,
+                at: CMTime(value: Int64(index), timescale: 30), angle: 0, presenterAngle: 0) { _, _ in
+                    XCTFail("A queued backlog must not be admitted")
+                })
+        }
+        let finished = expectation(description: "Stop drains accepted frame")
+        take.finish { error in XCTAssertNil(error); finished.fulfill() }
+        XCTAssertFalse(take.appendVideo(image, presenter: nil, presentation: nil,
+            at: CMTime(value: 101, timescale: 30), angle: 0, presenterAngle: 0) { _, _ in XCTFail() })
+        writing.resume()
+        await fulfillment(of: [accepted, finished], timeout: 30)
+        let videos = try await AVURLAsset(url: url).loadTracks(withMediaType: .video)
+        XCTAssertEqual(videos.count, 1)
+    }
+
     func testRememberedPiPPreferenceCannotActivateDualCameraByItself() {
         XCTAssertFalse(CameraCompatibility.shouldPreparePiP(profile: .standard, storedPreference: true, requested: false, currentlyEnabled: false))
         XCTAssertTrue(CameraCompatibility.shouldPreparePiP(profile: .standard, storedPreference: true, requested: true, currentlyEnabled: false))

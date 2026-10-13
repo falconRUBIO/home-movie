@@ -142,6 +142,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         lookRenderer?.frames?.setListener(nil)
         lookRenderer?.configure(frames: frames, cube: cube, active: active, passthrough: passthrough)
         lookRenderer?.front = showingFront
+        (lookView?.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: passthrough ? CGColorSpace.sRGB : CGColorSpace.itur_709)
         resizeLookView()
         let enabled = active && (cube != nil || passthrough) && frames != nil
         lookView?.alpha = 1; lookView?.isHidden = !enabled; lookView?.isPaused = !enabled
@@ -322,6 +323,7 @@ struct CameraPreview: UIViewRepresentable {
     var liveCube: ColorCube? = nil
     var liveActive = false
     var samplePreview = false
+    var displayPaused = false
     var onLiveLookStatus: ((LiveLookStatus) -> Void)? = nil
     var fixedFormat: MovieFormat? = nil
     let onFocus: (CGPoint, Bool) -> Bool
@@ -345,7 +347,7 @@ struct CameraPreview: UIViewRepresentable {
         view.fixedFormat = fixedFormat
         view.onLiveLookStatus = onLiveLookStatus
         view.setFront(front)
-        view.configureLiveLook(frames: liveFrames, cube: liveCube, active: liveActive || samplePreview, passthrough: samplePreview)
+        view.configureLiveLook(frames: liveFrames, cube: liveCube, active: (liveActive || samplePreview) && !displayPaused, passthrough: samplePreview)
         if let options { view.updateMetering(options) }
         view.updatePreviewRotation(fallback: angle)
         guard let connection = view.previewLayer.connection else { return }

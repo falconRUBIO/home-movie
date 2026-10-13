@@ -4,6 +4,14 @@ import AVFoundation
 @testable import HomeMovie
 
 final class CameraTouchTests: XCTestCase {
+    func testExtendedZoomUsesDisplayMultiplierAndActiveDeviceLimits() {
+        let targets = ExtendedZoomTargets.available(minimum: 1, maximum: 48, multiplier: 0.5)
+        XCTAssertEqual(targets, [20, 30, 40, 48])
+        XCTAssertEqual(ExtendedZoomTargets.available(minimum: 1, maximum: 7, multiplier: 1), [7])
+        XCTAssertTrue(ExtendedZoomTargets.available(minimum: 1, maximum: 24, multiplier: 0).isEmpty)
+        XCTAssertTrue(ExtendedZoomTargets.available(minimum: 1, maximum: .infinity, multiplier: 1).isEmpty)
+    }
+
     func testDualCameraLiveOutputsNeverSelectAutomaticCinematicBuffering() {
         XCTAssertEqual(CameraStabilization.dualCameraMode(front: true, supports: { _ in true }), .off)
         XCTAssertEqual(CameraStabilization.dualCameraMode(front: false, supports: { _ in true }), .standard)

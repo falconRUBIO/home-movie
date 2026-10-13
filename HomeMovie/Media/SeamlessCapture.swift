@@ -2,7 +2,7 @@ import AVFoundation
 import CoreImage
 
 // A take has one writer, one clock and one microphone regardless of the selected camera.
-// Every method and sample callback runs on CaptureService's serial capture queue.
+// Each writer is confined to one serial queue; the capture pipeline uses a dedicated writing queue.
 final class ContinuousTakeWriter {
     let writer: AVAssetWriter
     private let video: AVAssetWriterInput
@@ -41,6 +41,7 @@ final class ContinuousTakeWriter {
         writer.add(video); writer.add(audio)
         guard writer.startWriting() else { throw writer.error ?? HomeMovieError.message("Recording could not start.") }
     }
+    var canAcceptVideo: Bool { !finishing && failure == nil && video.isReadyForMoreMediaData }
     @discardableResult func appendVideo(_ buffer: CVPixelBuffer, at time: CMTime, sourceAngle: CGFloat? = nil) -> Bool {
         if writer.status == .failed { failure = writer.error; return false }
         guard !finishing, failure == nil, time.isNumeric, lastVideo.map({ time > $0 }) ?? true else { return false }
@@ -97,6 +98,57 @@ final class ContinuousTakeWriter {
     }
 }
 
+// Capture never waits for rendering/encoding. One video job and a bounded number of
+// audio jobs may be outstanding; all writer mutations and finish remain ordered.
+final class ContinuousTakePipeline: @unchecked Sendable {
+    private let writer: ContinuousTakeWriter
+    private let compositor = PiPFrameRenderer()
+    private let writingQueue: DispatchQueue
+    private let videoSlot = DispatchSemaphore(value: 1)
+    private let audioSlots = DispatchSemaphore(value: 8)
+    private let callbackQueue: DispatchQueue
+    let canvas: CGSize
+    let outputURL: URL
+    private(set) var finishing = false // Capture queue only.
+    init(url: URL, angle: CGFloat, callbackQueue: DispatchQueue,
+         writingQueue: DispatchQueue = DispatchQueue(label: "HomeMovie.continuousWriter", qos: .userInitiated)) throws {
+        writer = try ContinuousTakeWriter(url: url, angle: angle)
+        canvas = writer.canvas; outputURL = url; self.callbackQueue = callbackQueue; self.writingQueue = writingQueue
+    }
+    @discardableResult func appendVideo(_ image: CVPixelBuffer, presenter: CVPixelBuffer?, presentation: PiPPresentation?,
+                     at time: CMTime, angle: CGFloat, presenterAngle: CGFloat,
+                     completion: @escaping @Sendable (Bool, Error?) -> Void) -> Bool {
+        guard !finishing, videoSlot.wait(timeout: .now()) == .success else { return false }
+        writingQueue.async { [self] in
+            defer { videoSlot.signal() }
+            let accepted: Bool
+            if !writer.canAcceptVideo { accepted = false }
+            else if let presentation {
+                let composition = PiPCompositor.image(background: image, presenter: presenter, canvas: canvas,
+                    backgroundAngle: angle, presenterAngle: presenterAngle, presentation: presentation)
+                if let rendered = compositor.render(composition, canvas: canvas) {
+                    accepted = writer.appendRenderedVideo(rendered, at: time)
+                } else {
+                    accepted = writer.appendVideo(image, at: time, sourceAngle: angle)
+                }
+            } else { accepted = writer.appendVideo(image, at: time, sourceAngle: angle) }
+            let failure = writer.failure ?? (writer.writer.status == .failed ? writer.writer.error : nil)
+            callbackQueue.async { completion(accepted, failure) }
+        }
+        return true
+    }
+    func appendAudio(_ sample: CMSampleBuffer) {
+        guard !finishing, audioSlots.wait(timeout: .now()) == .success else { return }
+        writingQueue.async { [self] in
+            defer { audioSlots.signal() }; writer.appendAudio(sample)
+        }
+    }
+    func finish(_ completion: @escaping @Sendable (Error?) -> Void) {
+        guard !finishing else { return }; finishing = true
+        writingQueue.async { [self] in writer.finish(completion) }
+    }
+}
+
 // Prepared before recording: a flip changes frame selection, never the capture graph.
 final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
     let session = AVCaptureMultiCamSession()
@@ -113,10 +165,11 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private var recordedPresenterAngle: CGFloat = 90
     private var recordedRearAngle: CGFloat = 90
     private var pendingPiPEnable = false
-    private var noSpaceReported = false
+    private var presenterStallReported = false
     private var timeline = PiPTimeline()
     private var matcher = PiPFrameMatcher()
-    private let compositor = PiPFrameRenderer()
+    private let frontCopies = CaptureFrameCopy()
+    private let backCopies = CaptureFrameCopy()
     private var obstacles: [CGRect] = []
     private var lastVideoTime = CMTime.invalid
     private var lastPresentation = PiPPresentation()
@@ -125,6 +178,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private var pressureObservations: [NSKeyValueObservation] = []
     private var thermalObserver: NSObjectProtocol?
     private var lastStorageCheck: Double = 0
+    private var storageCheckPending = false
     let preparedForPiP: Bool
     private var preferredCanvas: MovieFormat?
     var canvasFormat: MovieFormat? { preferredCanvas }
@@ -139,7 +193,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private(set) var front = true
     var activeInput: AVCaptureDeviceInput { front ? frontInput : backInput }
     var readyToFlip: Bool { frontReady && backReady && !presenterDisabled }
-    private var take: ContinuousTakeWriter?
+    private var take: ContinuousTakePipeline?
     private var ticket: CaptureTicket?
     private var announcedStart = false
     var onStarted: ((UUID) -> Void)?
@@ -255,7 +309,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     }
     func record(ticket: CaptureTicket, url: URL, angle: CGFloat) throws {
         guard take == nil, session.isRunning else { throw HomeMovieError.message("The camera is not ready.") }
-        take = try ContinuousTakeWriter(url: url, angle: angle); self.ticket = ticket; announcedStart = false
+        take = try ContinuousTakePipeline(url: url, angle: angle, callbackQueue: queue); self.ticket = ticket; announcedStart = false
         let frontObserved = frontRotation?.videoRotationAngleForHorizonLevelCapture ?? angle
         let rearObserved = backRotation?.videoRotationAngleForHorizonLevelCapture ?? angle
         recordedPresenterAngle = (MovieFormat.captureFormat(angle: frontObserved) ?? .portrait).recordingAngle(observed: frontObserved)
@@ -304,7 +358,8 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     }
     func captureOutput(_ output: AVCaptureOutput, didOutput sample: CMSampleBuffer, from connection: AVCaptureConnection) {
         if output === audioOutput { take?.appendAudio(sample); return }
-        guard let image = CMSampleBufferGetImageBuffer(sample) else { return }
+        guard let source = CMSampleBufferGetImageBuffer(sample),
+              let image = (output === frontOutput ? frontCopies : backCopies).copy(source) else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sample)
         guard time.isNumeric else { return }
         let wasReady = readyToFlip
@@ -318,18 +373,14 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         }
         guard output === (front ? frontOutput : backOutput) else { return }
         lastVideoTime = time
-        if timeline.enabled, lastPresenterTime.isNumeric, CMTimeSubtract(time, lastPresenterTime).seconds > 0.3 {
-            timeline.setEnabled(false, at: time); onReady?()
-            onNotice?("The presenter camera paused. Rear video and audio are still recording.")
-        }
+        let presenterStalled = timeline.enabled && lastPresenterTime.isNumeric && CMTimeSubtract(time, lastPresenterTime).seconds > 0.5
+        if presenterStalled, !presenterStallReported {
+            presenterStallReported = true
+            onNotice?("The presenter camera paused. Rear video and audio continue; PiP resumes when fresh frames arrive.")
+        } else if !presenterStalled { presenterStallReported = false }
         let presentation = timeline.presentation(at: time, canvas: geometryCanvas, obstacles: obstacles)
-        if timeline.enabled, !presentation.isPlaceable, !noSpaceReported {
-            noSpaceReported = true
-            onNotice?("PiP is hidden while the camera controls cover its available space. Close Dolly or choose Small before the next take.")
-        } else if presentation.isPlaceable { noSpaceReported = false }
         if presentation != lastPresentation { lastPresentation = presentation; onPiPPresentation?(presentation) }
         let composing = timeline.enabled || presentation.opacity > 0
-        var accepted = false
         if composing {
             let angle = take == nil ? previewAngle : (front ? recordedPresenterAngle : recordedRearAngle)
             let frontObserved = frontRotation?.videoRotationAngleForHorizonLevelCapture ?? angle
@@ -339,34 +390,38 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             // of the full-resolution recording buffer and stays latest-frame-only.
             frames.push(image, angle: previewAngle, pip: LivePiPFrame(presenter: presenter,
                 backgroundAngle: angle, presenterAngle: frontAngle, presentation: presentation))
-            if let take, !take.finishing {
-                let composition = PiPCompositor.image(background: image, presenter: presenter, canvas: take.canvas,
-                    backgroundAngle: angle, presenterAngle: frontAngle, presentation: presentation)
-                if let rendered = compositor.render(composition, canvas: take.canvas) {
-                    accepted = take.appendRenderedVideo(rendered, at: time)
-                } else {
-                    // Optional composition failure preserves the main video/audio clock.
-                    accepted = take.appendVideo(image, at: time, sourceAngle: angle)
-                    if timeline.enabled {
-                        timeline.setEnabled(false, at: time); onReady?()
-                        onNotice?("PiP paused because the composition could not be rendered. Rear recording continues.")
-                    }
-                }
-            }
+            enqueueRecording(image, presenter: presenter, presentation: presentation, at: time,
+                angle: angle, presenterAngle: frontAngle)
         } else {
             frames.push(image, angle: previewAngle)
-            accepted = take?.appendVideo(image, at: time, sourceAngle: front ? recordedPresenterAngle : recordedRearAngle) ?? false
+            enqueueRecording(image, presenter: nil, presentation: nil, at: time,
+                angle: front ? recordedPresenterAngle : recordedRearAngle, presenterAngle: recordedPresenterAngle)
         }
-        if let ticket, accepted, !announcedStart {
-            announcedStart = true; onStarted?(ticket.sceneID)
-        }
-        if take?.failure != nil { stop() }
-        if take != nil, time.seconds - lastStorageCheck >= 2 {
-            lastStorageCheck = time.seconds
-            if let available = try? FileManager.default.attributesOfFileSystem(forPath: take!.writer.outputURL.deletingLastPathComponent().path)[.systemFreeSize] as? NSNumber,
-               available.int64Value < 100_000_000 {
-                onNotice?("Storage is nearly full. Finishing this take safely."); stop()
+        if let take, !storageCheckPending, time.seconds - lastStorageCheck >= 2 {
+            lastStorageCheck = time.seconds; storageCheckPending = true
+            let directory = take.outputURL.deletingLastPathComponent().path
+            DispatchQueue.global(qos: .utility).async { [weak self, weak take] in
+                let available = (try? FileManager.default.attributesOfFileSystem(forPath: directory)[.systemFreeSize]) as? NSNumber
+                self?.queue.async { [weak self, weak take] in
+                    guard let self else { return }; self.storageCheckPending = false
+                    guard let take, self.take === take, let available, available.int64Value < 100_000_000 else { return }
+                    self.onNotice?("Storage is nearly full. Finishing this take safely."); self.stop()
+                }
             }
         }
     }
+
+    private func enqueueRecording(_ image: CVPixelBuffer, presenter: CVPixelBuffer?, presentation: PiPPresentation?,
+                                  at time: CMTime, angle: CGFloat, presenterAngle: CGFloat) {
+        guard let take, let ticket else { return }
+        take.appendVideo(image, presenter: presenter, presentation: presentation, at: time,
+            angle: angle, presenterAngle: presenterAngle) { [weak self, weak take] accepted, error in
+            guard let self, let take, self.take === take else { return }
+            if accepted, !self.announcedStart {
+                self.announcedStart = true; self.onStarted?(ticket.sceneID)
+            }
+            if error != nil { self.stop() }
+        }
+    }
+
 }

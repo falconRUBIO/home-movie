@@ -6,6 +6,103 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testPresenterMatchingResumesAfterTemporaryGapWithoutReset() throws {
+        var matcher = PiPFrameMatcher()
+        let old = try frame(red: 40, green: 0, blue: 0)
+        let fresh = try frame(red: 220, green: 0, blue: 0)
+        matcher.push(old, at: .zero)
+        XCTAssertNil(matcher.frame(at: CMTime(seconds: 1, preferredTimescale: 30)))
+        matcher.push(fresh, at: CMTime(seconds: 1, preferredTimescale: 30))
+        XCTAssertTrue(matcher.frame(at: CMTime(seconds: 1.01, preferredTimescale: 300)) === fresh)
+    }
+
+    func testCaptureCopiesOwnPixelsAndBoundRetainedBuffers() throws {
+        let source = try frame(red: 220, green: 0, blue: 0)
+        let copier = CaptureFrameCopy()
+        var retained: [CVPixelBuffer] = []
+        for _ in 0..<8 { retained.append(try XCTUnwrap(copier.copy(source))) }
+        XCTAssertFalse(retained[0] === source)
+        CVPixelBufferLockBaseAddress(source, [])
+        memset(try XCTUnwrap(CVPixelBufferGetBaseAddress(source)), 0, CVPixelBufferGetDataSize(source))
+        CVPixelBufferUnlockBaseAddress(source, [])
+        XCTAssertGreaterThan(sample(CIImage(cvPixelBuffer: retained[0]), point: CGPoint(x: 10, y: 10))[0], 180)
+        XCTAssertNil(copier.copy(source))
+        retained.removeAll()
+        XCTAssertNotNil(copier.copy(source))
+    }
+    func testNativePlanarCaptureCopyPreservesBothPlanes() throws {
+        var source: CVPixelBuffer?
+        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 64, 36, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+            [kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary, &source), kCVReturnSuccess)
+        let buffer = try XCTUnwrap(source)
+        CVPixelBufferLockBaseAddress(buffer, [])
+        for plane in 0..<2 {
+            memset(try XCTUnwrap(CVPixelBufferGetBaseAddressOfPlane(buffer, plane)), plane == 0 ? 90 : 140,
+                CVPixelBufferGetBytesPerRowOfPlane(buffer, plane) * CVPixelBufferGetHeightOfPlane(buffer, plane))
+        }
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+        let copy = try XCTUnwrap(CaptureFrameCopy().copy(buffer))
+        XCTAssertEqual(CVPixelBufferGetPlaneCount(copy), 2)
+        CVPixelBufferLockBaseAddress(copy, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(copy, .readOnly) }
+        for plane in 0..<2 {
+            let bytes = try XCTUnwrap(CVPixelBufferGetBaseAddressOfPlane(copy, plane)).assumingMemoryBound(to: UInt8.self)
+            let stride = CVPixelBufferGetBytesPerRowOfPlane(copy, plane)
+            for row in 0..<CVPixelBufferGetHeightOfPlane(copy, plane) {
+                XCTAssertEqual(bytes[row * stride], plane == 0 ? 90 : 140)
+            }
+        }
+    }
+
+    func testMediumInsetRemainsVisibleWhenControlsCoverEveryPlacement() throws {
+        for canvas in [MovieFormat.portrait.canvas, MovieFormat.landscape.canvas] {
+            for orientation in PiPOrientation.allCases {
+                var timeline = PiPTimeline()
+                timeline.setLayout(PiPLayout(size: .medium, orientation: orientation))
+                timeline.setEnabled(true, at: .zero)
+                let presentation = timeline.presentation(at: CMTime(seconds: 1, preferredTimescale: 30),
+                    canvas: canvas, obstacles: [CGRect(x: 0, y: 0, width: 1, height: 1)])
+                XCTAssertTrue(presentation.isPlaceable); XCTAssertEqual(presentation.opacity, 1)
+                XCTAssertFalse(presentation.rect.isEmpty)
+                XCTAssertTrue(CGRect(x: 0, y: 0, width: 1, height: 1).contains(presentation.rect))
+            }
+        }
+    }
+    func testFrameMatcherReleasesOldCaptureBuffers() throws {
+        var matcher = PiPFrameMatcher()
+        var old: CVPixelBuffer? = try frame(red: 20, green: 0, blue: 0)
+        weak var retained = old
+        matcher.push(try XCTUnwrap(old), at: .zero); old = nil
+        XCTAssertNotNil(retained)
+        matcher.push(try frame(red: 40, green: 0, blue: 0), at: CMTime(value: 1, timescale: 30))
+        matcher.push(try frame(red: 60, green: 0, blue: 0), at: CMTime(value: 2, timescale: 30))
+        XCTAssertNil(retained)
+    }
+
+    func testLegacyLayoutKeepsLandscapeAndNewOrientationRoundTrips() throws {
+        let legacy = Data(#"{"corner":"bottomRight","size":"small"}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(PiPLayout.self, from: legacy).orientation, .landscape)
+        let portrait = PiPLayout(corner: .topLeft, size: .medium, orientation: .portrait)
+        XCTAssertEqual(try JSONDecoder().decode(PiPLayout.self, from: JSONEncoder().encode(portrait)), portrait)
+    }
+    func testBothInsetShapesFitBothMovieOrientationsAndSettleWithoutChangingShape() throws {
+        for canvas in [CGSize(width: 1920, height: 1080), CGSize(width: 1080, height: 1920)] {
+            for orientation in PiPOrientation.allCases {
+                for size in PiPSize.allCases {
+                    for corner in PiPCorner.allCases {
+                        let layout = PiPLayout(corner: corner, size: size, orientation: orientation)
+                        let rect = try XCTUnwrap(PiPGeometry.rect(layout: layout, canvas: canvas))
+                        XCTAssertTrue(CGRect(x: 0, y: 0, width: 1, height: 1).contains(rect))
+                        XCTAssertEqual(rect.width * canvas.width / (rect.height * canvas.height), orientation == .portrait ? 0.75 : 4.0 / 3, accuracy: 0.001)
+                        var timeline = PiPTimeline(); timeline.setLayout(layout)
+                        timeline.drag(to: CGPoint(x: 0.1, y: 0.1), at: .zero, canvas: canvas, obstacles: [])
+                        XCTAssertEqual(timeline.settle(at: .zero, canvas: canvas, obstacles: []).orientation, orientation)
+                    }
+                }
+            }
+        }
+    }
+
     func testLivePairIsAtomicAndClearedWhenReturningToOrdinaryFrames() throws {
         let rear = try frame(red: 0, green: 0, blue: 220), front = try frame(red: 220, green: 0, blue: 0)
         let frames = LiveFrames()

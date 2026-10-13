@@ -15,9 +15,25 @@ enum PiPSize: String, Codable, CaseIterable, Identifiable, Sendable {
     var fraction: CGFloat { self == .small ? 0.27 : 0.36 }
     var title: String { rawValue.capitalized }
 }
+enum PiPOrientation: String, Codable, CaseIterable, Identifiable, Sendable {
+    case landscape, portrait
+    var id: Self { self }
+    var title: String { rawValue.capitalized }
+}
 struct PiPLayout: Codable, Equatable, Sendable {
     var corner = PiPCorner.bottomRight
     var size = PiPSize.small
+    var orientation = PiPOrientation.landscape
+    init(corner: PiPCorner = .bottomRight, size: PiPSize = .small, orientation: PiPOrientation = .landscape) {
+        self.corner = corner; self.size = size; self.orientation = orientation
+    }
+    private enum CodingKeys: String, CodingKey { case corner, size, orientation }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        corner = try values.decode(PiPCorner.self, forKey: .corner)
+        size = try values.decode(PiPSize.self, forKey: .size)
+        orientation = try values.decodeIfPresent(PiPOrientation.self, forKey: .orientation) ?? .landscape
+    }
 }
 struct PiPPresentation: Equatable, Sendable {
     var rect = CGRect.zero // UIKit-normalized coordinates in the actual movie canvas.
@@ -27,19 +43,22 @@ struct PiPPresentation: Equatable, Sendable {
     var isPlaceable = true
 }
 enum PiPGeometry {
-    static func extent(canvas: CGSize, size: PiPSize) -> CGSize {
-        CGSize(width: canvas.width * size.fraction, height: canvas.width * size.fraction * 0.75)
+    static func extent(canvas: CGSize, size: PiPSize, orientation: PiPOrientation = .landscape) -> CGSize {
+        let longEdge = canvas.width * size.fraction
+        return orientation == .portrait
+            ? CGSize(width: longEdge * 0.75, height: longEdge)
+            : CGSize(width: longEdge, height: longEdge * 0.75)
     }
-    static func desiredCenter(corner: PiPCorner, canvas: CGSize, size: PiPSize) -> CGPoint {
-        let extent = extent(canvas: canvas, size: size), margin = min(canvas.width, canvas.height) * 0.022
+    static func desiredCenter(corner: PiPCorner, canvas: CGSize, size: PiPSize, orientation: PiPOrientation = .landscape) -> CGPoint {
+        let extent = extent(canvas: canvas, size: size, orientation: orientation), margin = min(canvas.width, canvas.height) * 0.022
         let left = corner == .topLeft || corner == .bottomLeft
         let top = corner == .topLeft || corner == .topRight
         return CGPoint(x: (left ? margin + extent.width / 2 : canvas.width - margin - extent.width / 2) / canvas.width,
             y: (top ? margin + extent.height / 2 : canvas.height - margin - extent.height / 2) / canvas.height)
     }
-    static func safeRect(center: CGPoint, canvas: CGSize, size: PiPSize, obstacles: [CGRect] = []) -> CGRect? {
+    static func safeRect(center: CGPoint, canvas: CGSize, size: PiPSize, orientation: PiPOrientation = .landscape, obstacles: [CGRect] = []) -> CGRect? {
         guard canvas.width > 0, canvas.height > 0, center.x.isFinite, center.y.isFinite else { return nil }
-        let extent = extent(canvas: canvas, size: size), margin = min(canvas.width, canvas.height) * 0.022
+        let extent = extent(canvas: canvas, size: size, orientation: orientation), margin = min(canvas.width, canvas.height) * 0.022
         let width = extent.width / canvas.width, height = extent.height / canvas.height
         let mx = margin / canvas.width, my = margin / canvas.height
         let xmin = mx + width / 2, xmax = 1 - mx - width / 2
@@ -58,12 +77,14 @@ enum PiPGeometry {
         return rect(closest)
     }
     static func rect(layout: PiPLayout, canvas: CGSize, obstacles: [CGRect] = []) -> CGRect? {
-        safeRect(center: desiredCenter(corner: layout.corner, canvas: canvas, size: layout.size), canvas: canvas, size: layout.size, obstacles: obstacles)
+        let center = desiredCenter(corner: layout.corner, canvas: canvas, size: layout.size, orientation: layout.orientation)
+        return safeRect(center: center, canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles)
+            ?? safeRect(center: center, canvas: canvas, size: layout.size, orientation: layout.orientation)
     }
     static func nearestCorner(to point: CGPoint, layout: PiPLayout, canvas: CGSize, obstacles: [CGRect] = []) -> PiPCorner {
         PiPCorner.allCases.min { a, b in
-            let ar = rect(layout: PiPLayout(corner: a, size: layout.size), canvas: canvas, obstacles: obstacles)
-            let br = rect(layout: PiPLayout(corner: b, size: layout.size), canvas: canvas, obstacles: obstacles)
+            let ar = rect(layout: PiPLayout(corner: a, size: layout.size, orientation: layout.orientation), canvas: canvas, obstacles: obstacles)
+            let br = rect(layout: PiPLayout(corner: b, size: layout.size, orientation: layout.orientation), canvas: canvas, obstacles: obstacles)
             let da = ar.map { distance(CGPoint(x: $0.midX, y: $0.midY), point) } ?? .infinity
             let db = br.map { distance(CGPoint(x: $0.midX, y: $0.midY), point) } ?? .infinity
             return da < db
@@ -94,14 +115,14 @@ struct PiPTimeline {
     }
     private func currentCenter(at time: CMTime, canvas: CGSize) -> CGPoint {
         guard let moveFrom, let moveTo, moveStart.isNumeric, time.isNumeric else {
-            return center ?? PiPGeometry.desiredCenter(corner: layout.corner, canvas: canvas, size: layout.size)
+            return center ?? PiPGeometry.desiredCenter(corner: layout.corner, canvas: canvas, size: layout.size, orientation: layout.orientation)
         }
         let p = min(1, max(0, CMTimeSubtract(time, moveStart).seconds / Self.transitionSeconds))
         let t = CGFloat(p * p * (3 - 2 * p))
         return CGPoint(x: moveFrom.x + (moveTo.x - moveFrom.x) * t, y: moveFrom.y + (moveTo.y - moveFrom.y) * t)
     }
     mutating func drag(to center: CGPoint, at time: CMTime, canvas: CGSize, obstacles: [CGRect]) {
-        guard let rect = PiPGeometry.safeRect(center: center, canvas: canvas, size: layout.size, obstacles: obstacles) else { return }
+        guard let rect = PiPGeometry.safeRect(center: center, canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles) else { return }
         self.center = CGPoint(x: rect.midX, y: rect.midY); moveFrom = nil; moveTo = nil
     }
     @discardableResult mutating func settle(at time: CMTime, canvas: CGSize, obstacles: [CGRect]) -> PiPLayout {
@@ -112,7 +133,8 @@ struct PiPTimeline {
         center = moveTo; return layout
     }
     func presentation(at time: CMTime, canvas: CGSize, obstacles: [CGRect] = []) -> PiPPresentation {
-        let rect = PiPGeometry.safeRect(center: currentCenter(at: time, canvas: canvas), canvas: canvas, size: layout.size, obstacles: obstacles)
+        let rect = PiPGeometry.safeRect(center: currentCenter(at: time, canvas: canvas), canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles)
+            ?? PiPGeometry.rect(layout: layout, canvas: canvas)
         return PiPPresentation(rect: rect ?? .zero, opacity: rect == nil ? 0 : opacity(at: time), enabled: enabled, corner: layout.corner, isPlaceable: rect != nil)
     }
 }
@@ -123,7 +145,7 @@ struct PiPFrameMatcher {
     mutating func push(_ buffer: CVPixelBuffer, at time: CMTime) {
         guard time.isNumeric else { return }
         frames.append((buffer, time)); frames.sort { $0.time < $1.time }
-        if frames.count > 6 { frames.removeFirst(frames.count - 6) }
+        if frames.count > 2 { frames.removeFirst(frames.count - 2) }
     }
     func frame(at rearTime: CMTime) -> CVPixelBuffer? {
         frames.last { frame in

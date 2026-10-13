@@ -3,6 +3,47 @@ import CoreImage
 import MetalKit
 import UIKit
 
+// Long-lived preview/writer snapshots must not retain the camera's own buffer pool.
+// Copy native planes without color conversion into a bounded, app-owned pool.
+final class CaptureFrameCopy {
+    private var pool: CVPixelBufferPool?
+    private var width = 0, height = 0
+    private var format: OSType = 0
+    func copy(_ source: CVPixelBuffer) -> CVPixelBuffer? {
+        let width = CVPixelBufferGetWidth(source), height = CVPixelBufferGetHeight(source)
+        let format = CVPixelBufferGetPixelFormatType(source)
+        if pool == nil || self.width != width || self.height != height || self.format != format {
+            pool = nil; self.width = width; self.height = height; self.format = format
+            let attributes: [String: Any] = [kCVPixelBufferWidthKey as String: width,
+                kCVPixelBufferHeightKey as String: height, kCVPixelBufferPixelFormatTypeKey as String: format,
+                kCVPixelBufferMetalCompatibilityKey as String: true, kCVPixelBufferIOSurfacePropertiesKey as String: [:]]
+            guard CVPixelBufferPoolCreate(kCFAllocatorDefault, nil, attributes as CFDictionary, &pool) == kCVReturnSuccess else { return nil }
+        }
+        guard let pool else { return nil }
+        var result: CVPixelBuffer?
+        guard CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pool,
+            [kCVPixelBufferPoolAllocationThresholdKey as String: 8] as CFDictionary, &result) == kCVReturnSuccess,
+              let result else { return nil }
+        guard CVPixelBufferLockBaseAddress(source, .readOnly) == kCVReturnSuccess else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(source, .readOnly) }
+        guard CVPixelBufferLockBaseAddress(result, []) == kCVReturnSuccess else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(result, []) }
+        let planes = CVPixelBufferGetPlaneCount(source)
+        guard planes == CVPixelBufferGetPlaneCount(result) else { return nil }
+        for plane in 0..<max(1, planes) {
+            let from = planes == 0 ? CVPixelBufferGetBaseAddress(source) : CVPixelBufferGetBaseAddressOfPlane(source, plane)
+            let to = planes == 0 ? CVPixelBufferGetBaseAddress(result) : CVPixelBufferGetBaseAddressOfPlane(result, plane)
+            guard let from, let to else { return nil }
+            let fromStride = planes == 0 ? CVPixelBufferGetBytesPerRow(source) : CVPixelBufferGetBytesPerRowOfPlane(source, plane)
+            let toStride = planes == 0 ? CVPixelBufferGetBytesPerRow(result) : CVPixelBufferGetBytesPerRowOfPlane(result, plane)
+            let rows = planes == 0 ? height : CVPixelBufferGetHeightOfPlane(source, plane)
+            for row in 0..<rows { memcpy(to.advanced(by: row * toStride), from.advanced(by: row * fromStride), min(fromStride, toStride)) }
+        }
+        CVBufferPropagateAttachments(source, result)
+        return result
+    }
+}
+
 struct LivePiPFrame {
     let presenter: CVPixelBuffer?
     let backgroundAngle: CGFloat
@@ -56,7 +97,8 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
 
 @MainActor final class LiveLookRenderer: NSObject, MTKViewDelegate {
     private let queue: MTLCommandQueue
-    private let context: CIContext
+    private var context: CIContext?
+    private var contextPassthrough: Bool?
     private(set) var frames: LiveFrames?
     private(set) var cube: ColorCube?
     private(set) var presentationID = UUID()
@@ -70,6 +112,12 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
     func configure(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false) {
         let nextFrames = active && (cube != nil || passthrough) ? frames : nil
         let nextCube = active ? cube : nil
+        if nextFrames != nil, contextPassthrough != passthrough {
+            var options: [CIContextOption: Any] = [.cacheIntermediates: false, .name: "HomeMovie.LivePreview"]
+            if !passthrough { options[.workingColorSpace] = NSNull(); options[.outputColorSpace] = NSNull() }
+            context = CIContext(mtlCommandQueue: queue, options: options)
+            contextPassthrough = passthrough
+        }
         if self.frames !== nextFrames || self.passthrough != passthrough || self.cube?.rgba != nextCube?.rgba ||
             self.cube?.dimension != nextCube?.dimension || self.cube?.minimum != nextCube?.minimum ||
             self.cube?.maximum != nextCube?.maximum {
@@ -85,7 +133,6 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
     init?(device: MTLDevice) {
         guard let queue = device.makeCommandQueue() else { return nil }
         self.queue = queue
-        context = CIContext(mtlDevice: device, options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .cacheIntermediates: false])
         super.init()
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -102,7 +149,9 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: composed || directPiP ? 0 : (sourceAngle ?? angle), front: composed || directPiP ? false : front))
             .cropped(to: CGRect(origin: .zero, size: target))
         let destination = CIRenderDestination(mtlTexture: texture, commandBuffer: command)
-        destination.colorSpace = nil; destination.isFlipped = true
+        destination.colorSpace = passthrough ? CGColorSpace(name: CGColorSpace.sRGB) : nil
+        destination.isFlipped = true
+        guard let context else { throw HomeMovieError.message("The live preview is not configured.") }
         _ = try context.startTask(toRender: image, to: destination)
     }
     func draw(in view: MTKView) {
