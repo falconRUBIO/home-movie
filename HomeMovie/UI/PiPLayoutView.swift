@@ -212,7 +212,10 @@ final class PiPMetalView: MTKView {
         do {
             _ = try context.startTask(toRender: image, to: destination)
             rendering = true
-            command.addCompletedHandler { [weak self] _ in Task { @MainActor in self?.rendering = false } }
+            command.addCompletedHandler { [weak self, background, presenter, liveSource] _ in
+                withExtendedLifetime((background, presenter, liveSource)) { }
+                Task { @MainActor in self?.rendering = false }
+            }
             command.present(drawable); command.commit()
         }
         catch { }

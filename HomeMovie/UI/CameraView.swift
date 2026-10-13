@@ -243,7 +243,7 @@ struct CameraView: View {
                 format: movie?.recordingFormat ?? MovieFormat.captureFormat(angle: camera.options?.angle ?? 90) ?? .portrait,
                 rearFrames: camera.service.pipRearFrames, frontFrames: camera.service.pipPresenterFrames,
                 ready: camera.options?.piPAvailable == true, canPrepare: camera.options?.canPreparePiP == true,
-                logMode: movie?.captureProfile == .appleLog, obstacles: normalizedPiPObstacles,
+                logMode: movie?.captureProfile == .appleLog, obstacles: [],
                 onPrepare: { enableDualCamera() })
         }
         .sheet(isPresented: $showingPiPCompatibility) { pipCompatibility }
@@ -998,7 +998,7 @@ struct CameraView: View {
                 width: $0.width / viewfinderSize.width, height: $0.height / viewfinderSize.height)
         }.filter { !$0.isEmpty }
     }
-    private func updatePiPObstacles() { camera.service.setPiPObstacles(normalizedPiPObstacles) }
+    private func updatePiPObstacles() { camera.service.setPiPObstacles([]) }
     private var pipProtectedRegion: [CGRect] {
         guard camera.pipPresentation.opacity > 0, viewfinderSize.width > 0 else { return [] }
         let r = camera.pipPresentation.rect

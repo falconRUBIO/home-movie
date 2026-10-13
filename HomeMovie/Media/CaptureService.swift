@@ -31,9 +31,10 @@ enum CameraStabilization {
         if #available(iOS 26.0, *), supports(.lowLatency) { return .lowLatency }
         return supports(.standard) ? .standard : .off
     }
-    static func configure(_ connection: AVCaptureConnection, format: AVCaptureDevice.Format?, preview: Bool, front: Bool = false) {
+    static func configure(_ connection: AVCaptureConnection, format: AVCaptureDevice.Format?, preview: Bool, front: Bool = false, sharedStream: Bool = false) {
         guard connection.isVideoStabilizationSupported, let format else { return }
-        let mode = preferredMode(preview: preview, front: front, supports: { format.isVideoStabilizationModeSupported($0) })
+        let mode = sharedStream ? dualCameraMode(front: front, supports: { format.isVideoStabilizationModeSupported($0) }) :
+            preferredMode(preview: preview, front: front, supports: { format.isVideoStabilizationModeSupported($0) })
         // Avoid renegotiating the pipeline on every zoom/UI update.
         if connection.preferredVideoStabilizationMode != mode { connection.preferredVideoStabilizationMode = mode }
     }
@@ -819,7 +820,9 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             connection.automaticallyAdjustsVideoMirroring = false
             if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
             if connection.isVideoRotationAngleSupported(0) { connection.videoRotationAngle = 0 }
-            CameraStabilization.configure(connection, format: videoInput?.device.activeFormat, preview: false, front: isFront)
+            // Standard output feeds both the viewfinder and writer. Automatic cinematic
+            // stabilization buffers this entire stream, so use a realtime policy.
+            CameraStabilization.configure(connection, format: videoInput?.device.activeFormat, preview: false, front: isFront, sharedStream: true)
             return
         }
         // Inherit the device's automatic physical-camera selection while recording.
