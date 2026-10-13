@@ -6,6 +6,27 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testEverySelectedCornerMatchesMovieCanvasInSettingsAndCapture() throws {
+        for canvas in [MovieFormat.portrait.canvas, MovieFormat.landscape.canvas] {
+            for corner in PiPCorner.allCases {
+                for orientation in PiPOrientation.allCases {
+                    let layout = PiPLayout(corner: corner, orientation: orientation)
+                    var timeline = PiPTimeline(); timeline.setLayout(layout)
+                    timeline.setEnabled(true, at: .zero)
+                    let recorded = timeline.presentation(at: CMTime(seconds: 1, preferredTimescale: 30), canvas: canvas)
+                    let settings = try XCTUnwrap(PiPGeometry.rect(layout: layout, canvas: canvas))
+                    XCTAssertEqual(recorded.rect, settings)
+                    let margin = min(canvas.width, canvas.height) * 0.022
+                    if corner == .topLeft || corner == .bottomLeft {
+                        XCTAssertEqual(settings.minX * canvas.width, margin, accuracy: 0.001)
+                    } else { XCTAssertEqual((1 - settings.maxX) * canvas.width, margin, accuracy: 0.001) }
+                    if corner == .topLeft || corner == .topRight {
+                        XCTAssertEqual(settings.minY * canvas.height, margin, accuracy: 0.001)
+                    } else { XCTAssertEqual((1 - settings.maxY) * canvas.height, margin, accuracy: 0.001) }
+                }
+            }
+        }
+    }
     func testPreviewFitsPortraitAndLandscapeCanvasWithinAvailableArea() {
         let area = CGSize(width: 358, height: 340)
         let portrait = PiPGeometry.fittedPreview(canvas: CGSize(width: 1080, height: 1920), available: area)

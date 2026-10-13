@@ -214,7 +214,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         if camera.position == .front, #available(iOS 26.0, *) {
             let square = formats.filter {
                 let size = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
-                return size.width == size.height && size.width >= 1280 && size.width <= 1920 &&
+                return size.width == size.height && size.width >= 1280 && size.width <= 2160 &&
                     $0.supportedDynamicAspectRatios.contains(.ratio1x1)
             }.sorted {
                 CMVideoFormatDescriptionGetDimensions($0.formatDescription).width < CMVideoFormatDescriptionGetDimensions($1.formatDescription).width

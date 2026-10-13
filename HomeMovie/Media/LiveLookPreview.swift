@@ -162,7 +162,11 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
             try encode(source.buffer, to: drawable.texture, command: command, composed: source.composed, sourceAngle: source.angle, pip: source.pip, sourceFront: source.front)
             rendering = true
             let presentationID = self.presentationID
-            command.addCompletedHandler { [weak self] buffer in
+            // Keep pool-backed source frames alive until the GPU has finished reading.
+            // Holding only the CI graph during encode lets the capture pool recycle
+            // presenter pixels while the asynchronous preview command is in flight.
+            command.addCompletedHandler { [weak self, source] buffer in
+                withExtendedLifetime(source) { }
                 Task { @MainActor in
                     self?.rendering = false
                     guard let self, self.canPresent(presentationID) else { return }
