@@ -31,7 +31,7 @@ final class PictureInPictureTests: XCTestCase {
         let presentation = PiPPresentation(rect: rect, opacity: 1, enabled: true)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 640, height: 360, mipmapped: false)
         descriptor.storageMode = .shared; descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
-        let texture = try XCTUnwrap(device.makeTexture(descriptor))
+        let texture = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
         let queue = try XCTUnwrap(device.makeCommandQueue()), command = try XCTUnwrap(queue.makeCommandBuffer())
         try renderer.encode(rear, to: texture, command: command, pip: LivePiPFrame(presenter: front,
             backgroundAngle: 0, presenterAngle: 0, presentation: presentation))
