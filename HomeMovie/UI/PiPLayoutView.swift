@@ -150,6 +150,8 @@ struct PiPCompositionPreview: UIViewRepresentable {
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { }
     func draw(in view: MTKView) {
+        let previewSize = PiPFrameRenderer.previewCanvas(for: view.drawableSize)
+        if previewSize != .zero, view.drawableSize != previewSize { view.drawableSize = previewSize }
         guard !rendering, let rear = rear?.snapshot(), let drawable = view.currentDrawable, let command = queue.makeCommandBuffer() else { return }
         let front = front?.snapshot(), canvas = CGSize(width: drawable.texture.width, height: drawable.texture.height)
         let presentation = PiPPresentation(rect: PiPGeometry.rect(layout: layout, canvas: canvas, obstacles: obstacles) ?? .zero, opacity: 1, enabled: true, corner: layout.corner)

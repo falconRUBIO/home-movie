@@ -763,6 +763,7 @@ struct CameraView: View {
                 liveCube: liveOriginal ? nil : liveCube,
                 liveActive: movie?.captureProfile == .appleLog && camera.state.showsLiveLook,
                 samplePreview: camera.options?.samplePreview == true,
+                displayPaused: showingPiPLayout,
                 onLiveLookStatus: { status in
                     Task { @MainActor in liveLookStatus = status }
                 },
