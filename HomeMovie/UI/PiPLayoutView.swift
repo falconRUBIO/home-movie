@@ -36,40 +36,51 @@ struct PiPLayoutView: View {
     var obstacles: [CGRect] = []
     let onPrepare: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
                 VStack(spacing: 0) {
-                    preview
-                        .frame(maxWidth: .infinity)
-                        .frame(height: min(300, geometry.size.height * 0.43))
-                        .background(.black)
+                    GeometryReader { area in
+                        let size = PiPGeometry.fittedPreview(canvas: format.canvas,
+                            available: CGSize(width: max(0, area.size.width - 32), height: max(0, area.size.height - 24)))
+                        preview.frame(width: size.width, height: size.height)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .position(x: area.size.width / 2, y: area.size.height / 2)
+                    }
+                    .frame(height: geometry.size.height * (format == .portrait ? 0.49 : 0.38))
+                    .background(Color.black)
                     Form {
                         Section {
-                            Picker("Orientation", selection: $layout.orientation) {
+                            Picker("Framing", selection: $layout.orientation) {
                                 ForEach(PiPOrientation.allCases) { orientation in
                                     Text(orientation.title).tag(orientation)
                                 }
                             }.pickerStyle(.segmented)
+                            VStack(spacing: 12) {
+                                HStack {
+                                    Text("Zoom")
+                                    Spacer()
+                                    Text(String(format: "%.1f×", Double(layout.framingZoom)))
+                                        .monospacedDigit().foregroundStyle(.secondary)
+                                }
+                                Slider(value: $layout.zoom, in: 1...2, step: 0.05)
+                                    .accessibilityLabel("Presenter zoom")
+                                    .accessibilityValue(String(format: "%.1f times", Double(layout.framingZoom)))
+                                HStack {
+                                    Text("Wider")
+                                    Spacer()
+                                    Text("Closer")
+                                }.font(.caption).foregroundStyle(.secondary)
+                            }
+                        } header: { Text("Front Camera") } footer: {
+                            Text("Frame yourself without turning your iPhone. The main video stays the same.")
+                        }
+                        Section("Inset") {
                             Picker("Size", selection: $layout.size) {
                                 ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
                             }.pickerStyle(.segmented)
-                        } header: { Text("Presenter") } footer: {
-                            Text("The inset has its own shape, independent of the main video. Your presenter stays upright and unmirrored.")
-                        }
-                        Section("Position") {
-                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: dynamicTypeSize.isAccessibilitySize ? 1 : 2), spacing: 8) {
-                                ForEach(PiPCorner.allCases) { corner in
-                                    Button { layout.corner = corner } label: {
-                                        HStack {
-                                            Image(systemName: layout.corner == corner ? "checkmark.circle.fill" : "circle")
-                                            Text(corner.title).font(.subheadline)
-                                            Spacer(minLength: 0)
-                                        }.frame(minHeight: 44)
-                                    }.buttonStyle(.plain).foregroundStyle(layout.corner == corner ? Color.accentColor : .primary)
-                                        .accessibilityAddTraits(layout.corner == corner ? .isSelected : [])
-                                }
+                            Picker("Position", selection: $layout.corner) {
+                                ForEach(PiPCorner.allCases) { corner in Text(corner.title).tag(corner) }
                             }
                         }
                         if !ready {
@@ -105,7 +116,7 @@ struct PiPLayoutView: View {
                     }
                 }
             }
-        }.aspectRatio(format.aspect, contentMode: .fit)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityLabel("\(format == .portrait ? "Portrait" : "Landscape") video with \(layout.orientation.title.lowercased()) presenter inset at \(layout.corner.title.lowercased())")
     }
 
@@ -192,7 +203,7 @@ final class PiPMetalView: MTKView {
                 (MovieFormat.captureFormat(angle: presenter?.angle ?? 90) ?? .portrait).recordingAngle(observed: presenter?.angle ?? 90),
             presentation: live != nil ? (liveSource?.pip?.presentation ?? PiPPresentation()) :
                 PiPPresentation(rect: PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero,
-                    opacity: 1, enabled: true, corner: layout.corner))
+                    opacity: 1, enabled: true, corner: layout.corner, zoom: layout.framingZoom))
         if live != nil, sourceFront, liveSource?.pip == nil {
             image = image.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: canvas.width, ty: 0))
         }
@@ -207,4 +218,5 @@ final class PiPMetalView: MTKView {
         catch { }
     }
 }
+
 

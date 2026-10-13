@@ -6,6 +6,51 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testPreviewFitsPortraitAndLandscapeCanvasWithinAvailableArea() {
+        let area = CGSize(width: 358, height: 340)
+        let portrait = PiPGeometry.fittedPreview(canvas: CGSize(width: 1080, height: 1920), available: area)
+        XCTAssertEqual(portrait.height, 340, accuracy: 0.001)
+        XCTAssertEqual(portrait.width / portrait.height, 9.0 / 16, accuracy: 0.001)
+        let landscape = PiPGeometry.fittedPreview(canvas: CGSize(width: 1920, height: 1080), available: area)
+        XCTAssertEqual(landscape.width, 358, accuracy: 0.001)
+        XCTAssertEqual(landscape.width / landscape.height, 16.0 / 9, accuracy: 0.001)
+        XCTAssertEqual(PiPGeometry.fittedPreview(canvas: .zero, available: area), .zero)
+    }
+    func testZoomPreferenceDecodesLegacyClampsAndTravelsWithCapturePresentation() throws {
+        let legacy = Data(#"{"corner":"bottomRight","size":"small"}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(PiPLayout.self, from: legacy).zoom, 1)
+        let layout = PiPLayout(orientation: .portrait, zoom: 1.75)
+        XCTAssertEqual(try JSONDecoder().decode(PiPLayout.self, from: JSONEncoder().encode(layout)), layout)
+        XCTAssertEqual(PiPLayout(zoom: .infinity).framingZoom, 1)
+        XCTAssertEqual(PiPLayout(zoom: 5).framingZoom, 2)
+        var timeline = PiPTimeline(); timeline.setLayout(layout)
+        let time = CMTime(seconds: 1, preferredTimescale: 600)
+        timeline.setEnabled(true, at: time)
+        XCTAssertEqual(timeline.presentation(at: time, canvas: CGSize(width: 1080, height: 1920)).zoom, 1.75)
+    }
+    func testPresenterZoomCropsAroundCenterWithoutChangingRearOrInsetBounds() throws {
+        let rear = try frame(red: 0, green: 0, blue: 220)
+        let front = try frame(red: 220, green: 0, blue: 0)
+        CVPixelBufferLockBaseAddress(front, [])
+        let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(front)).assumingMemoryBound(to: UInt8.self)
+        for y in 0..<36 { for x in 22..<42 {
+            let offset = y * CVPixelBufferGetBytesPerRow(front) + x * 4
+            base[offset + 1] = 220; base[offset + 2] = 0
+        }}
+        CVPixelBufferUnlockBaseAddress(front, [])
+        let canvas = CGSize(width: 320, height: 240)
+        let rect = CGRect(x: 0.1, y: 0.1, width: 0.4, height: 0.4)
+        let wide = PiPPresentation(rect: rect, opacity: 1, enabled: true, zoom: 1)
+        let close = PiPPresentation(rect: rect, opacity: 1, enabled: true, zoom: 2)
+        let a = PiPCompositor.image(background: rear, presenter: front, canvas: canvas, backgroundAngle: 0, presenterAngle: 0, presentation: wide)
+        let b = PiPCompositor.image(background: rear, presenter: front, canvas: canvas, backgroundAngle: 0, presenterAngle: 0, presentation: close)
+        for x: CGFloat in [0.2, 0.8] {
+            let point = CGPoint(x: (rect.minX + rect.width * x) * canvas.width, y: (1 - rect.midY) * canvas.height)
+            XCTAssertGreaterThan(sample(a, point: point)[0], 180)
+            XCTAssertGreaterThan(sample(b, point: point)[1], 180)
+        }
+        XCTAssertGreaterThan(sample(b, point: CGPoint(x: 260, y: 120))[2], 180)
+    }
     @MainActor func testPortraitFrontPreviewUsesFrameOrientationAndMirrorBeforeUIHandoff() async throws {
         let source = try frame(red: 220, green: 0, blue: 0, split: true)
         CVPixelBufferLockBaseAddress(source, [])
@@ -376,7 +421,7 @@ final class PictureInPictureTests: XCTestCase {
         let store = ProjectStore(root: root); _ = try await store.load()
         let movie = try await store.create(name: "Tour", format: .landscape)
         let log = try await store.create(name: "Cinema", format: .portrait, profile: .appleLog)
-        let layout = PiPLayout(corner: .topLeft, size: .medium)
+        let layout = PiPLayout(corner: .topLeft, size: .medium, orientation: .portrait, zoom: 1.5)
         try await store.setPiPLayout(movieID: movie.id, layout: layout)
         try await store.setDualCameraCapture(movieID: movie.id, enabled: true)
         do { try await store.setDualCameraCapture(movieID: log.id, enabled: true); XCTFail("Log must not silently downgrade") } catch { }
@@ -483,3 +528,4 @@ final class PictureInPictureTests: XCTestCase {
         XCTAssertGreaterThan(moved[0], 150); XCTAssertGreaterThan(hidden[2], 150)
     }
 }
+

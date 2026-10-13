@@ -204,21 +204,47 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     var onPiPLayout: ((PiPLayout) -> Void)?
     var onNotice: ((String) -> Void)?
     private let queue: DispatchQueue
-    static func canPreparePiP() -> Bool {
-        guard AVCaptureMultiCamSession.isMultiCamSupported else { return false }
-        let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .builtInTrueDepthCamera], mediaType: .video, position: .unspecified)
-        return discovery.supportedMultiCamDeviceSets.contains { pair in
-            pair.contains { $0.position == .front } && pair.contains { $0.position == .back && $0.deviceType == .builtInWideAngleCamera }
+    // Prefer the square Center Stage sensor only when its formats support MultiCam.
+    // Keep the full square feed fixed; both preview and writer crop it identically.
+    // Switching the device aspect ratio during a take would change source dimensions.
+    private static func captureFormat(for camera: AVCaptureDevice) -> AVCaptureDevice.Format? {
+        let formats = camera.formats.filter {
+            $0.isMultiCamSupported && $0.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 }
+        }
+        if camera.position == .front, #available(iOS 26.0, *) {
+            let square = formats.filter {
+                let size = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
+                return size.width == size.height && size.width >= 1280 && size.width <= 1920 &&
+                    $0.supportedDynamicAspectRatios.contains(.ratio1x1)
+            }.sorted {
+                CMVideoFormatDescriptionGetDimensions($0.formatDescription).width < CMVideoFormatDescriptionGetDimensions($1.formatDescription).width
+            }
+            if let format = square.first { return format }
+        }
+        return formats.first {
+            let size = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
+            return size.width == 1920 && size.height == 1080
         }
     }
+    private static func cameraPair() -> (front: AVCaptureDevice, back: AVCaptureDevice)? {
+        guard AVCaptureMultiCamSession.isMultiCamSupported else { return nil }
+        let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInUltraWideCamera, .builtInWideAngleCamera, .builtInTrueDepthCamera], mediaType: .video, position: .unspecified)
+        let pairs = discovery.supportedMultiCamDeviceSets.compactMap { set -> (front: AVCaptureDevice, back: AVCaptureDevice)? in
+            guard let front = set.first(where: { $0.position == .front && captureFormat(for: $0) != nil }),
+                  let back = set.first(where: { $0.position == .back && $0.deviceType == .builtInWideAngleCamera && captureFormat(for: $0) != nil }) else { return nil }
+            return (front, back)
+        }
+        return pairs.sorted {
+            let a = $0.front.deviceType == .builtInUltraWideCamera ? 0 : 1
+            let b = $1.front.deviceType == .builtInUltraWideCamera ? 0 : 1
+            return a == b ? $0.front.uniqueID < $1.front.uniqueID : a < b
+        }.first
+    }
+    static func canPreparePiP() -> Bool { cameraPair() != nil }
     init?(queue: DispatchQueue, frames: LiveFrames, rearFrames: LiveFrames = LiveFrames(), presenterFrames: LiveFrames = LiveFrames(),
           front: Bool = true, preparedForPiP: Bool = false, layout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) {
-        guard AVCaptureMultiCamSession.isMultiCamSupported else { return nil }
-        let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .builtInTrueDepthCamera], mediaType: .video, position: .unspecified)
-        guard let pair = discovery.supportedMultiCamDeviceSets.first(where: { set in
-            set.contains(where: { $0.position == .front }) && set.contains(where: { $0.position == .back && $0.deviceType == .builtInWideAngleCamera })
-        }), let frontCamera = pair.first(where: { $0.position == .front }),
-              let backCamera = pair.first(where: { $0.position == .back && $0.deviceType == .builtInWideAngleCamera }),
+        guard let pair = Self.cameraPair(),
+              case let frontCamera = pair.front, case let backCamera = pair.back,
               let frontInput = try? AVCaptureDeviceInput(device: frontCamera),
               let backInput = try? AVCaptureDeviceInput(device: backCamera) else { return nil }
         self.frontInput = frontInput; self.backInput = backInput; self.queue = queue; self.frames = frames
@@ -251,14 +277,12 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         session.automaticallyConfiguresCaptureDeviceForWideColor = false
         for (input, output) in [(frontInput, frontOutput), (backInput, backOutput)] {
             let camera = input.device
-            let formats = camera.formats.filter { format in
-                let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-                return format.isMultiCamSupported && dimensions.width == 1920 && dimensions.height == 1080 &&
-                    format.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 }
-            }
-            guard let format = formats.first else { throw HomeMovieError.message("Dual-camera 1080p recording is unavailable.") }
+            guard let format = Self.captureFormat(for: camera) else { throw HomeMovieError.message("Dual-camera 1080p recording is unavailable.") }
             try camera.lockForConfiguration()
             camera.activeFormat = format
+            if camera.position == .front, #available(iOS 26.0, *), format.supportedDynamicAspectRatios.contains(.ratio1x1) {
+                camera.setDynamicAspectRatio(.ratio1x1, completionHandler: nil)
+            }
             camera.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
             camera.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
             camera.automaticallyAdjustsVideoHDREnabled = false
@@ -270,7 +294,8 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             if camera.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { camera.whiteBalanceMode = .continuousAutoWhiteBalance }
             if camera.isFocusPointOfInterestSupported { camera.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5) }
             if camera.isExposurePointOfInterestSupported { camera.exposurePointOfInterest = CGPoint(x: 0.5, y: 0.5) }
-            camera.videoZoomFactor = min(camera.maxAvailableVideoZoomFactor, max(camera.minAvailableVideoZoomFactor, 1 / camera.displayVideoZoomFactorMultiplier))
+            camera.videoZoomFactor = camera.position == .front ? camera.minAvailableVideoZoomFactor :
+                min(camera.maxAvailableVideoZoomFactor, max(camera.minAvailableVideoZoomFactor, 1 / camera.displayVideoZoomFactorMultiplier))
             camera.setExposureTargetBias(0, completionHandler: nil)
             camera.unlockForConfiguration()
             guard session.canAddInput(input), session.canAddOutput(output) else { throw HomeMovieError.message("Dual cameras could not be connected.") }
@@ -427,3 +452,4 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     }
 
 }
+
