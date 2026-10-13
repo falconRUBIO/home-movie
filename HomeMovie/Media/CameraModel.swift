@@ -192,12 +192,11 @@ struct RecordingFlipHandoff {
             }
             return
         }
-        if state == .recording, options.canFlipWhileRecording == true { service.flip(); return }
-        if state == .recording, let movieID = activeMovieID {
-            let current = beganAt.map { CMTimeAdd(elapsedBeforeSegment, CMTime(seconds: max(0, ProcessInfo.processInfo.systemUptime - $0), preferredTimescale: 600)) } ?? elapsed
-            elapsed = current
-            recordingFlip = RecordingFlipHandoff(movieID: movieID, elapsed: current)
-            state = .finalizing; timer?.invalidate(); beginBackgroundTime(); service.stop()
+        if state == .recording {
+            guard options.canFlipWhileRecording else {
+                message = "Stop recording before switching cameras in this mode."; return
+            }
+            switchingCamera = true; service.flip()
         } else if state == .ready { switchingCamera = true; service.flip() }
     }
     func togglePiP() {
@@ -228,6 +227,8 @@ struct RecordingFlipHandoff {
             let wasSwitching = switchingCamera; switchingCamera = false
             self.options = options; rememberedFront = options.isFront
             guard active, interruption == nil else { recordingFlip = nil; state = .interrupted; return }
+            // A live input change must not reset the writer, timer or Record state.
+            guard state != .recording && state != .finalizing && state != .starting else { return }
             guard state == .preparing || wasSwitching else { return }
             state = .ready
             if let handoff = recordingFlip, handoff.mayResume(active: active, interrupted: interruption != nil) {

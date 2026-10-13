@@ -147,7 +147,7 @@ enum CaptureEvent {
 }
 
 // All capture mutation is confined to one serial queue. The preview observes the session only.
-final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
+final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
     private let singleSession = AVCaptureSession()
     private var seamless: SeamlessCapture?
     private let sessionLock = NSLock()
@@ -161,6 +161,14 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     }
     private let queue = DispatchQueue(label: "HomeMovie.Capture", qos: .userInitiated)
     private let output = AVCaptureMovieFileOutput()
+    private let standardVideo = AVCaptureVideoDataOutput()
+    private let standardAudio = AVCaptureAudioDataOutput()
+    private let standardCopies = CaptureFrameCopy()
+    private var standardTake: ContinuousTakePipeline?
+    private var standardAngle: CGFloat = 90
+    private var standardStarted = false
+    private var standardStorageCheckPending = false
+    private var standardLastStorageCheck: Double = 0
     let liveFrames = LiveFrames()
     let pipRearFrames = LiveFrames()
     let pipPresenterFrames = LiveFrames()
@@ -356,9 +364,21 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         session.addInput(input); videoInput = input; isFront = front
         guard let mic = AVCaptureDevice.default(for: .audio) else { throw HomeMovieError.message("No microphone is available.") }
         let audio = try AVCaptureDeviceInput(device: mic)
-        guard session.canAddInput(audio), session.canAddOutput(output) else { throw HomeMovieError.message("Recording could not be configured.") }
-        session.addInput(audio); session.addOutput(output)
+        guard session.canAddInput(audio) else { throw HomeMovieError.message("Recording could not be configured.") }
+        session.addInput(audio)
+        if configuredProfile == .standard {
+            guard session.canAddOutput(standardVideo), session.canAddOutput(standardAudio) else {
+                throw HomeMovieError.message("Continuous camera recording is unavailable.")
+            }
+            session.addOutput(standardVideo); session.addOutput(standardAudio)
+            standardVideo.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
+            standardVideo.alwaysDiscardsLateVideoFrames = true
+            standardVideo.setSampleBufferDelegate(self, queue: queue)
+            standardAudio.setSampleBufferDelegate(self, queue: queue)
+        }
         if configuredProfile == .appleLog {
+            guard session.canAddOutput(output) else { throw HomeMovieError.message("Log recording is unavailable.") }
+            session.addOutput(output)
             guard session.canAddOutput(liveOutput) else { throw HomeMovieError.message("Live Log preview is unavailable on this camera.") }
             session.addOutput(liveOutput)
             // This output is used only for the graded viewfinder, never recording.
@@ -523,7 +543,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             canStayOnLens: camera.isVirtualDevice && camera.activePrimaryConstituent != nil && camera.primaryConstituentDeviceSwitchingBehavior != .unsupported,
             smoothMoving: smoothTimer != nil,
             recordingFormat: configuredProfile == .appleLog ? LogRecordingCodec.label(LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)) : "Standard · H.264",
-            samplePreview: seamless != nil, canFlipWhileRecording: seamless?.readyToFlip == true,
+            samplePreview: seamless != nil, canFlipWhileRecording: seamless?.readyToFlip == true || (seamless == nil && configuredProfile == .standard && standardVideo.connection(with: .video) != nil),
             canPreparePiP: CameraCompatibility.allowsPiP(profile: configuredProfile, deviceSupported: piPCapable), piPAvailable: seamless?.supportsPiP == true && seamless?.preparedForPiP == true && configuredProfile == .standard,
             isPiPEnabled: seamless?.pipEnabled == true, dualCameraPrepared: seamless?.preparedForPiP == true,
             piPCanvasFormat: seamless?.canvasFormat)
@@ -792,6 +812,13 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         session.addInput(next)
     }
     private func configureVideoConnection() {
+        if configuredProfile == .standard, let connection = standardVideo.connection(with: .video) {
+            connection.automaticallyAdjustsVideoMirroring = false
+            if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
+            if connection.isVideoRotationAngleSupported(0) { connection.videoRotationAngle = 0 }
+            CameraStabilization.configure(connection, format: videoInput?.device.activeFormat, preview: false, front: isFront)
+            return
+        }
         // Inherit the device's automatic physical-camera selection while recording.
         output.isPrimaryConstituentDeviceSwitchingBehaviorForRecordingEnabled = false
         guard let connection = output.connection(with: .video) else { return }
@@ -815,7 +842,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         queue.async {
             guard CameraCompatibility.allowsFlip(profile: self.configuredProfile, recording: self.ticket != nil,
                 otherCameraSupported: self.device(front: !self.isFront) != nil,
-                continuousFlipSupported: self.seamless?.readyToFlip == true) else {
+                continuousFlipSupported: self.seamless?.readyToFlip == true || self.standardTake != nil) else {
                 self.onEvent?(.notice(self.configuredProfile == .appleLog ?
                     (self.ticket != nil ? CameraCompatibility.logRecordingFlipExplanation : CameraCompatibility.logCameraExplanation) : "No other camera is available."))
                 if let options = try? self.options() { self.onEvent?(.cameraChanged(options)) }
@@ -834,7 +861,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 if let options = try? self.options() { self.onEvent?(.cameraChanged(options)) }
                 return
             }
-            guard self.ticket == nil, let old = self.videoInput else { return }
+            guard self.ticket == nil || (self.standardTake != nil && !self.stopRequested), let old = self.videoInput else { return }
             self.stopSmoothZoomOnQueue()
             self.liveFrames.clear()
             let oldFront = self.isFront
@@ -870,6 +897,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                     self.onEvent?(.cameraChanged(options))
                 } else {
                     self.configured = false
+                    self.requestStop()
                     self.onEvent?(.failed("Camera could not be switched. Tap Resume Camera to reconnect."))
                 }
             }
@@ -883,6 +911,15 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             if let dual = self.seamless {
                 do {
                     try dual.record(ticket: ticket, url: url, angle: angle)
+                    self.ticket = ticket; self.recordingURL = url.standardizedFileURL; self.stopRequested = false
+                } catch { self.onEvent?(.finished(ticket, error)) }
+                return
+            }
+            if self.configuredProfile == .standard {
+                do {
+                    self.standardTake = try ContinuousTakePipeline(url: url, angle: angle, callbackQueue: self.queue)
+                    self.standardAngle = angle; self.standardStarted = false
+                    self.standardLastStorageCheck = 0
                     self.ticket = ticket; self.recordingURL = url.standardizedFileURL; self.stopRequested = false
                 } catch { self.onEvent?(.finished(ticket, error)) }
                 return
@@ -905,6 +942,18 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private func requestStop() {
         if ticket != nil { stopRequested = true }
         if let seamless { seamless.stop(); return }
+        if let take = standardTake, let ticket {
+            guard !take.finishing else { return }
+            take.finish { [weak self, weak take] error in
+                self?.queue.async { [weak self, weak take] in
+                    guard let self, let take, self.standardTake === take else { return }
+                    self.standardTake = nil; self.ticket = nil; self.recordingURL = nil; self.stopRequested = false
+                    self.onEvent?(.finished(ticket, error))
+                    if self.session.isRunning, let options = try? self.options() { self.onEvent?(.ready(options)) }
+                }
+            }
+            return
+        }
         if output.isRecording { output.stopRecording() }
     }
     func stop() { queue.async { self.requestStop() } }
@@ -917,6 +966,36 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
             if self.session.isRunning { self.session.stopRunning() }
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             completion?()
+        }
+    }
+    // Standard takes retain one writer and capture clock across input changes.
+    // The microphone input/output is never replaced by a camera flip.
+    func captureOutput(_ output: AVCaptureOutput, didOutput sample: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard let take = standardTake, let ticket, !take.finishing else { return }
+        if output === standardAudio { take.appendAudio(sample); return }
+        guard output === standardVideo, connection === standardVideo.connection(with: .video),
+              let source = CMSampleBufferGetImageBuffer(sample), let image = standardCopies.copy(source) else { return }
+        let time = CMSampleBufferGetPresentationTimeStamp(sample)
+        let format = MovieFormat.captureFormat(angle: standardAngle) ?? .portrait
+        let angle = format.recordingAngle(observed: coordinator?.videoRotationAngleForHorizonLevelCapture ?? standardAngle)
+        take.appendVideo(image, presenter: nil, presentation: nil, at: time, angle: angle, presenterAngle: angle) { [weak self, weak take] accepted, error in
+            guard let self, let take, self.standardTake === take else { return }
+            if accepted, !self.standardStarted {
+                self.standardStarted = true; self.onEvent?(.started(ticket.sceneID))
+            }
+            if error != nil { self.requestStop() }
+        }
+        if time.isNumeric, !standardStorageCheckPending, time.seconds - standardLastStorageCheck >= 2 {
+            standardLastStorageCheck = time.seconds; standardStorageCheckPending = true
+            let directory = take.outputURL.deletingLastPathComponent().path
+            DispatchQueue.global(qos: .utility).async { [weak self, weak take] in
+                let available = (try? FileManager.default.attributesOfFileSystem(forPath: directory)[.systemFreeSize]) as? NSNumber
+                self?.queue.async { [weak self, weak take] in
+                    guard let self else { return }; self.standardStorageCheckPending = false
+                    guard let take, self.standardTake === take, let available, available.int64Value < 100_000_000 else { return }
+                    self.onEvent?(.notice("Storage is nearly full. Finishing this take safely.")); self.requestStop()
+                }
+            }
         }
     }
     func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {

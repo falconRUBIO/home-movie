@@ -42,6 +42,49 @@ final class ContinuousCaptureTests: XCTestCase {
         XCTAssertNotEqual(withPiP.dataProvider?.data as Data?, withoutPiP.dataProvider?.data as Data?)
     }
 
+    func testSingleWriterKeepsAudioAcrossOrdinaryFlipAndMissingVideoFrames() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let take = try ContinuousTakePipeline(url: url, angle: 0, callbackQueue: DispatchQueue(label: "test.pipelineCallbacks"))
+        let rear = try frame(red: true), front = try frame(red: false)
+        for index in 0..<12 {
+            let time = CMTime(value: Int64(300 + index), timescale: 30)
+            // Hardware may briefly stop video delivery during an input swap.
+            // Audio still belongs to the same take and must span this interval.
+            if index == 5 || index == 6 {
+                take.appendAudio(try audio(at: time)); continue
+            }
+            var written = false
+            for _ in 0..<100 {
+                written = await withCheckedContinuation { continuation in
+                    let admitted = take.appendVideo(index < 6 ? rear : front, presenter: nil, presentation: nil,
+                        at: time, angle: 0, presenterAngle: 0) { accepted, error in
+                            XCTAssertNil(error); continuation.resume(returning: accepted)
+                        }
+                    if !admitted { continuation.resume(returning: false) }
+                }
+                if written { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(written)
+            take.appendAudio(try audio(at: time))
+        }
+        let finished = expectation(description: "Asynchronous movie and audio finish")
+        take.finish { error in XCTAssertNil(error); finished.fulfill() }
+        await fulfillment(of: [finished], timeout: 30)
+        let asset = AVURLAsset(url: url)
+        let videos = try await asset.loadTracks(withMediaType: .video)
+        let audios = try await asset.loadTracks(withMediaType: .audio)
+        XCTAssertEqual(videos.count, 1); XCTAssertEqual(audios.count, 1)
+        let range = try await XCTUnwrap(audios.first).load(.timeRange)
+        XCTAssertGreaterThanOrEqual(range.duration.seconds, 0.35)
+        let generator = AVAssetImageGenerator(asset: asset); generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+        let (beforeFlip, _) = try await generator.image(at: CMTime(value: 1, timescale: 30))
+        let (afterFlip, _) = try await generator.image(at: CMTime(value: 8, timescale: 30))
+        XCTAssertNotEqual(beforeFlip.dataProvider?.data as Data?, afterFlip.dataProvider?.data as Data?)
+    }
+
     func testSlowWriterCannotBuildVideoBacklogAndStopDrainsAcceptedFrame() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
         defer { try? FileManager.default.removeItem(at: url) }
