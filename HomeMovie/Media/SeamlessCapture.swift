@@ -246,7 +246,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     @discardableResult func flip() -> Bool {
         guard readyToFlip, take?.finishing != true, !timeline.enabled, !preparedForPiP else { return false }
         front.toggle()
-        if let image = front ? frontFrame : backFrame { frames.push(image) }
+        if let image = front ? frontFrame : backFrame { frames.push(image, angle: previewAngle) }
         return true
     }
     func record(ticket: CaptureTicket, url: URL, angle: CGFloat) throws {
@@ -344,7 +344,8 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
                 }
             }
         } else {
-            frames.push(image); accepted = take?.appendVideo(image, at: time) ?? false
+            frames.push(image, angle: previewAngle)
+            accepted = take?.appendVideo(image, at: time, sourceAngle: front ? recordedPresenterAngle : recordedRearAngle) ?? false
         }
         if let ticket, accepted, !announcedStart {
             announcedStart = true; onStarted?(ticket.sceneID)

@@ -81,13 +81,13 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         super.init()
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
-    func encode(_ source: CVPixelBuffer, to texture: MTLTexture, command: MTLCommandBuffer, composed: Bool = false) throws {
+    func encode(_ source: CVPixelBuffer, to texture: MTLTexture, command: MTLCommandBuffer, composed: Bool = false, sourceAngle: CGFloat? = nil) throws {
         let target = CGSize(width: texture.width, height: texture.height)
         var image: CIImage
         if passthrough { image = CIImage(cvPixelBuffer: source) }
         else if let cube { image = try cube.apply(to: CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()])) }
         else { throw HomeMovieError.message("No live look is selected.") }
-        image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: composed ? 0 : angle, front: composed ? false : front))
+        image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: composed ? 0 : (sourceAngle ?? angle), front: composed ? false : front))
             .cropped(to: CGRect(origin: .zero, size: target))
         let destination = CIRenderDestination(mtlTexture: texture, commandBuffer: command)
         destination.colorSpace = nil; destination.isFlipped = true
@@ -97,7 +97,7 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         guard !rendering, cube != nil || passthrough, let source = frames?.snapshot(), let drawable = view.currentDrawable,
               let command = queue.makeCommandBuffer() else { return }
         do {
-            try encode(source.buffer, to: drawable.texture, command: command, composed: source.composed)
+            try encode(source.buffer, to: drawable.texture, command: command, composed: source.composed, sourceAngle: source.angle)
             rendering = true
             let presentationID = self.presentationID
             command.addCompletedHandler { [weak self] buffer in
