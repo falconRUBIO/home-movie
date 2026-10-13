@@ -183,6 +183,7 @@ struct CameraPreviewHandoff: Sendable {
     let after: CMTime
     private var last = CMTime.invalid
     private var count = 0
+    init(after: CMTime) { self.after = after }
     mutating func accept(_ time: CMTime) -> Bool {
         guard time.isNumeric, !after.isNumeric || time > after else { return false }
         if last.isNumeric {
