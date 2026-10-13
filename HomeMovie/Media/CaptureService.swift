@@ -504,7 +504,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 (!camera.isFocusPointOfInterestSupported || camera.isFocusModeSupported(.autoFocus)),
             focusLocked: focusLocked, exposureBias: camera.exposureTargetBias,
             minimumExposureBias: camera.minExposureTargetBias, maximumExposureBias: camera.maxExposureTargetBias,
-            canFlip: device(front: !isFront) != nil && seamless?.preparedForPiP != true, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on,
+            canFlip: device(front: !isFront) != nil && seamless?.pipEnabled != true && seamless?.needsPiPReprepare != true, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on,
             canStayOnLens: camera.isVirtualDevice && camera.activePrimaryConstituent != nil && camera.primaryConstituentDeviceSwitchingBehavior != .unsupported,
             smoothMoving: smoothTimer != nil,
             recordingFormat: configuredProfile == .appleLog ? LogRecordingCodec.label(LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)) : "Standard · H.264",

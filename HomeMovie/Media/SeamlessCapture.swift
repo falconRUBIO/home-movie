@@ -137,7 +137,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private var backFrame: CVPixelBuffer?
     private(set) var front = true
     var activeInput: AVCaptureDeviceInput { front ? frontInput : backInput }
-    var readyToFlip: Bool { frontReady && backReady }
+    var readyToFlip: Bool { frontReady && backReady && !presenterDisabled }
     private var take: ContinuousTakeWriter?
     private var ticket: CaptureTicket?
     private var announcedStart = false
@@ -247,7 +247,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         guard session.hardwareCost <= 1, session.systemPressureCost <= 1 else { throw HomeMovieError.message("Dual-camera recording exceeds this device's capacity.") }
     }
     @discardableResult func flip() -> Bool {
-        guard readyToFlip, take?.finishing != true, !timeline.enabled, !preparedForPiP else { return false }
+        guard readyToFlip, take?.finishing != true, !timeline.enabled else { return false }
         front.toggle()
         if let image = front ? frontFrame : backFrame { frames.push(image, angle: previewAngle) }
         return true
