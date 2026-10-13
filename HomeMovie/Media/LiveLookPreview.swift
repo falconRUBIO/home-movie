@@ -56,6 +56,7 @@ final class LiveFrames: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
     private var frame: CVPixelBuffer?
     private var composed = false
     private var rotationAngle: CGFloat?
+    private var sourceFront: Bool?
     private var pip: LivePiPFrame?
     private var listener: (@Sendable () -> Void)?
     private var notificationPending = false
@@ -63,8 +64,8 @@ final class LiveFrames: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
         guard let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         push(image)
     }
-    func push(_ image: CVPixelBuffer, composed: Bool = false, angle: CGFloat? = nil, pip: LivePiPFrame? = nil) {
-        lock.lock(); frame = image; self.composed = composed; rotationAngle = angle; self.pip = pip
+    func push(_ image: CVPixelBuffer, composed: Bool = false, angle: CGFloat? = nil, pip: LivePiPFrame? = nil, front: Bool? = nil) {
+        lock.lock(); frame = image; self.composed = composed; rotationAngle = angle; self.pip = pip; sourceFront = front
         let notify = notificationPending ? nil : listener
         if notify != nil { notificationPending = true }
         lock.unlock(); notify?()
@@ -74,11 +75,11 @@ final class LiveFrames: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
     }
     func notificationHandled() { lock.lock(); notificationPending = false; lock.unlock() }
     func latest() -> CVPixelBuffer? { lock.lock(); defer { lock.unlock() }; return frame }
-    func snapshot() -> (buffer: CVPixelBuffer, composed: Bool, angle: CGFloat?, pip: LivePiPFrame?)? {
+    func snapshot() -> (buffer: CVPixelBuffer, composed: Bool, angle: CGFloat?, pip: LivePiPFrame?, front: Bool?)? {
         lock.lock(); defer { lock.unlock() }
-        return frame.map { ($0, composed, rotationAngle, pip) }
+        return frame.map { ($0, composed, rotationAngle, pip, sourceFront) }
     }
-    func clear() { lock.lock(); frame = nil; pip = nil; composed = false; rotationAngle = nil; lock.unlock() }
+    func clear() { lock.lock(); frame = nil; pip = nil; composed = false; rotationAngle = nil; sourceFront = nil; lock.unlock() }
 }
 enum LiveLookGeometry {
     static func transform(source: CGSize, target: CGSize, angle: CGFloat, front: Bool) -> CGAffineTransform {
@@ -136,7 +137,7 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         super.init()
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
-    func encode(_ source: CVPixelBuffer, to texture: MTLTexture, command: MTLCommandBuffer, composed: Bool = false, sourceAngle: CGFloat? = nil, pip: LivePiPFrame? = nil) throws {
+    func encode(_ source: CVPixelBuffer, to texture: MTLTexture, command: MTLCommandBuffer, composed: Bool = false, sourceAngle: CGFloat? = nil, pip: LivePiPFrame? = nil, sourceFront: Bool? = nil) throws {
         let target = CGSize(width: texture.width, height: texture.height)
         var image: CIImage
         let directPiP = passthrough && pip != nil
@@ -146,7 +147,7 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         } else if passthrough { image = CIImage(cvPixelBuffer: source) }
         else if let cube { image = try cube.apply(to: CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()])) }
         else { throw HomeMovieError.message("No live look is selected.") }
-        image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: composed || directPiP ? 0 : (sourceAngle ?? angle), front: composed || directPiP ? false : front))
+        image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: composed || directPiP ? 0 : (sourceAngle ?? angle), front: composed || directPiP ? false : (sourceFront ?? front)))
             .cropped(to: CGRect(origin: .zero, size: target))
         let destination = CIRenderDestination(mtlTexture: texture, commandBuffer: command)
         destination.colorSpace = passthrough ? CGColorSpace(name: CGColorSpace.sRGB) : nil
@@ -158,7 +159,7 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         guard !rendering, cube != nil || passthrough, let source = frames?.snapshot(), let drawable = view.currentDrawable,
               let command = queue.makeCommandBuffer() else { return }
         do {
-            try encode(source.buffer, to: drawable.texture, command: command, composed: source.composed, sourceAngle: source.angle, pip: source.pip)
+            try encode(source.buffer, to: drawable.texture, command: command, composed: source.composed, sourceAngle: source.angle, pip: source.pip, sourceFront: source.front)
             rendering = true
             let presentationID = self.presentationID
             command.addCompletedHandler { [weak self] buffer in
@@ -173,5 +174,24 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
             // A preview failure never changes or stops the original recording.
             report(.unavailable)
         }
+    }
+}
+
+// Keep the outgoing frame until three fresh incoming samples arrive at a usable cadence.
+struct CameraPreviewHandoff: Sendable {
+    let id = UUID()
+    let after: CMTime
+    private var last = CMTime.invalid
+    private var count = 0
+    init(after: CMTime) { self.after = after }
+    mutating func accept(_ time: CMTime) -> Bool {
+        guard time.isNumeric, !after.isNumeric || time > after else { return false }
+        if last.isNumeric {
+            let interval = CMTimeSubtract(time, last).seconds
+            guard interval > 0 else { return false }
+            if interval > 0.25 { count = 0 }
+        }
+        last = time; count += 1
+        return count >= 3
     }
 }

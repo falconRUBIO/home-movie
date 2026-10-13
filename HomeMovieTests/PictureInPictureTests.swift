@@ -6,6 +6,48 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    @MainActor func testPortraitFrontPreviewUsesFrameOrientationAndMirrorBeforeUIHandoff() async throws {
+        let source = try frame(red: 220, green: 0, blue: 0, split: true)
+        CVPixelBufferLockBaseAddress(source, [])
+        let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(source)).assumingMemoryBound(to: UInt8.self)
+        for y in 0..<18 { for x in 0..<64 {
+            let offset = y * CVPixelBufferGetBytesPerRow(source) + x * 4
+            base[offset] = 220; base[offset + 1] = 0; base[offset + 2] = 0
+        }}
+        CVPixelBufferUnlockBaseAddress(source, [])
+        let frames = LiveFrames()
+        frames.push(source, angle: 270, front: true)
+        let snapshot = try XCTUnwrap(frames.snapshot())
+        XCTAssertEqual(snapshot.angle, 270); XCTAssertEqual(snapshot.front, true)
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let renderer = try XCTUnwrap(LiveLookRenderer(device: device))
+        renderer.configure(frames: frames, cube: nil, active: true, passthrough: true)
+        renderer.angle = 90; renderer.front = false // Outgoing UI camera metadata.
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 36, height: 64, mipmapped: false)
+        descriptor.storageMode = .shared; descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
+        let texture = try XCTUnwrap(device.makeTexture(descriptor: descriptor))
+        let queue = try XCTUnwrap(device.makeCommandQueue()), command = try XCTUnwrap(queue.makeCommandBuffer())
+        try renderer.encode(snapshot.buffer, to: texture, command: command,
+            sourceAngle: snapshot.angle, sourceFront: snapshot.front)
+        let completed = expectation(description: "Portrait front preview")
+        command.addCompletedHandler { _ in completed.fulfill() }; command.commit()
+        await fulfillment(of: [completed], timeout: 15)
+        XCTAssertEqual(command.status, .completed)
+        func pixel(_ x: Int, _ y: Int) -> [UInt8] {
+            var bgra = [UInt8](repeating: 0, count: 4)
+            texture.getBytes(&bgra, bytesPerRow: 4, from: MTLRegionMake2D(x, y, 1, 1), mipmapLevel: 0)
+            return bgra
+        }
+        // CVPixelBuffer rows are top-down; Core Image's image coordinates are bottom-up.
+        let topLeft = pixel(9, 16), topRight = pixel(27, 16), bottomLeft = pixel(9, 48)
+        XCTAssertGreaterThan(topRight[0], 180, "Blue side: topLeft=\(topLeft), topRight=\(topRight)")
+        XCTAssertGreaterThan(topLeft[1], 180, "Upright green: \(topLeft)")
+        XCTAssertGreaterThan(bottomLeft[2], 180, "Upright red: \(bottomLeft)")
+        frames.push(source, angle: 90, front: false)
+        XCTAssertEqual(frames.snapshot()?.front, false)
+        frames.clear(); XCTAssertNil(frames.snapshot())
+    }
+
     @MainActor func testSharedPreviewShowsRearAndPresenterAtBothDisplaySizes() throws {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let renderer = try XCTUnwrap(PiPLayoutRenderer(device: device))

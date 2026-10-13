@@ -4,6 +4,21 @@ import AVFoundation
 @testable import HomeMovie
 
 final class CameraTouchTests: XCTestCase {
+    func testCameraHandoffWaitsForFreshOrderedFramesAndResetsAfterStall() {
+        func time(_ value: Double) -> CMTime { CMTime(seconds: value, preferredTimescale: 600) }
+        var gate = CameraPreviewHandoff(after: time(10))
+        XCTAssertFalse(gate.accept(time(9.9)))
+        XCTAssertFalse(gate.accept(time(10.01)))
+        XCTAssertFalse(gate.accept(time(10.01)))
+        XCTAssertFalse(gate.accept(time(10.04)))
+        XCTAssertTrue(gate.accept(time(10.07)))
+        var stalled = CameraPreviewHandoff(after: time(10))
+        XCTAssertFalse(stalled.accept(time(10.01)))
+        XCTAssertFalse(stalled.accept(time(10.5)))
+        XCTAssertFalse(stalled.accept(time(10.53)))
+        XCTAssertTrue(stalled.accept(time(10.56)))
+    }
+
     @MainActor func testDollyCountdownRunsDuringRecordingAndCanBeCancelledWithoutStoppingTake() async throws {
         let model = CameraModel(app: AppModel())
         model.state = .recording

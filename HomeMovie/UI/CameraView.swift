@@ -441,7 +441,7 @@ struct CameraView: View {
                 .background(background, in: Circle())
                 .overlay { Circle().strokeBorder(border, lineWidth: isDestination ? 1.5 : 1) }
         }.buttonStyle(DollyLensButtonStyle())
-            .disabled(countdown != nil || camera.state != .ready && camera.state != .recording)
+            .disabled(camera.switchingCamera || countdown != nil || camera.state != .ready && camera.state != .recording)
             .accessibilityLabel("\(label) lens").accessibilityValue(value).accessibilityHint(hint)
             .accessibilityAddTraits(highlighted ? .isSelected : [])
     }
@@ -872,7 +872,7 @@ struct CameraView: View {
                 }
             }
         }.buttonStyle(.plain)
-            .disabled(camera.switchingCamera || pipConfiguring || undoingTake ||
+            .disabled(camera.switchingCamera && !camera.recordingSessionActive || pipConfiguring || undoingTake ||
                 dollyCountdown.remaining != nil && !camera.recordingSessionActive ||
                 !camera.recordingSessionActive && camera.state != .ready)
             .opacity(!camera.recordingSessionActive && camera.state != .ready ? 0.4 : 1)

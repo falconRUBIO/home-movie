@@ -304,7 +304,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     @discardableResult func flip() -> Bool {
         guard readyToFlip, take?.finishing != true, !timeline.enabled else { return false }
         front.toggle()
-        if let image = front ? frontFrame : backFrame { frames.push(image, angle: previewAngle) }
+        if let image = front ? frontFrame : backFrame { frames.push(image, angle: previewAngle, front: front) }
         return true
     }
     func record(ticket: CaptureTicket, url: URL, angle: CGFloat) throws {
@@ -395,7 +395,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             enqueueRecording(image, presenter: presenter, presentation: presentation, at: time,
                 angle: angle, presenterAngle: frontAngle)
         } else {
-            frames.push(image, angle: previewAngle)
+            frames.push(image, angle: previewAngle, front: front)
             enqueueRecording(image, presenter: nil, presentation: nil, at: time,
                 angle: front ? recordedPresenterAngle : recordedRearAngle, presenterAngle: recordedPresenterAngle)
         }
