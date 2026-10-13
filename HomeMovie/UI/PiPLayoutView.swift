@@ -114,6 +114,7 @@ struct PiPCompositionPreview: UIViewRepresentable {
     let device: MTLDevice
     private let queue: MTLCommandQueue
     private let context: CIContext
+    private var rendering = false
     var rear: LiveFrames?
     var front: LiveFrames?
     var layout = PiPLayout()
@@ -126,7 +127,7 @@ struct PiPCompositionPreview: UIViewRepresentable {
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { }
     func draw(in view: MTKView) {
-        guard let rear = rear?.snapshot(), let drawable = view.currentDrawable, let command = queue.makeCommandBuffer() else { return }
+        guard !rendering, let rear = rear?.snapshot(), let drawable = view.currentDrawable, let command = queue.makeCommandBuffer() else { return }
         let front = front?.snapshot(), canvas = CGSize(width: drawable.texture.width, height: drawable.texture.height)
         let presentation = PiPPresentation(rect: PiPGeometry.rect(layout: layout, canvas: canvas, obstacles: obstacles) ?? .zero, opacity: 1, enabled: true, corner: layout.corner)
         let image = PiPCompositor.image(background: rear.buffer, presenter: front?.buffer, canvas: canvas,
@@ -134,7 +135,12 @@ struct PiPCompositionPreview: UIViewRepresentable {
             presenterAngle: (MovieFormat.captureFormat(angle: front?.angle ?? 90) ?? .portrait).recordingAngle(observed: front?.angle ?? 90), presentation: presentation)
         let destination = CIRenderDestination(mtlTexture: drawable.texture, commandBuffer: command)
         destination.isFlipped = true; destination.colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
-        do { _ = try context.startTask(toRender: image, to: destination); command.present(drawable); command.commit() }
+        do {
+            _ = try context.startTask(toRender: image, to: destination)
+            rendering = true
+            command.addCompletedHandler { [weak self] _ in Task { @MainActor in self?.rendering = false } }
+            command.present(drawable); command.commit()
+        }
         catch { }
     }
 }

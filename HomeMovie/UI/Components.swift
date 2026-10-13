@@ -149,7 +149,8 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     }
     private func resizeLookView() {
         lookView?.frame = bounds
-        let scale = min(window?.screen.scale ?? 2, 1920 / max(1, max(bounds.width, bounds.height)))
+        let maximumEdge: CGFloat = samplePreview ? 960 : 1920
+        let scale = min(window?.screen.scale ?? 2, maximumEdge / max(1, max(bounds.width, bounds.height)))
         lookView?.drawableSize = CGSize(width: max(1, bounds.width * scale), height: max(1, bounds.height * scale))
     }
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?

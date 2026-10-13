@@ -3,19 +3,27 @@ import CoreImage
 import MetalKit
 import UIKit
 
+struct LivePiPFrame {
+    let presenter: CVPixelBuffer?
+    let backgroundAngle: CGFloat
+    let presenterAngle: CGFloat
+    let presentation: PiPPresentation
+}
+
 final class LiveFrames: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var frame: CVPixelBuffer?
     private var composed = false
     private var rotationAngle: CGFloat?
+    private var pip: LivePiPFrame?
     private var listener: (@Sendable () -> Void)?
     private var notificationPending = false
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         push(image)
     }
-    func push(_ image: CVPixelBuffer, composed: Bool = false, angle: CGFloat? = nil) {
-        lock.lock(); frame = image; self.composed = composed; rotationAngle = angle
+    func push(_ image: CVPixelBuffer, composed: Bool = false, angle: CGFloat? = nil, pip: LivePiPFrame? = nil) {
+        lock.lock(); frame = image; self.composed = composed; rotationAngle = angle; self.pip = pip
         let notify = notificationPending ? nil : listener
         if notify != nil { notificationPending = true }
         lock.unlock(); notify?()
@@ -25,11 +33,11 @@ final class LiveFrames: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
     }
     func notificationHandled() { lock.lock(); notificationPending = false; lock.unlock() }
     func latest() -> CVPixelBuffer? { lock.lock(); defer { lock.unlock() }; return frame }
-    func snapshot() -> (buffer: CVPixelBuffer, composed: Bool, angle: CGFloat?)? {
+    func snapshot() -> (buffer: CVPixelBuffer, composed: Bool, angle: CGFloat?, pip: LivePiPFrame?)? {
         lock.lock(); defer { lock.unlock() }
-        return frame.map { ($0, composed, rotationAngle) }
+        return frame.map { ($0, composed, rotationAngle, pip) }
     }
-    func clear() { lock.lock(); frame = nil; lock.unlock() }
+    func clear() { lock.lock(); frame = nil; pip = nil; composed = false; rotationAngle = nil; lock.unlock() }
 }
 enum LiveLookGeometry {
     static func transform(source: CGSize, target: CGSize, angle: CGFloat, front: Bool) -> CGAffineTransform {
@@ -81,13 +89,17 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         super.init()
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
-    func encode(_ source: CVPixelBuffer, to texture: MTLTexture, command: MTLCommandBuffer, composed: Bool = false, sourceAngle: CGFloat? = nil) throws {
+    func encode(_ source: CVPixelBuffer, to texture: MTLTexture, command: MTLCommandBuffer, composed: Bool = false, sourceAngle: CGFloat? = nil, pip: LivePiPFrame? = nil) throws {
         let target = CGSize(width: texture.width, height: texture.height)
         var image: CIImage
-        if passthrough { image = CIImage(cvPixelBuffer: source) }
+        let directPiP = passthrough && pip != nil
+        if passthrough, let pip {
+            image = PiPCompositor.image(background: source, presenter: pip.presenter, canvas: target,
+                backgroundAngle: pip.backgroundAngle, presenterAngle: pip.presenterAngle, presentation: pip.presentation)
+        } else if passthrough { image = CIImage(cvPixelBuffer: source) }
         else if let cube { image = try cube.apply(to: CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()])) }
         else { throw HomeMovieError.message("No live look is selected.") }
-        image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: composed ? 0 : (sourceAngle ?? angle), front: composed ? false : front))
+        image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: composed || directPiP ? 0 : (sourceAngle ?? angle), front: composed || directPiP ? false : front))
             .cropped(to: CGRect(origin: .zero, size: target))
         let destination = CIRenderDestination(mtlTexture: texture, commandBuffer: command)
         destination.colorSpace = nil; destination.isFlipped = true
@@ -97,7 +109,7 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         guard !rendering, cube != nil || passthrough, let source = frames?.snapshot(), let drawable = view.currentDrawable,
               let command = queue.makeCommandBuffer() else { return }
         do {
-            try encode(source.buffer, to: drawable.texture, command: command, composed: source.composed, sourceAngle: source.angle)
+            try encode(source.buffer, to: drawable.texture, command: command, composed: source.composed, sourceAngle: source.angle, pip: source.pip)
             rendering = true
             let presentationID = self.presentationID
             command.addCompletedHandler { [weak self] buffer in
