@@ -6,6 +6,31 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testMediumInsetRemainsVisibleWhenControlsCoverEveryPlacement() throws {
+        for canvas in [MovieFormat.portrait.canvas, MovieFormat.landscape.canvas] {
+            for orientation in PiPOrientation.allCases {
+                var timeline = PiPTimeline()
+                timeline.setLayout(PiPLayout(size: .medium, orientation: orientation))
+                timeline.setEnabled(true, at: .zero)
+                let presentation = timeline.presentation(at: CMTime(seconds: 1, preferredTimescale: 30),
+                    canvas: canvas, obstacles: [CGRect(x: 0, y: 0, width: 1, height: 1)])
+                XCTAssertTrue(presentation.isPlaceable); XCTAssertEqual(presentation.opacity, 1)
+                XCTAssertFalse(presentation.rect.isEmpty)
+                XCTAssertTrue(CGRect(x: 0, y: 0, width: 1, height: 1).contains(presentation.rect))
+            }
+        }
+    }
+    func testFrameMatcherReleasesOldCaptureBuffers() throws {
+        var matcher = PiPFrameMatcher()
+        var old: CVPixelBuffer? = try frame(red: 20, green: 0, blue: 0)
+        weak var retained = old
+        matcher.push(try XCTUnwrap(old), at: .zero); old = nil
+        XCTAssertNotNil(retained)
+        matcher.push(try frame(red: 40, green: 0, blue: 0), at: CMTime(value: 1, timescale: 30))
+        matcher.push(try frame(red: 60, green: 0, blue: 0), at: CMTime(value: 2, timescale: 30))
+        XCTAssertNil(retained)
+    }
+
     func testLegacyLayoutKeepsLandscapeAndNewOrientationRoundTrips() throws {
         let legacy = Data(#"{"corner":"bottomRight","size":"small"}"#.utf8)
         XCTAssertEqual(try JSONDecoder().decode(PiPLayout.self, from: legacy).orientation, .landscape)

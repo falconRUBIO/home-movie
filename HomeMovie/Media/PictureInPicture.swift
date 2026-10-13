@@ -77,7 +77,9 @@ enum PiPGeometry {
         return rect(closest)
     }
     static func rect(layout: PiPLayout, canvas: CGSize, obstacles: [CGRect] = []) -> CGRect? {
-        safeRect(center: desiredCenter(corner: layout.corner, canvas: canvas, size: layout.size, orientation: layout.orientation), canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles)
+        let center = desiredCenter(corner: layout.corner, canvas: canvas, size: layout.size, orientation: layout.orientation)
+        return safeRect(center: center, canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles)
+            ?? safeRect(center: center, canvas: canvas, size: layout.size, orientation: layout.orientation)
     }
     static func nearestCorner(to point: CGPoint, layout: PiPLayout, canvas: CGSize, obstacles: [CGRect] = []) -> PiPCorner {
         PiPCorner.allCases.min { a, b in
@@ -132,6 +134,7 @@ struct PiPTimeline {
     }
     func presentation(at time: CMTime, canvas: CGSize, obstacles: [CGRect] = []) -> PiPPresentation {
         let rect = PiPGeometry.safeRect(center: currentCenter(at: time, canvas: canvas), canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles)
+            ?? PiPGeometry.rect(layout: layout, canvas: canvas)
         return PiPPresentation(rect: rect ?? .zero, opacity: rect == nil ? 0 : opacity(at: time), enabled: enabled, corner: layout.corner, isPlaceable: rect != nil)
     }
 }
@@ -142,7 +145,7 @@ struct PiPFrameMatcher {
     mutating func push(_ buffer: CVPixelBuffer, at time: CMTime) {
         guard time.isNumeric else { return }
         frames.append((buffer, time)); frames.sort { $0.time < $1.time }
-        if frames.count > 6 { frames.removeFirst(frames.count - 6) }
+        if frames.count > 2 { frames.removeFirst(frames.count - 2) }
     }
     func frame(at rearTime: CMTime) -> CVPixelBuffer? {
         frames.last { frame in
