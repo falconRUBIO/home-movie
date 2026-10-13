@@ -146,7 +146,7 @@ struct PiPCompositionPreview: UIViewRepresentable {
     init?(device: MTLDevice) {
         guard let queue = device.makeCommandQueue() else { return nil }
         self.device = device; self.queue = queue
-        context = CIContext(mtlDevice: device, options: [.cacheIntermediates: false]); super.init()
+        context = CIContext(mtlCommandQueue: queue, options: [.cacheIntermediates: false, .name: "HomeMovie.PiPLayout"]); super.init()
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { }
     func draw(in view: MTKView) {

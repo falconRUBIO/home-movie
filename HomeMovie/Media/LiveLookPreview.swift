@@ -97,7 +97,8 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
 
 @MainActor final class LiveLookRenderer: NSObject, MTKViewDelegate {
     private let queue: MTLCommandQueue
-    private let context: CIContext
+    private var context: CIContext?
+    private var contextPassthrough: Bool?
     private(set) var frames: LiveFrames?
     private(set) var cube: ColorCube?
     private(set) var presentationID = UUID()
@@ -111,6 +112,12 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
     func configure(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false) {
         let nextFrames = active && (cube != nil || passthrough) ? frames : nil
         let nextCube = active ? cube : nil
+        if nextFrames != nil, contextPassthrough != passthrough {
+            var options: [CIContextOption: Any] = [.cacheIntermediates: false, .name: "HomeMovie.LivePreview"]
+            if !passthrough { options[.workingColorSpace] = NSNull(); options[.outputColorSpace] = NSNull() }
+            context = CIContext(mtlCommandQueue: queue, options: options)
+            contextPassthrough = passthrough
+        }
         if self.frames !== nextFrames || self.passthrough != passthrough || self.cube?.rgba != nextCube?.rgba ||
             self.cube?.dimension != nextCube?.dimension || self.cube?.minimum != nextCube?.minimum ||
             self.cube?.maximum != nextCube?.maximum {
@@ -126,7 +133,6 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
     init?(device: MTLDevice) {
         guard let queue = device.makeCommandQueue() else { return nil }
         self.queue = queue
-        context = CIContext(mtlDevice: device, options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .cacheIntermediates: false])
         super.init()
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -143,7 +149,9 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: composed || directPiP ? 0 : (sourceAngle ?? angle), front: composed || directPiP ? false : front))
             .cropped(to: CGRect(origin: .zero, size: target))
         let destination = CIRenderDestination(mtlTexture: texture, commandBuffer: command)
-        destination.colorSpace = nil; destination.isFlipped = true
+        destination.colorSpace = passthrough ? CGColorSpace(name: CGColorSpace.sRGB) : nil
+        destination.isFlipped = true
+        guard let context else { throw HomeMovieError.message("The live preview is not configured.") }
         _ = try context.startTask(toRender: image, to: destination)
     }
     func draw(in view: MTKView) {

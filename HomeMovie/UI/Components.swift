@@ -142,6 +142,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         lookRenderer?.frames?.setListener(nil)
         lookRenderer?.configure(frames: frames, cube: cube, active: active, passthrough: passthrough)
         lookRenderer?.front = showingFront
+        (lookView?.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: passthrough ? CGColorSpace.sRGB : CGColorSpace.itur_709)
         resizeLookView()
         let enabled = active && (cube != nil || passthrough) && frames != nil
         lookView?.alpha = 1; lookView?.isHidden = !enabled; lookView?.isPaused = !enabled
