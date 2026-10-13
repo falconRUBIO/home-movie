@@ -164,6 +164,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
     private let standardVideo = AVCaptureVideoDataOutput()
     private let standardAudio = AVCaptureAudioDataOutput()
     private let standardCopies = CaptureFrameCopy()
+    private var previewHandoff: CameraPreviewHandoff?
+    private var previewHandoffAnnounced = true
     private var standardTake: ContinuousTakePipeline?
     private var standardAngle: CGFloat = 90
     private var standardStarted = false
@@ -312,6 +314,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
     }
     private func configure(front: Bool, preparedForPiP: Bool = false, pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) throws {
         stopSmoothZoomOnQueue()
+        previewHandoff = nil; previewHandoffAnnounced = true
         liveFrames.clear()
         pipRearFrames.clear(); pipPresenterFrames.clear()
         focusLocked = false
@@ -506,7 +509,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
     }
     private func options() throws -> CameraOptions {
         // Late metering/rotation/zoom callbacks must not revive failed preparation.
-        guard configured, session.isRunning, !session.isInterrupted else {
+        guard configured, session.isRunning, !session.isInterrupted, previewHandoff == nil else {
             throw HomeMovieError.message("The camera is not ready.")
         }
         guard let camera = videoInput?.device else { throw HomeMovieError.message("Camera not configured.") }
@@ -543,7 +546,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             canStayOnLens: camera.isVirtualDevice && camera.activePrimaryConstituent != nil && camera.primaryConstituentDeviceSwitchingBehavior != .unsupported,
             smoothMoving: smoothTimer != nil,
             recordingFormat: configuredProfile == .appleLog ? LogRecordingCodec.label(LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)) : "Standard · H.264",
-            samplePreview: seamless != nil, canFlipWhileRecording: seamless?.readyToFlip == true || (seamless == nil && configuredProfile == .standard && standardVideo.connection(with: .video) != nil),
+            samplePreview: seamless != nil || configuredProfile == .standard, canFlipWhileRecording: seamless?.readyToFlip == true || (seamless == nil && configuredProfile == .standard && standardVideo.connection(with: .video) != nil),
             canPreparePiP: CameraCompatibility.allowsPiP(profile: configuredProfile, deviceSupported: piPCapable), piPAvailable: seamless?.supportsPiP == true && seamless?.preparedForPiP == true && configuredProfile == .standard,
             isPiPEnabled: seamless?.pipEnabled == true, dualCameraPrepared: seamless?.preparedForPiP == true,
             piPCanvasFormat: seamless?.canvasFormat)
@@ -861,9 +864,13 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
                 if let options = try? self.options() { self.onEvent?(.cameraChanged(options)) }
                 return
             }
-            guard self.ticket == nil || (self.standardTake != nil && !self.stopRequested), let old = self.videoInput else { return }
+            guard self.previewHandoff == nil, self.ticket == nil || (self.standardTake != nil && !self.stopRequested), let old = self.videoInput else { return }
             self.stopSmoothZoomOnQueue()
-            self.liveFrames.clear()
+            // Preserve the outgoing frame while the new input warms up.
+            if self.configuredProfile == .standard {
+                self.previewHandoffAnnounced = false
+                self.previewHandoff = CameraPreviewHandoff(after: CMClockGetTime(self.session.synchronizationClock ?? CMClockGetHostTimeClock()))
+            } else { self.liveFrames.clear() }
             let oldFront = self.isFront
             do {
                 guard let camera = self.device(front: !oldFront) else { throw HomeMovieError.message("No other camera is available.") }
@@ -888,8 +895,20 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
                     self.configureVideoConnection()
                 }
                 self.setCoordinator(camera)
-                self.onEvent?(.cameraChanged(try self.options()))
+                if self.previewHandoff != nil {
+                    // Reject samples queued by the outgoing input during configuration.
+                    self.previewHandoff = CameraPreviewHandoff(after: CMClockGetTime(self.session.synchronizationClock ?? CMClockGetHostTimeClock()))
+                }
+                if let pending = self.previewHandoff {
+                    self.queue.asyncAfter(deadline: .now() + 4) { [weak self] in
+                        guard let self, self.previewHandoff?.id == pending.id else { return }
+                        self.previewHandoff = nil; self.previewHandoffAnnounced = true
+                        self.onEvent?(.notice("The camera is taking longer to prepare. The last preview stays visible until fresh frames arrive."))
+                        if let options = try? self.options() { self.onEvent?(.cameraChanged(options)) }
+                    }
+                } else { self.onEvent?(.cameraChanged(try self.options())) }
             } catch {
+                self.previewHandoff = nil; self.previewHandoffAnnounced = true
                 if self.videoInput?.device.uniqueID == old.device.uniqueID,
                    self.session.inputs.contains(where: { $0 === old }), let options = try? self.options() {
                     self.setCoordinator(old.device); self.configureVideoConnection()
@@ -961,6 +980,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         queue.async {
             self.stopSmoothZoomOnQueue()
             self.requestStop()
+            self.previewHandoff = nil; self.previewHandoffAnnounced = true
             self.liveFrames.clear()
             self.turnOffTorch()
             if self.session.isRunning { self.session.stopRunning() }
@@ -971,11 +991,25 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
     // Standard takes retain one writer and capture clock across input changes.
     // The microphone input/output is never replaced by a camera flip.
     func captureOutput(_ output: AVCaptureOutput, didOutput sample: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard let take = standardTake, let ticket, !take.finishing else { return }
-        if output === standardAudio { take.appendAudio(sample); return }
+        if output === standardAudio { standardTake?.appendAudio(sample); return }
         guard output === standardVideo, connection === standardVideo.connection(with: .video),
               let source = CMSampleBufferGetImageBuffer(sample), let image = standardCopies.copy(source) else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sample)
+        var publishPreview = true
+        if var pending = previewHandoff {
+            guard !pending.after.isNumeric || time > pending.after else { return }
+            publishPreview = pending.accept(time)
+            previewHandoff = publishPreview ? nil : pending
+        }
+        if publishPreview {
+            // Angle and mirroring travel with this frame, independent of take rotation.
+            liveFrames.push(image, angle: coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90, front: isFront)
+            if let options = try? options(), previewHandoff == nil, !previewHandoffAnnounced {
+                previewHandoffAnnounced = true
+                onEvent?(.cameraChanged(options))
+            }
+        }
+        guard let take = standardTake, let ticket, !take.finishing else { return }
         let format = MovieFormat.captureFormat(angle: standardAngle) ?? .portrait
         let angle = format.recordingAngle(observed: coordinator?.videoRotationAngleForHorizonLevelCapture ?? standardAngle)
         take.appendVideo(image, presenter: nil, presentation: nil, at: time, angle: angle, presenterAngle: angle) { [weak self, weak take] accepted, error in

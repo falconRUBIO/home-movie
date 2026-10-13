@@ -150,7 +150,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     }
     private func resizeLookView() {
         lookView?.frame = bounds
-        let maximumEdge: CGFloat = samplePreview ? 960 : 1920
+        let maximumEdge: CGFloat = 1920
         let scale = min(window?.screen.scale ?? 2, maximumEdge / max(1, max(bounds.width, bounds.height)))
         lookView?.drawableSize = CGSize(width: max(1, bounds.width * scale), height: max(1, bounds.height * scale))
     }
@@ -177,8 +177,8 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         applyPreviewRotation(fallback: fallback)
     }
     private func applyPreviewRotation(fallback: CGFloat = 90) {
-        let angle = fixedFormat.map { OrientationPolicy.shared.captureAngle(format: $0, observed: fallback) }
-            ?? rotationCoordinator?.videoRotationAngleForHorizonLevelPreview ?? fallback
+        // Native preview rotation belongs to the active sensor, never the saved take.
+        let angle = rotationCoordinator?.videoRotationAngleForHorizonLevelPreview ?? fallback
         if let connection = previewLayer.connection, connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
         lastPreviewAngle = angle
         lookRenderer?.angle = angle
