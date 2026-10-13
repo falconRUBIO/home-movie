@@ -33,6 +33,12 @@ import UIKit
         }
     }
     deinit { if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) } }
+    static func matchesExport(_ info: MediaInfo, movie: Movie) -> Bool {
+        abs(info.duration.seconds - movie.duration.seconds) < 0.15 &&
+        abs(info.size.width - movie.format.canvas.width) < 1 &&
+        abs(info.size.height - movie.format.canvas.height) < 1 &&
+        info.hasAudio == movie.activeScenes.contains(where: { $0.hasAudio })
+    }
     static func cachePrefix(movie: Movie) -> String {
         "\(movie.id)-r\(movie.revision)-audio2-light\(SceneAdjustments.engineVersion)-film\(FilmEffectsSettings.engineVersion)-\(movie.exportEffects.cacheIdentity)-"
     }
@@ -68,8 +74,7 @@ import UIKit
                 let candidates = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
                 for candidate in candidates where candidate.lastPathComponent.hasPrefix(prefix) && candidate.pathExtension == "mp4" {
                     try Task.checkCancellation()
-                    if let info = try? await MediaInspector.inspect(candidate), abs(info.duration.seconds - seconds) < 0.15,
-                       abs(info.size.width - movie.format.canvas.width) < 1, abs(info.size.height - movie.format.canvas.height) < 1 {
+                    if let info = try? await MediaInspector.inspect(candidate), Self.matchesExport(info, movie: movie) {
                         try Task.checkCancellation()
                         exportedURL = candidate; committedRevision = movie.revision; committedMovieID = movie.id
                         progress = 1; running = false; job = nil; return
@@ -95,10 +100,8 @@ import UIKit
                 try await export.export(to: destination, as: .mp4)
                 try Task.checkCancellation()
                 let info = try await MediaInspector.inspect(destination)
-                guard abs(info.duration.seconds - bundle.duration.seconds) < 0.15,
-                      abs(info.size.width - movie.format.canvas.width) < 1,
-                      abs(info.size.height - movie.format.canvas.height) < 1 else {
-                    throw HomeMovieError.message("The exported duration or frame size did not match your movie. Please try again.")
+                guard Self.matchesExport(info, movie: movie) else {
+                    throw HomeMovieError.message("The exported duration, frame size or audio did not match your movie. Please try again.")
                 }
                 exportedURL = destination; committedRevision = movie.revision; committedMovieID = movie.id; progress = 1
             } catch {

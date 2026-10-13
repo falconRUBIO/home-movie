@@ -114,6 +114,7 @@ struct RecordingFlipHandoff {
         // Keep the camera controls oriented to the phone; PiP's movie canvas is independent.
         takeFormat = automatic
         activeMovieID = movieID; elapsedBeforeSegment = elapsed ?? .zero
+        self.elapsed = elapsedBeforeSegment; beganAt = nil
         continuingRecording = elapsed != nil
         state = .starting; savedScene = false; hasRecoverableTake = false; message = nil; startCancelled = false
         operation = Task {
@@ -238,7 +239,7 @@ struct RecordingFlipHandoff {
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
                 Task { @MainActor in
-                    guard let self, let date = self.beganAt else { return }
+                    guard let self, self.state == .recording, let date = self.beganAt else { return }
                     self.elapsed = CMTimeAdd(self.elapsedBeforeSegment, CMTime(seconds: max(0, ProcessInfo.processInfo.systemUptime - date), preferredTimescale: 600))
                 }
             }
@@ -260,7 +261,7 @@ struct RecordingFlipHandoff {
                 savedScene = true
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 state = active && interruption == nil ? .ready : .interrupted
-                message = interruption
+                message = interruption ?? message
             } catch {
                 recordingFlip = nil
                 state = .failed

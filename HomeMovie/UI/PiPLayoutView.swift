@@ -36,6 +36,7 @@ struct PiPLayoutView: View {
     var obstacles: [CGRect] = []
     let onPrepare: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var body: some View {
         NavigationStack {
             Form {
@@ -52,7 +53,7 @@ struct PiPLayoutView: View {
                     }.aspectRatio(format.aspect, contentMode: .fit).frame(maxHeight: 180).listRowInsets(EdgeInsets())
                 } footer: { Text("The presenter is unmirrored in both the preview and the saved clip. Placement is recorded into the footage.") }
                 Section("Position") {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: dynamicTypeSize.isAccessibilitySize ? 1 : 2), spacing: 8) {
                         ForEach(PiPCorner.allCases) { corner in
                             Button { layout.corner = corner } label: {
                                 HStack {
