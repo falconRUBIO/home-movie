@@ -158,6 +158,11 @@ enum PiPCompositor {
     }
 }
 final class PiPFrameRenderer {
+    static func previewCanvas(for canvas: CGSize) -> CGSize {
+        guard canvas.width.isFinite, canvas.height.isFinite, canvas.width > 0, canvas.height > 0 else { return .zero }
+        let scale = min(1, 960 / max(canvas.width, canvas.height))
+        return CGSize(width: (canvas.width * scale).rounded(), height: (canvas.height * scale).rounded())
+    }
     private let context = CIContext(options: [.cacheIntermediates: false])
     private var pool: CVPixelBufferPool?
     private var canvas = CGSize.zero

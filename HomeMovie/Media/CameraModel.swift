@@ -58,6 +58,7 @@ struct RecordingFlipHandoff {
 @MainActor final class CameraModel: ObservableObject {
     let service = CaptureService()
     @Published var state: CameraState = .preparing
+    @Published private(set) var switchingCamera = false
     @Published var options: CameraOptions?
     @Published var elapsed = CMTime.zero
     @Published var message: String?
@@ -85,7 +86,7 @@ struct RecordingFlipHandoff {
     private var continuingRecording = false
     private var preparationID = UUID()
     @AppStorage("frontCamera") var rememberedFront = false
-    var busy: Bool { recordingFlip != nil || [.starting, .recording, .finalizing].contains(state) }
+    var busy: Bool { switchingCamera || recordingFlip != nil || [.starting, .recording, .finalizing].contains(state) }
     var recordingSessionActive: Bool { state.canStopTake || recordingFlip != nil }
 
     init(app: AppModel) {
@@ -105,7 +106,7 @@ struct RecordingFlipHandoff {
         service.prepare(front: rememberedFront, profile: profile, dualCamera: dualCamera, pipLayout: layout, canvasFormat: canvasFormat)
     }
     func record(movieID: UUID, continuingAt elapsed: CMTime? = nil) {
-        guard state == .ready, active, let app else { return }
+        guard state == .ready, !switchingCamera, active, let app else { return }
         guard let observed = options?.angle, let automatic = MovieFormat.captureFormat(angle: observed),
               let movie = app.movie(movieID), options?.profile == movie.captureProfile else { return }
         let format = movie.recordingFormat ?? automatic
@@ -114,6 +115,7 @@ struct RecordingFlipHandoff {
         // Keep the camera controls oriented to the phone; PiP's movie canvas is independent.
         takeFormat = automatic
         activeMovieID = movieID; elapsedBeforeSegment = elapsed ?? .zero
+        self.elapsed = elapsedBeforeSegment; beganAt = nil
         continuingRecording = elapsed != nil
         state = .starting; savedScene = false; hasRecoverableTake = false; message = nil; startCancelled = false
         operation = Task {
@@ -149,6 +151,7 @@ struct RecordingFlipHandoff {
         state = .finalizing; timer?.invalidate(); beginBackgroundTime(); service.stop()
     }
     func suspend() {
+        switchingCamera = false
         recordingFlip = nil
         active = false; startCancelled = true; preparationID = UUID()
         if busy { beginBackgroundTime(); state = .finalizing; timer?.invalidate() }
@@ -160,28 +163,28 @@ struct RecordingFlipHandoff {
             service.suspend { continuation.resume() }
         }
     }
-    func zoom(_ factor: CGFloat) { if active, [.ready, .recording].contains(state) { service.zoom(factor) } }
+    func zoom(_ factor: CGFloat) { if active, !switchingCamera, [.ready, .recording].contains(state) { service.zoom(factor) } }
     func configureSmoothZoom(speed: SmoothZoomSpeed, stayOnLens: Bool) { service.configureSmoothZoom(speed: speed, stayOnLens: stayOnLens) }
-    func beginSmoothZoom() { if active, [.ready, .recording].contains(state) { service.beginSmoothZoom() } }
+    func beginSmoothZoom() { if active, !switchingCamera, [.ready, .recording].contains(state) { service.beginSmoothZoom() } }
     func smoothZoom(to factor: CGFloat, inputTime: Double? = nil, inputEnded: Bool = false) {
-        if active, [.ready, .recording].contains(state) { service.smoothZoom(to: factor, inputTime: inputTime, inputEnded: inputEnded) }
+        if active, !switchingCamera, [.ready, .recording].contains(state) { service.smoothZoom(to: factor, inputTime: inputTime, inputEnded: inputEnded) }
     }
     func endSmoothInput() { service.endSmoothInput() }
     func adjustDollyDestination(to factor: CGFloat) {
-        if active, [.ready, .recording].contains(state) { service.adjustDollyDestination(to: factor) }
+        if active, !switchingCamera, [.ready, .recording].contains(state) { service.adjustDollyDestination(to: factor) }
     }
-    func dollyZoom(to factor: CGFloat, seconds: Int) { if active, [.ready, .recording].contains(state) { service.dollyZoom(to: factor, seconds: seconds) } }
+    func dollyZoom(to factor: CGFloat, seconds: Int) { if active, !switchingCamera, [.ready, .recording].contains(state) { service.dollyZoom(to: factor, seconds: seconds) } }
     func endSmoothZoom() { service.endSmoothZoom() }
     func focus(at point: CGPoint, locked: Bool = false) -> Bool {
-        guard active, [.ready, .recording].contains(state), options?.canMeter == true else { return false }
+        guard active, !switchingCamera, [.ready, .recording].contains(state), options?.canMeter == true else { return false }
         guard !locked || options?.canLock == true else { return false }
         service.focus(at: point, locked: locked)
         return true
     }
-    func exposure(_ bias: Float) { if active, [.ready, .recording].contains(state) { service.exposure(bias) } }
-    func toggleTorch() { if active, [.ready, .recording].contains(state) { service.toggleTorch() } }
+    func exposure(_ bias: Float) { if active, !switchingCamera, [.ready, .recording].contains(state) { service.exposure(bias) } }
+    func toggleTorch() { if active, !switchingCamera, [.ready, .recording].contains(state) { service.toggleTorch() } }
     func flip() {
-        guard active, recordingFlip == nil, let options, options.isPiPEnabled != true, pipPresentation.opacity == 0 else { return }
+        guard active, !switchingCamera, recordingFlip == nil, let options, options.isPiPEnabled != true, pipPresentation.opacity == 0 else { return }
         guard CameraCompatibility.allowsFlip(profile: options.profile, recording: state == .recording,
             otherCameraSupported: options.canFlip, continuousFlipSupported: options.canFlipWhileRecording) else {
             if options.profile == .appleLog {
@@ -195,10 +198,10 @@ struct RecordingFlipHandoff {
             elapsed = current
             recordingFlip = RecordingFlipHandoff(movieID: movieID, elapsed: current)
             state = .finalizing; timer?.invalidate(); beginBackgroundTime(); service.stop()
-        } else if state == .ready { state = .preparing; service.flip() }
+        } else if state == .ready { switchingCamera = true; service.flip() }
     }
     func togglePiP() {
-        guard active, state == .ready || state == .recording, options?.piPAvailable == true else { return }
+        guard active, !switchingCamera, state == .ready || state == .recording, options?.piPAvailable == true else { return }
         service.setPiPEnabled(options?.isPiPEnabled != true)
     }
     func updatePiPLayout(_ layout: PiPLayout, movieID: UUID) {
@@ -210,7 +213,7 @@ struct RecordingFlipHandoff {
         }
     }
     func dragPiP(to center: CGPoint, finished: Bool) {
-        guard active, state == .ready || state == .recording, options?.isPiPEnabled == true else { return }
+        guard active, !switchingCamera, state == .ready || state == .recording, options?.isPiPEnabled == true else { return }
         service.dragPiP(to: center, finished: finished)
     }
     func receive(_ event: CaptureEvent) async {
@@ -222,9 +225,10 @@ struct RecordingFlipHandoff {
                 enablePiPWhenReady = false; service.setPiPEnabled(true)
             }
         case .cameraChanged(let options):
+            let wasSwitching = switchingCamera; switchingCamera = false
             self.options = options; rememberedFront = options.isFront
             guard active, interruption == nil else { recordingFlip = nil; state = .interrupted; return }
-            guard state == .preparing else { return }
+            guard state == .preparing || wasSwitching else { return }
             state = .ready
             if let handoff = recordingFlip, handoff.mayResume(active: active, interrupted: interruption != nil) {
                 recordingFlip = nil
@@ -238,7 +242,7 @@ struct RecordingFlipHandoff {
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
                 Task { @MainActor in
-                    guard let self, let date = self.beganAt else { return }
+                    guard let self, self.state == .recording, let date = self.beganAt else { return }
                     self.elapsed = CMTimeAdd(self.elapsedBeforeSegment, CMTime(seconds: max(0, ProcessInfo.processInfo.systemUptime - date), preferredTimescale: 600))
                 }
             }
@@ -260,7 +264,7 @@ struct RecordingFlipHandoff {
                 savedScene = true
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 state = active && interruption == nil ? .ready : .interrupted
-                message = interruption
+                message = interruption ?? message
             } catch {
                 recordingFlip = nil
                 state = .failed
@@ -273,10 +277,12 @@ struct RecordingFlipHandoff {
                 message = error.localizedDescription
             }
         case .interrupted(let text):
+            switchingCamera = false
             recordingFlip = nil
             interruption = text; message = text; startCancelled = true
             if busy { state = .finalizing; beginBackgroundTime() } else { state = .interrupted }
         case .failed(let text):
+            switchingCamera = false
             recordingFlip = nil
             message = text
             if busy { interruption = text; stop() } else { state = .failed }

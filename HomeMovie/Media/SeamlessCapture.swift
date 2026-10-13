@@ -137,7 +137,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private var backFrame: CVPixelBuffer?
     private(set) var front = true
     var activeInput: AVCaptureDeviceInput { front ? frontInput : backInput }
-    var readyToFlip: Bool { frontReady && backReady }
+    var readyToFlip: Bool { frontReady && backReady && !presenterDisabled }
     private var take: ContinuousTakeWriter?
     private var ticket: CaptureTicket?
     private var announcedStart = false
@@ -230,7 +230,10 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             connection.automaticallyAdjustsVideoMirroring = false
             if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
             if connection.isVideoRotationAngleSupported(0) { connection.videoRotationAngle = 0 }
-            CameraStabilization.configure(connection, format: format, preview: false)
+            if connection.isVideoStabilizationSupported {
+                connection.preferredVideoStabilizationMode = CameraStabilization.dualCameraMode(front: camera.position == .front,
+                    supports: { format.isVideoStabilizationModeSupported($0) })
+            }
         }
         guard let microphone = AVCaptureDevice.default(for: .audio) else { throw HomeMovieError.message("Microphone unavailable.") }
         let micInput = try AVCaptureDeviceInput(device: microphone)
@@ -244,9 +247,9 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         guard session.hardwareCost <= 1, session.systemPressureCost <= 1 else { throw HomeMovieError.message("Dual-camera recording exceeds this device's capacity.") }
     }
     @discardableResult func flip() -> Bool {
-        guard readyToFlip, take?.finishing != true, !timeline.enabled, !preparedForPiP else { return false }
+        guard readyToFlip, take?.finishing != true, !timeline.enabled else { return false }
         front.toggle()
-        if let image = front ? frontFrame : backFrame { frames.push(image) }
+        if let image = front ? frontFrame : backFrame { frames.push(image, angle: previewAngle) }
         return true
     }
     func record(ticket: CaptureTicket, url: URL, angle: CGFloat) throws {
@@ -265,7 +268,8 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         let observed = (front ? frontRotation : backRotation)?.videoRotationAngleForHorizonLevelCapture ?? 90
         return (MovieFormat.captureFormat(angle: observed) ?? .portrait).recordingAngle(observed: observed)
     }
-    private var canvas: CGSize { take?.canvas ?? (preferredCanvas ?? MovieFormat.captureFormat(angle: previewAngle) ?? .portrait).canvas }
+    private var geometryCanvas: CGSize { take?.canvas ?? (preferredCanvas ?? MovieFormat.captureFormat(angle: previewAngle) ?? .portrait).canvas }
+    private var canvas: CGSize { take?.canvas ?? PiPFrameRenderer.previewCanvas(for: geometryCanvas) }
     private var eventTime: CMTime { lastVideoTime.isNumeric ? lastVideoTime : CMClockGetTime(session.synchronizationClock ?? CMClockGetHostTimeClock()) }
     func setPiPEnabled(_ enabled: Bool) {
         if enabled, !readyToFlip, !presenterDisabled, take == nil { pendingPiPEnable = true; return }
@@ -277,8 +281,8 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     func setPiPObstacles(_ obstacles: [CGRect]) { self.obstacles = Array(obstacles.prefix(32)) }
     func dragPiP(to point: CGPoint, finished: Bool) {
         guard timeline.enabled else { return }
-        timeline.drag(to: point, at: eventTime, canvas: canvas, obstacles: obstacles)
-        if finished { onPiPLayout?(timeline.settle(at: eventTime, canvas: canvas, obstacles: obstacles)) }
+        timeline.drag(to: point, at: eventTime, canvas: geometryCanvas, obstacles: obstacles)
+        if finished { onPiPLayout?(timeline.settle(at: eventTime, canvas: geometryCanvas, obstacles: obstacles)) }
     }
     private func suspendPresenter() {
         guard preparedForPiP || timeline.enabled, !presenterDisabled else { return }
@@ -318,13 +322,13 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             timeline.setEnabled(false, at: time); onReady?()
             onNotice?("The presenter camera paused. Rear video and audio are still recording.")
         }
-        let presentation = timeline.presentation(at: time, canvas: canvas, obstacles: obstacles)
+        let presentation = timeline.presentation(at: time, canvas: geometryCanvas, obstacles: obstacles)
         if timeline.enabled, !presentation.isPlaceable, !noSpaceReported {
             noSpaceReported = true
             onNotice?("PiP is hidden while the camera controls cover its available space. Close Dolly or choose Small before the next take.")
         } else if presentation.isPlaceable { noSpaceReported = false }
         if presentation != lastPresentation { lastPresentation = presentation; onPiPPresentation?(presentation) }
-        let composing = preparedForPiP || timeline.enabled || presentation.opacity > 0
+        let composing = timeline.enabled || presentation.opacity > 0
         var accepted = false
         if composing {
             let angle = take == nil ? previewAngle : (front ? recordedPresenterAngle : recordedRearAngle)
@@ -344,7 +348,8 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
                 }
             }
         } else {
-            frames.push(image); accepted = take?.appendVideo(image, at: time) ?? false
+            frames.push(image, angle: previewAngle)
+            accepted = take?.appendVideo(image, at: time, sourceAngle: front ? recordedPresenterAngle : recordedRearAngle) ?? false
         }
         if let ticket, accepted, !announcedStart {
             announcedStart = true; onStarted?(ticket.sceneID)

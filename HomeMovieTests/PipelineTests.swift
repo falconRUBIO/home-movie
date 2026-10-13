@@ -5,6 +5,24 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    @MainActor func testExportValidationRejectsLostAudioAndWrongGeometry() async throws {
+        let store = try await makeStore()
+        let created = try await store.create(name: "Export validation", format: .landscape)
+        _ = try await record(created, into: store)
+        let movies = await store.snapshot()
+        var movie = try XCTUnwrap(movies.first)
+        var info = MediaInfo(duration: movie.duration, size: movie.format.canvas, hasAudio: false, bytes: 100)
+        XCTAssertTrue(ExportModel.matchesExport(info, movie: movie), "Silent source scenes should remain valid")
+        movie.scenes[0].hasAudio = true
+        XCTAssertFalse(ExportModel.matchesExport(info, movie: movie), "Matching dimensions must not conceal missing sound")
+        info.hasAudio = true
+        XCTAssertTrue(ExportModel.matchesExport(info, movie: movie))
+        info.size = CGSize(width: 1080, height: 1920)
+        XCTAssertFalse(ExportModel.matchesExport(info, movie: movie))
+        info.size = movie.format.canvas; info.duration = CMTimeAdd(movie.duration, CMTime(seconds: 1, preferredTimescale: 600))
+        XCTAssertFalse(ExportModel.matchesExport(info, movie: movie))
+    }
+
     @MainActor func testSceneLightEditsPersistIndependentlyAndClipExportKeepsOnlySelectedTrim() async throws {
         let store = try await makeStore()
         let project = try await store.create(name: "Clip light", format: .landscape)

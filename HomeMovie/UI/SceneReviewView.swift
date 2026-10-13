@@ -28,7 +28,10 @@ import AVKit
             statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
                 guard item.status == .failed else { return }
                 let message = item.error?.localizedDescription ?? "This scene could not be played."
-                Task { @MainActor in self?.error = message; self?.player?.pause() }
+                Task { @MainActor in
+                    guard let self, self.requestID == request else { return }
+                    self.error = message; self.player?.pause()
+                }
             }
             _ = await player?.seek(to: scene.trimStart.cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
         } catch { if !Task.isCancelled, requestID == request { self.error = error.localizedDescription } }

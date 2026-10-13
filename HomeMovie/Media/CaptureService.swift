@@ -22,6 +22,10 @@ enum CameraStabilization {
         if supports(.standard) { return .standard }
         return .auto
     }
+    static func dualCameraMode(front: Bool, supports: (AVCaptureVideoStabilizationMode) -> Bool) -> AVCaptureVideoStabilizationMode {
+        // Avoid automatic cinematic buffering on the outputs that also feed live PiP.
+        !front && supports(.standard) ? .standard : .off
+    }
     static func configure(_ connection: AVCaptureConnection, format: AVCaptureDevice.Format?, preview: Bool) {
         guard connection.isVideoStabilizationSupported, let format else { return }
         let mode = preferredMode(preview: preview, supports: { format.isVideoStabilizationModeSupported($0) })
@@ -72,6 +76,9 @@ enum CameraCompatibility {
     static func allowsFlip(profile: CaptureProfile, recording: Bool, otherCameraSupported: Bool,
                            continuousFlipSupported: Bool) -> Bool {
         otherCameraSupported && (profile != .appleLog || !recording || continuousFlipSupported)
+    }
+    static func shouldPreparePiP(profile: CaptureProfile, storedPreference: Bool, requested: Bool, currentlyEnabled: Bool) -> Bool {
+        profile == .standard && storedPreference && (requested || currentlyEnabled)
     }
     static func allowsPiP(profile: CaptureProfile, deviceSupported: Bool) -> Bool {
         profile == .standard && deviceSupported
@@ -292,7 +299,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         singleSession.inputs.forEach { singleSession.removeInput($0) }
         singleSession.outputs.forEach { singleSession.removeOutput($0) }
         singleSession.commitConfiguration()
-        if (front || preparedForPiP), configuredProfile == .standard, let dual = SeamlessCapture(queue: queue, frames: liveFrames,
+        if preparedForPiP, configuredProfile == .standard, let dual = SeamlessCapture(queue: queue, frames: liveFrames,
             rearFrames: pipRearFrames, presenterFrames: pipPresenterFrames, front: front, preparedForPiP: preparedForPiP,
             layout: pipLayout, canvasFormat: canvasFormat) {
             seamless = dual; videoInput = dual.activeInput; isFront = front
@@ -497,7 +504,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 (!camera.isFocusPointOfInterestSupported || camera.isFocusModeSupported(.autoFocus)),
             focusLocked: focusLocked, exposureBias: camera.exposureTargetBias,
             minimumExposureBias: camera.minExposureTargetBias, maximumExposureBias: camera.maxExposureTargetBias,
-            canFlip: device(front: !isFront) != nil && seamless?.preparedForPiP != true, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on,
+            canFlip: device(front: !isFront) != nil && seamless?.pipEnabled != true && seamless?.needsPiPReprepare != true, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on,
             canStayOnLens: camera.isVirtualDevice && camera.activePrimaryConstituent != nil && camera.primaryConstituentDeviceSwitchingBehavior != .unsupported,
             smoothMoving: smoothTimer != nil,
             recordingFormat: configuredProfile == .appleLog ? LogRecordingCodec.label(LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)) : "Standard · H.264",
@@ -796,6 +803,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 continuousFlipSupported: self.seamless?.readyToFlip == true) else {
                 self.onEvent?(.notice(self.configuredProfile == .appleLog ?
                     (self.ticket != nil ? CameraCompatibility.logRecordingFlipExplanation : CameraCompatibility.logCameraExplanation) : "No other camera is available."))
+                if let options = try? self.options() { self.onEvent?(.cameraChanged(options)) }
+                else { self.onEvent?(.failed("The camera could not be switched. Resume Camera to reconnect.")) }
                 return
             }
             if let dual = self.seamless {
@@ -811,14 +820,6 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 return
             }
             guard self.ticket == nil, let old = self.videoInput else { return }
-            if !self.isFront, self.configuredProfile == .standard, AVCaptureMultiCamSession.isMultiCamSupported {
-                do {
-                    try self.configure(front: true)
-                    self.session.startRunning()
-                    self.onEvent?(.cameraChanged(try self.options()))
-                } catch { self.configured = false; self.onEvent?(.failed(error.localizedDescription)) }
-                return
-            }
             self.stopSmoothZoomOnQueue()
             self.liveFrames.clear()
             let oldFront = self.isFront

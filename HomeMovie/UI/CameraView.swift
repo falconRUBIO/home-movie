@@ -223,7 +223,9 @@ struct CameraView: View {
             }
         }
         .task(id: camera.options?.smoothMoving) { await finishDollyIfIdle() }
-        .onChange(of: camera.options?.isPiPEnabled) { _, enabled in if enabled == true { enablePiPAfterPreparation = false } }
+        .onChange(of: camera.options?.isPiPEnabled) { _, enabled in
+            if enabled == true { enablePiPAfterPreparation = false }
+        }
         .onChange(of: camera.pipSetupFailed) { _, failed in if failed { enablePiPAfterPreparation = false } }
         .onChange(of: movie?.recordingFormat) { _, format in
             if camera.options?.dualCameraPrepared == true { camera.service.setPiPLayout(camera.pipLayout, canvasFormat: format) }
@@ -807,7 +809,7 @@ struct CameraView: View {
                 }
             }
         }.buttonStyle(.plain)
-            .disabled(pipConfiguring || undoingTake || !camera.recordingSessionActive && camera.state != .ready)
+            .disabled(camera.switchingCamera || pipConfiguring || undoingTake || !camera.recordingSessionActive && camera.state != .ready)
             .opacity(!camera.recordingSessionActive && camera.state != .ready ? 0.4 : 1)
             .accessibilityLabel(countdown != nil ? "Cancel countdown" : camera.state == .starting ? "Cancel starting recording" : camera.state == .finalizing ? "Saving recording" : camera.recordingSessionActive ? "Stop recording" : "Record next scene")
     }
@@ -825,7 +827,7 @@ struct CameraView: View {
         }.accessibilityLabel(camera.recordingFlip == nil ? "Switch camera" : "Switching camera")
             .accessibilityHint(movie.captureProfile == .appleLog ?
                 (camera.state == .recording ? CameraCompatibility.logRecordingFlipExplanation : camera.options?.canFlip == true ? "Switch cameras before recording." : CameraCompatibility.logCameraExplanation) : "Switch between the front and rear cameras.")
-            .disabled(camera.recordingFlip != nil || camera.state != .ready && camera.state != .recording || camera.options?.canFlip != true ||
+            .disabled(camera.switchingCamera || camera.recordingFlip != nil || camera.state != .ready && camera.state != .recording || camera.options?.canFlip != true ||
                 movie.captureProfile == .appleLog && camera.state == .recording && camera.options?.canFlipWhileRecording != true ||
                 camera.options?.isPiPEnabled == true || camera.pipPresentation.opacity > 0)
         let watch = VStack(spacing: 0) {
@@ -922,9 +924,12 @@ struct CameraView: View {
         Task { await camera.pauseForPlayback(); initialReviewID = sceneID; watching = true }
     }
     private func prepareCamera() async {
+        let usePiP = CameraCompatibility.shouldPreparePiP(profile: movie?.captureProfile ?? .standard,
+            storedPreference: movie?.dualCameraCapture == true, requested: enablePiPAfterPreparation,
+            currentlyEnabled: camera.options?.isPiPEnabled == true)
         await camera.prepare(profile: movie?.captureProfile ?? .standard, movieID: movieID,
-            dualCamera: movie?.dualCameraCapture == true, layout: movie?.preferredPiPLayout ?? PiPLayout(),
-            canvasFormat: movie?.recordingFormat, enablePiP: enablePiPAfterPreparation)
+            dualCamera: usePiP, layout: movie?.preferredPiPLayout ?? PiPLayout(),
+            canvasFormat: movie?.recordingFormat, enablePiP: usePiP)
     }
     private var normalizedPiPObstacles: [CGRect] {
         guard viewfinderSize.width > 0, viewfinderSize.height > 0 else { return [] }

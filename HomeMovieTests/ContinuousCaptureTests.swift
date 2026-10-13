@@ -3,6 +3,14 @@ import AVFoundation
 @testable import HomeMovie
 
 final class ContinuousCaptureTests: XCTestCase {
+    func testRememberedPiPPreferenceCannotActivateDualCameraByItself() {
+        XCTAssertFalse(CameraCompatibility.shouldPreparePiP(profile: .standard, storedPreference: true, requested: false, currentlyEnabled: false))
+        XCTAssertTrue(CameraCompatibility.shouldPreparePiP(profile: .standard, storedPreference: true, requested: true, currentlyEnabled: false))
+        XCTAssertTrue(CameraCompatibility.shouldPreparePiP(profile: .standard, storedPreference: true, requested: false, currentlyEnabled: true))
+        XCTAssertFalse(CameraCompatibility.shouldPreparePiP(profile: .standard, storedPreference: false, requested: false, currentlyEnabled: true))
+        XCTAssertFalse(CameraCompatibility.shouldPreparePiP(profile: .appleLog, storedPreference: true, requested: true, currentlyEnabled: true))
+    }
+
     func testLogRecordingCannotUseSegmentedCameraFlip() {
         XCTAssertFalse(CameraCompatibility.allowsFlip(profile: .appleLog, recording: true,
             otherCameraSupported: true, continuousFlipSupported: false))
