@@ -178,6 +178,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private var pressureObservations: [NSKeyValueObservation] = []
     private var thermalObserver: NSObjectProtocol?
     private var lastStorageCheck: Double = 0
+    private var storageCheckPending = false
     let preparedForPiP: Bool
     private var preferredCanvas: MovieFormat?
     var canvasFormat: MovieFormat? { preferredCanvas }
@@ -396,14 +397,20 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             enqueueRecording(image, presenter: nil, presentation: nil, at: time,
                 angle: front ? recordedPresenterAngle : recordedRearAngle, presenterAngle: recordedPresenterAngle)
         }
-        if take != nil, time.seconds - lastStorageCheck >= 2 {
-            lastStorageCheck = time.seconds
-            if let available = try? FileManager.default.attributesOfFileSystem(forPath: take!.outputURL.deletingLastPathComponent().path)[.systemFreeSize] as? NSNumber,
-               available.int64Value < 100_000_000 {
-                onNotice?("Storage is nearly full. Finishing this take safely."); stop()
+        if let take, !storageCheckPending, time.seconds - lastStorageCheck >= 2 {
+            lastStorageCheck = time.seconds; storageCheckPending = true
+            let directory = take.outputURL.deletingLastPathComponent().path
+            DispatchQueue.global(qos: .utility).async { [weak self, weak take] in
+                let available = (try? FileManager.default.attributesOfFileSystem(forPath: directory)[.systemFreeSize]) as? NSNumber
+                self?.queue.async { [weak self, weak take] in
+                    guard let self else { return }; self.storageCheckPending = false
+                    guard let take, self.take === take, let available, available.int64Value < 100_000_000 else { return }
+                    self.onNotice?("Storage is nearly full. Finishing this take safely."); self.stop()
+                }
             }
         }
     }
+
     private func enqueueRecording(_ image: CVPixelBuffer, presenter: CVPixelBuffer?, presentation: PiPPresentation?,
                                   at time: CMTime, angle: CGFloat, presenterAngle: CGFloat) {
         guard let take, let ticket else { return }
