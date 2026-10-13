@@ -168,6 +168,8 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private var noSpaceReported = false
     private var timeline = PiPTimeline()
     private var matcher = PiPFrameMatcher()
+    private let frontCopies = CaptureFrameCopy()
+    private let backCopies = CaptureFrameCopy()
     private var obstacles: [CGRect] = []
     private var lastVideoTime = CMTime.invalid
     private var lastPresentation = PiPPresentation()
@@ -355,7 +357,8 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     }
     func captureOutput(_ output: AVCaptureOutput, didOutput sample: CMSampleBuffer, from connection: AVCaptureConnection) {
         if output === audioOutput { take?.appendAudio(sample); return }
-        guard let image = CMSampleBufferGetImageBuffer(sample) else { return }
+        guard let source = CMSampleBufferGetImageBuffer(sample),
+              let image = (output === frontOutput ? frontCopies : backCopies).copy(source) else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sample)
         guard time.isNumeric else { return }
         let wasReady = readyToFlip

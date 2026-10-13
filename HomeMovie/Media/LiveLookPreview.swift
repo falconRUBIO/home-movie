@@ -3,6 +3,47 @@ import CoreImage
 import MetalKit
 import UIKit
 
+// Long-lived preview/writer snapshots must not retain the camera's own buffer pool.
+// Copy native planes without color conversion into a bounded, app-owned pool.
+final class CaptureFrameCopy {
+    private var pool: CVPixelBufferPool?
+    private var width = 0, height = 0
+    private var format: OSType = 0
+    func copy(_ source: CVPixelBuffer) -> CVPixelBuffer? {
+        let width = CVPixelBufferGetWidth(source), height = CVPixelBufferGetHeight(source)
+        let format = CVPixelBufferGetPixelFormatType(source)
+        if pool == nil || self.width != width || self.height != height || self.format != format {
+            pool = nil; self.width = width; self.height = height; self.format = format
+            let attributes: [String: Any] = [kCVPixelBufferWidthKey as String: width,
+                kCVPixelBufferHeightKey as String: height, kCVPixelBufferPixelFormatTypeKey as String: format,
+                kCVPixelBufferMetalCompatibilityKey as String: true, kCVPixelBufferIOSurfacePropertiesKey as String: [:]]
+            guard CVPixelBufferPoolCreate(kCFAllocatorDefault, nil, attributes as CFDictionary, &pool) == kCVReturnSuccess else { return nil }
+        }
+        guard let pool else { return nil }
+        var result: CVPixelBuffer?
+        guard CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pool,
+            [kCVPixelBufferPoolAllocationThresholdKey as String: 8] as CFDictionary, &result) == kCVReturnSuccess,
+              let result else { return nil }
+        guard CVPixelBufferLockBaseAddress(source, .readOnly) == kCVReturnSuccess else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(source, .readOnly) }
+        guard CVPixelBufferLockBaseAddress(result, []) == kCVReturnSuccess else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(result, []) }
+        let planes = CVPixelBufferGetPlaneCount(source)
+        guard planes == CVPixelBufferGetPlaneCount(result) else { return nil }
+        for plane in 0..<max(1, planes) {
+            let from = planes == 0 ? CVPixelBufferGetBaseAddress(source) : CVPixelBufferGetBaseAddressOfPlane(source, plane)
+            let to = planes == 0 ? CVPixelBufferGetBaseAddress(result) : CVPixelBufferGetBaseAddressOfPlane(result, plane)
+            guard let from, let to else { return nil }
+            let fromStride = planes == 0 ? CVPixelBufferGetBytesPerRow(source) : CVPixelBufferGetBytesPerRowOfPlane(source, plane)
+            let toStride = planes == 0 ? CVPixelBufferGetBytesPerRow(result) : CVPixelBufferGetBytesPerRowOfPlane(result, plane)
+            let rows = planes == 0 ? height : CVPixelBufferGetHeightOfPlane(source, plane)
+            for row in 0..<rows { memcpy(to.advanced(by: row * toStride), from.advanced(by: row * fromStride), min(fromStride, toStride)) }
+        }
+        CVBufferPropagateAttachments(source, result)
+        return result
+    }
+}
+
 struct LivePiPFrame {
     let presenter: CVPixelBuffer?
     let backgroundAngle: CGFloat

@@ -6,6 +6,44 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testCaptureCopiesOwnPixelsAndBoundRetainedBuffers() throws {
+        let source = try frame(red: 220, green: 0, blue: 0)
+        let copier = CaptureFrameCopy()
+        var retained: [CVPixelBuffer] = []
+        for _ in 0..<8 { retained.append(try XCTUnwrap(copier.copy(source))) }
+        XCTAssertFalse(retained[0] === source)
+        CVPixelBufferLockBaseAddress(source, [])
+        memset(try XCTUnwrap(CVPixelBufferGetBaseAddress(source)), 0, CVPixelBufferGetDataSize(source))
+        CVPixelBufferUnlockBaseAddress(source, [])
+        XCTAssertGreaterThan(sample(CIImage(cvPixelBuffer: retained[0]), point: CGPoint(x: 10, y: 10))[0], 180)
+        XCTAssertNil(copier.copy(source))
+        retained.removeAll()
+        XCTAssertNotNil(copier.copy(source))
+    }
+    func testNativePlanarCaptureCopyPreservesBothPlanes() throws {
+        var source: CVPixelBuffer?
+        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 64, 36, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+            [kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary, &source), kCVReturnSuccess)
+        let buffer = try XCTUnwrap(source)
+        CVPixelBufferLockBaseAddress(buffer, [])
+        for plane in 0..<2 {
+            memset(try XCTUnwrap(CVPixelBufferGetBaseAddressOfPlane(buffer, plane)), plane == 0 ? 90 : 140,
+                CVPixelBufferGetBytesPerRowOfPlane(buffer, plane) * CVPixelBufferGetHeightOfPlane(buffer, plane))
+        }
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+        let copy = try XCTUnwrap(CaptureFrameCopy().copy(buffer))
+        XCTAssertEqual(CVPixelBufferGetPlaneCount(copy), 2)
+        CVPixelBufferLockBaseAddress(copy, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(copy, .readOnly) }
+        for plane in 0..<2 {
+            let bytes = try XCTUnwrap(CVPixelBufferGetBaseAddressOfPlane(copy, plane)).assumingMemoryBound(to: UInt8.self)
+            let stride = CVPixelBufferGetBytesPerRowOfPlane(copy, plane)
+            for row in 0..<CVPixelBufferGetHeightOfPlane(copy, plane) {
+                XCTAssertEqual(bytes[row * stride], plane == 0 ? 90 : 140)
+            }
+        }
+    }
+
     func testMediumInsetRemainsVisibleWhenControlsCoverEveryPlacement() throws {
         for canvas in [MovieFormat.portrait.canvas, MovieFormat.landscape.canvas] {
             for orientation in PiPOrientation.allCases {
