@@ -433,7 +433,7 @@ struct CameraView: View {
         let value = isDestination ? "Dolly destination" : isStart ? "Dolly start" : selected ? "Current lens" : ""
         let hint: String
         if !smoothZoomOpen { hint = "Switch to this lens." }
-        else { hint = "Choose this destination without moving. Tap Play Dolly to start." }
+        else { hint = "Choose this destination without moving. Tap Start Dolly to start." }
         return Button { selectLens(factor) } label: {
             Text(label).font(.caption.weight(.medium)).monospacedDigit()
                 .foregroundStyle(foreground).frame(minWidth: 44, minHeight: 44)
@@ -467,7 +467,7 @@ struct CameraView: View {
         else { preparedDollyTarget = nil }
         UISelectionFeedbackGenerator().selectionChanged()
         if preparedDollyTarget != nil {
-            UIAccessibility.post(notification: .announcement, argument: "Destination selected. Tap Play Dolly to move.")
+            UIAccessibility.post(notification: .announcement, argument: "Destination selected. Tap Start Dolly to move.")
         }
     }
     private func toggleDollyPlayback() {
@@ -493,15 +493,18 @@ struct CameraView: View {
     }
     private var dollyPlaybackButton: some View {
         Button(action: toggleDollyPlayback) {
-            Image(systemName: dollyCountdown.remaining != nil ? "xmark" : activeDolly == nil ? "play.fill" : "stop.fill")
-                .font(.body.weight(.semibold)).foregroundStyle(.yellow)
-                .frame(width: 44, height: 44)
-                .background(.white.opacity(0.1), in: Circle())
+            HStack(spacing: 6) {
+                Image(systemName: dollyCountdown.remaining != nil ? "xmark" : activeDolly == nil ? "play.fill" : "stop.fill")
+                Text(dollyCountdown.remaining != nil ? "Cancel" : activeDolly == nil ? "Start Dolly" : "Stop Dolly")
+            }.font(.caption.weight(.semibold)).foregroundStyle(.yellow)
+                .frame(minWidth: 108, minHeight: 44)
+                .padding(.horizontal, 8)
+                .background(.white.opacity(0.1), in: Capsule())
         }.buttonStyle(DollyLensButtonStyle())
             .disabled(recordingCountdown.remaining != nil || camera.switchingCamera ||
                 camera.state != .ready && camera.state != .recording ||
                 activeDolly == nil && preparedDollyTarget == nil)
-            .accessibilityLabel(dollyCountdown.remaining != nil ? "Cancel Dolly countdown" : activeDolly == nil ? "Play Dolly" : "Stop Dolly")
+            .accessibilityLabel(dollyCountdown.remaining != nil ? "Cancel Dolly countdown" : activeDolly == nil ? "Start Dolly" : "Stop Dolly")
             .accessibilityHint("Controls the zoom move. Recording is controlled separately.")
     }
     private func beginDolly(to target: CGFloat, seconds: Int) {
@@ -519,16 +522,16 @@ struct CameraView: View {
                     Text("\(zoomLabel(CGFloat(route.start), multiplier: options.multiplier)) → \(zoomLabel(CGFloat(route.destination), multiplier: options.multiplier)) · \(route.seconds)s")
                         .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(.yellow)
                     if activeDolly == nil {
-                        Text(dollyCountdown.remaining != nil ? "Dolly starts after countdown" : recordingCountdown.remaining != nil ? "Recording countdown" : "Ready · Tap ▶ to move")
+                        Text(dollyCountdown.remaining != nil ? "Dolly starts after countdown" : recordingCountdown.remaining != nil ? "Recording countdown" : "Ready · Tap Start Dolly")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 } else if preparedDollyStart != nil {
-                    Text("Choose a destination, then tap ▶")
+                    Text("Choose a destination, then Start Dolly")
                         .font(.caption).foregroundStyle(.secondary)
                 } else if zoomDragging || pinchBase != nil {
                     Text("Manual Dolly").font(.caption).foregroundStyle(.secondary)
                 } else if !dollyGuidanceLearned {
-                    Text("Choose a destination, then tap ▶")
+                    Text("Choose a destination, then Start Dolly")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("Dolly").font(.caption).foregroundStyle(.secondary)
@@ -580,10 +583,10 @@ struct CameraView: View {
         NavigationStack {
             List {
                 Section("Move between lenses") {
-                    Text("Open Dolly at your current zoom, choose a destination lens, then tap Play. Selecting a lens does not move the camera. The outlined lens is your destination; the dot shows actual zoom.")
-                    Text("Play becomes Stop during a move. Stop holds the current zoom. Choosing a different lens stops the move and selects the next destination; tap Play to move again.")
+                    Text("Open Dolly at your current zoom, choose a destination lens, then tap Start Dolly. Selecting a lens does not move the camera. The outlined lens is your destination; the dot shows actual zoom.")
+                    Text("Start Dolly becomes Stop Dolly during a move. Stop holds the current zoom. Choosing a different lens stops the move and selects the next destination; tap Start Dolly to move again.")
                     Text("Dragging or pinching always controls zoom immediately. It takes over from an automatic move and clears the selected destination. Choose a lens again for another automatic move.")
-                    Text("Record controls recording; Play controls Dolly. Delay waits before either starts; Move sets the zoom duration. During a take, Play counts down without interrupting recording. Tap Play again to cancel that countdown, or the red Stop button to end the take.")
+                    Text("Record controls recording; Start Dolly controls the zoom move. Delay waits before either starts; Move sets the zoom duration. During a take, Start Dolly counts down without interrupting recording. Tap Cancel to cancel that countdown, or the red Stop button to end the take.")
                     Text("Tap the video to focus, including during a Dolly move. Lens and Dolly controls adjust zoom without changing focus.")
                 }
                 Section("Automatic duration") {
@@ -593,7 +596,7 @@ struct CameraView: View {
                     Text("Drag faster or slower to control zoom. Slow gives a gentler response, Normal is balanced, and Fast responds more quickly. This setting does not change the automatic duration.")
                 }
                 Section("Start Delay") {
-                    Text("The timer on the left sets an optional 3, 5 or 7 second delay before recording. The duration on the right controls the Dolly move itself. The delay applies to Record only while Dolly is open. Your selected destination stays ready; tap Play after recording begins. Play uses the same delay, while recording continues. Tap Play again to cancel the pending move without stopping recording.")
+                    Text("The timer on the left sets an optional 3, 5 or 7 second delay before recording. The duration on the right controls the Dolly move itself. The delay applies to Record only while Dolly is open. Your selected destination stays ready; tap Start Dolly after recording begins. Start Dolly uses the same delay, while recording continues. Tap Start Dolly again to cancel the pending move without stopping recording.")
                 }
                 Section {
                     Button("Show Dolly Tips Again") { dollyGuidanceLearned = false; showingDollyHelp = false }
@@ -617,9 +620,11 @@ struct CameraView: View {
                     dollyZoomValue(options: options)
                     Spacer(minLength: 8)
                     dollyDurationMenu
+                }
+                HStack(spacing: 8) {
+                    dollyTrack(options: options)
                     dollyPlaybackButton
                 }
-                dollyTrack(options: options)
             }
         }.padding(.horizontal, 12).padding(.vertical, 5)
             .contentShape(Rectangle()).onTapGesture { }
@@ -643,7 +648,7 @@ struct CameraView: View {
                 .font(.caption.monospacedDigit()).frame(minWidth: 42, minHeight: 44)
         }.accessibilityLabel("Zoom target")
             .accessibilityValue(zoomLabel(options.zoom, multiplier: options.multiplier))
-            .accessibilityHint("Choose a destination without moving. Tap Play Dolly to start using the selected duration.")
+            .accessibilityHint("Choose a destination without moving. Tap Start Dolly to start using the selected duration.")
     }
     private func dollyTrack(options: CameraOptions) -> some View {
             GeometryReader { geometry in
