@@ -4,6 +4,12 @@ import AVFoundation
 @testable import HomeMovie
 
 final class CameraTouchTests: XCTestCase {
+    func testDualCameraLiveOutputsNeverSelectAutomaticCinematicBuffering() {
+        XCTAssertEqual(CameraStabilization.dualCameraMode(front: true, supports: { _ in true }), .off)
+        XCTAssertEqual(CameraStabilization.dualCameraMode(front: false, supports: { _ in true }), .standard)
+        XCTAssertEqual(CameraStabilization.dualCameraMode(front: false, supports: { _ in false }), .off)
+    }
+
     func testRecordingDoesNotOverridePreviewLensSelectionWithASeparateRestrictedPolicy() {
         let output = AVCaptureMovieFileOutput()
         CameraVideoTuning.configureRecordingOutput(output)

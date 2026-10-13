@@ -5,6 +5,24 @@ import UIKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testIdlePreviewReducesPixelWorkWithoutChangingInsetGeometry() throws {
+        for format in [MovieFormat.landscape, .portrait] {
+            let full = format.canvas, preview = PiPFrameRenderer.previewCanvas(for: full)
+            XCTAssertEqual(max(preview.width, preview.height), 960)
+            XCTAssertEqual(preview.width / preview.height, full.width / full.height, accuracy: 0.0001)
+            XCTAssertEqual(preview.width * preview.height, full.width * full.height / 4)
+            for corner in PiPCorner.allCases {
+                let layout = PiPLayout(corner: corner)
+                let a = try XCTUnwrap(PiPGeometry.rect(layout: layout, canvas: full))
+                let b = try XCTUnwrap(PiPGeometry.rect(layout: layout, canvas: preview))
+                XCTAssertEqual(a.minX, b.minX, accuracy: 0.0001)
+                XCTAssertEqual(a.minY, b.minY, accuracy: 0.0001)
+                XCTAssertEqual(a.width, b.width, accuracy: 0.0001)
+                XCTAssertEqual(a.height, b.height, accuracy: 0.0001)
+            }
+        }
+    }
+
     private func frame(red: UInt8, green: UInt8, blue: UInt8, split: Bool = false) throws -> CVPixelBuffer {
         var result: CVPixelBuffer?
         XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 64, 36, kCVPixelFormatType_32BGRA,

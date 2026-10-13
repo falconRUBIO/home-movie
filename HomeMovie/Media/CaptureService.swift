@@ -22,6 +22,10 @@ enum CameraStabilization {
         if supports(.standard) { return .standard }
         return .auto
     }
+    static func dualCameraMode(front: Bool, supports: (AVCaptureVideoStabilizationMode) -> Bool) -> AVCaptureVideoStabilizationMode {
+        // Avoid automatic cinematic buffering on the outputs that also feed live PiP.
+        !front && supports(.standard) ? .standard : .off
+    }
     static func configure(_ connection: AVCaptureConnection, format: AVCaptureDevice.Format?, preview: Bool) {
         guard connection.isVideoStabilizationSupported, let format else { return }
         let mode = preferredMode(preview: preview, supports: { format.isVideoStabilizationModeSupported($0) })
@@ -799,6 +803,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 continuousFlipSupported: self.seamless?.readyToFlip == true) else {
                 self.onEvent?(.notice(self.configuredProfile == .appleLog ?
                     (self.ticket != nil ? CameraCompatibility.logRecordingFlipExplanation : CameraCompatibility.logCameraExplanation) : "No other camera is available."))
+                if let options = try? self.options() { self.onEvent?(.cameraChanged(options)) }
+                else { self.onEvent?(.failed("The camera could not be switched. Resume Camera to reconnect.")) }
                 return
             }
             if let dual = self.seamless {
