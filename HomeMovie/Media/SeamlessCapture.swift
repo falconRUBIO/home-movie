@@ -324,7 +324,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             onNotice?("PiP is hidden while the camera controls cover its available space. Close Dolly or choose Small before the next take.")
         } else if presentation.isPlaceable { noSpaceReported = false }
         if presentation != lastPresentation { lastPresentation = presentation; onPiPPresentation?(presentation) }
-        let composing = preparedForPiP || timeline.enabled || presentation.opacity > 0
+        let composing = timeline.enabled || presentation.opacity > 0
         var accepted = false
         if composing {
             let angle = take == nil ? previewAngle : (front ? recordedPresenterAngle : recordedRearAngle)

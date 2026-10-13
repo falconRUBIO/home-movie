@@ -73,6 +73,9 @@ enum CameraCompatibility {
                            continuousFlipSupported: Bool) -> Bool {
         otherCameraSupported && (profile != .appleLog || !recording || continuousFlipSupported)
     }
+    static func shouldPreparePiP(profile: CaptureProfile, storedPreference: Bool, requested: Bool, currentlyEnabled: Bool) -> Bool {
+        profile == .standard && storedPreference && (requested || currentlyEnabled)
+    }
     static func allowsPiP(profile: CaptureProfile, deviceSupported: Bool) -> Bool {
         profile == .standard && deviceSupported
     }
@@ -292,7 +295,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
         singleSession.inputs.forEach { singleSession.removeInput($0) }
         singleSession.outputs.forEach { singleSession.removeOutput($0) }
         singleSession.commitConfiguration()
-        if (front || preparedForPiP), configuredProfile == .standard, let dual = SeamlessCapture(queue: queue, frames: liveFrames,
+        if preparedForPiP, configuredProfile == .standard, let dual = SeamlessCapture(queue: queue, frames: liveFrames,
             rearFrames: pipRearFrames, presenterFrames: pipPresenterFrames, front: front, preparedForPiP: preparedForPiP,
             layout: pipLayout, canvasFormat: canvasFormat) {
             seamless = dual; videoInput = dual.activeInput; isFront = front
@@ -811,14 +814,6 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                 return
             }
             guard self.ticket == nil, let old = self.videoInput else { return }
-            if !self.isFront, self.configuredProfile == .standard, AVCaptureMultiCamSession.isMultiCamSupported {
-                do {
-                    try self.configure(front: true)
-                    self.session.startRunning()
-                    self.onEvent?(.cameraChanged(try self.options()))
-                } catch { self.configured = false; self.onEvent?(.failed(error.localizedDescription)) }
-                return
-            }
             self.stopSmoothZoomOnQueue()
             self.liveFrames.clear()
             let oldFront = self.isFront

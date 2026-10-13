@@ -193,6 +193,8 @@ struct CameraView: View {
         configuredCamera
         .onChange(of: camera.state) { _, state in
             if state == .starting { addedSceneID = nil }
+            if state == .ready, camera.options?.dualCameraPrepared == true, camera.options?.isPiPEnabled != true,
+               !enablePiPAfterPreparation, !pipConfiguring { Task { await prepareCamera() } }
             if state == .recording, let move = queuedDolly {
                 queuedDolly = nil
                 preparedDollyStart = nil; preparedDollyTarget = nil
@@ -223,7 +225,12 @@ struct CameraView: View {
             }
         }
         .task(id: camera.options?.smoothMoving) { await finishDollyIfIdle() }
-        .onChange(of: camera.options?.isPiPEnabled) { _, enabled in if enabled == true { enablePiPAfterPreparation = false } }
+        .onChange(of: camera.options?.isPiPEnabled) { _, enabled in
+            if enabled == true { enablePiPAfterPreparation = false }
+            else if enabled == false, camera.state == .ready, camera.options?.dualCameraPrepared == true, !enablePiPAfterPreparation, !pipConfiguring {
+                Task { await prepareCamera() }
+            }
+        }
         .onChange(of: camera.pipSetupFailed) { _, failed in if failed { enablePiPAfterPreparation = false } }
         .onChange(of: movie?.recordingFormat) { _, format in
             if camera.options?.dualCameraPrepared == true { camera.service.setPiPLayout(camera.pipLayout, canvasFormat: format) }
@@ -922,9 +929,12 @@ struct CameraView: View {
         Task { await camera.pauseForPlayback(); initialReviewID = sceneID; watching = true }
     }
     private func prepareCamera() async {
+        let usePiP = CameraCompatibility.shouldPreparePiP(profile: movie?.captureProfile ?? .standard,
+            storedPreference: movie?.dualCameraCapture == true, requested: enablePiPAfterPreparation,
+            currentlyEnabled: camera.options?.isPiPEnabled == true)
         await camera.prepare(profile: movie?.captureProfile ?? .standard, movieID: movieID,
-            dualCamera: movie?.dualCameraCapture == true, layout: movie?.preferredPiPLayout ?? PiPLayout(),
-            canvasFormat: movie?.recordingFormat, enablePiP: enablePiPAfterPreparation)
+            dualCamera: usePiP, layout: movie?.preferredPiPLayout ?? PiPLayout(),
+            canvasFormat: movie?.recordingFormat, enablePiP: usePiP)
     }
     private var normalizedPiPObstacles: [CGRect] {
         guard viewfinderSize.width > 0, viewfinderSize.height > 0 else { return [] }
