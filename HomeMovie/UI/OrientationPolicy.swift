@@ -33,6 +33,10 @@ import UIKit
     }
 }
 @MainActor final class MovieAppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        _ = ApplePerformanceDiagnostics.shared
+        return true
+    }
     func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
         ReliabilityDiagnostics.shared.record(.lowMemory)
     }

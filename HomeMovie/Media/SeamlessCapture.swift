@@ -23,6 +23,8 @@ final class ContinuousTakeWriter {
         let portrait = abs(angle.truncatingRemainder(dividingBy: 180)) == 90
         size = portrait ? CGSize(width: 1080, height: 1920) : CGSize(width: 1920, height: 1080)
         writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        // Periodic MOV fragments improve salvage after termination; finalization is still required for a complete take.
+        writer.movieFragmentInterval = CMTime(value: 1, timescale: 1)
         video = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: Int(size.width), AVVideoHeightKey: Int(size.height),
@@ -383,6 +385,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     }
     private func suspendPresenter() {
         guard preparedForPiP || timeline.enabled, !presenterDisabled else { return }
+        ReliabilityDiagnostics.shared.record(.resourcePressure)
         presenterDisabled = true
         timeline.setEnabled(false, at: eventTime)
         frontOutput.connection(with: .video)?.isEnabled = false

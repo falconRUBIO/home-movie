@@ -1,0 +1,51 @@
+{
+  "privacy_policy_url": null,
+  "support_url": null,
+  "original_lut_redistribution_confirmed": false,
+  "privacy_labels_reviewed": false,
+  "export_compliance_reviewed": false,
+  "store_screenshots_reviewed": false,
+  "app_review_notes": null,
+  "device_tests": [
+    {
+      "role": "primary",
+      "model": "iPhone 17",
+      "os_version": null,
+      "build_number": null,
+      "status": "not_run",
+      "evidence": null,
+      "scenarios": {
+        "long_recording": false,
+        "repeated_flips": false,
+        "pip_orientations": false,
+        "log_effects_export": false,
+        "interruptions": false,
+        "low_storage": false,
+        "recovery": false,
+        "upgrade": false,
+        "backup_restore": false,
+        "accessibility": false
+      }
+    },
+    {
+      "role": "oldest_supported",
+      "model": null,
+      "os_version": null,
+      "build_number": null,
+      "status": "not_run",
+      "evidence": null,
+      "scenarios": {
+        "long_recording": false,
+        "repeated_flips": false,
+        "pip_orientations": false,
+        "log_effects_export": false,
+        "interruptions": false,
+        "low_storage": false,
+        "recovery": false,
+        "upgrade": false,
+        "backup_restore": false,
+        "accessibility": false
+      }
+    }
+  ]
+}

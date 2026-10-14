@@ -187,6 +187,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
     private var recordingURL: URL?
     private var stopRequested = false
     private var observers: [NSObjectProtocol] = []
+    private var pressureObservation: NSKeyValueObservation?
+    private var pressureStopReported = false
     private var rotationObservation: NSKeyValueObservation?
     private var configuredProfile = CaptureProfile.standard
     private var configured = false
@@ -403,6 +405,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         CameraVideoTuning.configureRecordingOutput(output)
         setCoordinator(camera)
         configureVideoConnection()
+        output.movieFragmentInterval = CMTime(value: 1, timescale: 1)
         output.minFreeDiskSpaceLimit = 200_000_000
         configured = true
     }
@@ -505,6 +508,20 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
                     guard let self else { return }; self.zoomNotificationPending = false
                     if self.session.isRunning, let options = try? self.options() { self.onEvent?(.ready(options)) }
                 }
+            }
+        }
+        pressureStopReported = false
+        pressureObservation = camera.observe(\.systemPressureState, options: [.new]) { [weak self] _, change in
+            let level = change.newValue?.level
+            self?.queue.async {
+                guard let self, self.seamless == nil else { return }
+                if level == .critical || level == .shutdown {
+                    guard !self.pressureStopReported else { return }
+                    self.pressureStopReported = true
+                    ReliabilityDiagnostics.shared.record(.resourcePressure)
+                    self.onEvent?(.notice("The camera is under heavy system pressure. Finishing this take safely; let your iPhone cool before recording again."))
+                    self.requestStop()
+                } else if level == .nominal { self.pressureStopReported = false }
             }
         }
         coordinator = AVCaptureDevice.RotationCoordinator(device: camera, previewLayer: nil)
@@ -936,6 +953,11 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         queue.async {
             guard self.ticket == nil, self.session.isRunning, !self.session.isInterrupted else {
                 self.onEvent?(.finished(ticket, HomeMovieError.message("The camera is not ready."))); return
+            }
+            if let level = self.videoInput?.device.systemPressureState.level,
+               level == .critical || level == .shutdown {
+                self.onEvent?(.finished(ticket, HomeMovieError.message("Let your iPhone cool before recording again.")))
+                return
             }
             if let dual = self.seamless {
                 do {

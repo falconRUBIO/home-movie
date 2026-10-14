@@ -227,11 +227,11 @@ final class ContinuousCaptureTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
         let take = try ContinuousTakeWriter(url: url, angle: 0)
         let front = try frame(red: true), back = try frame(red: false)
-        for index in 0..<12 {
+        for index in 0..<90 {
             let time = CMTime(value: Int64(300 + index), timescale: 30)
             var accepted = false
             for _ in 0..<100 {
-                if take.appendVideo(index < 6 ? front : back, at: time) { accepted = true; break }
+                if take.appendVideo(index < 45 ? front : back, at: time) { accepted = true; break }
                 try await Task.sleep(for: .milliseconds(10))
             }
             XCTAssertTrue(accepted)
@@ -246,11 +246,11 @@ final class ContinuousCaptureTests: XCTestCase {
         let audios = try await asset.loadTracks(withMediaType: .audio)
         XCTAssertEqual(videos.count, 1); XCTAssertEqual(audios.count, 1)
         let range = try await XCTUnwrap(audios.first).load(.timeRange)
-        XCTAssertGreaterThanOrEqual(range.duration.seconds, 0.35)
+        XCTAssertGreaterThanOrEqual(range.duration.seconds, 2.9)
         let generator = AVAssetImageGenerator(asset: asset); generator.appliesPreferredTrackTransform = true
         generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
         let (first, _) = try await generator.image(at: CMTime(value: 1, timescale: 30))
-        let (second, _) = try await generator.image(at: CMTime(value: 8, timescale: 30))
+        let (second, _) = try await generator.image(at: CMTime(value: 70, timescale: 30))
         XCTAssertEqual(first.width, 1920); XCTAssertEqual(second.height, 1080)
         XCTAssertNotEqual(first.dataProvider?.data as Data?, second.dataProvider?.data as Data?)
     }

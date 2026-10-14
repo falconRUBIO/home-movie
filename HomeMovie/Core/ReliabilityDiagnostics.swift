@@ -3,7 +3,7 @@ import Foundation
 // Local, bounded support events. Never record titles, paths, media or error userInfo.
 final class ReliabilityDiagnostics: @unchecked Sendable {
     enum Event: String, Codable {
-        case appLaunched, lowMemory, cameraRequested, cameraReady, cameraFailed, cameraInterrupted
+        case appLaunched, lowMemory, resourcePressure, firstPreviewFrame, cameraRequested, cameraReady, cameraFailed, cameraInterrupted
         case recordingRequested, recordingStarted, recordingFinished, recordingFailed
         case exportRequested, exportFinished, exportFailed, exportCancelled
     }
@@ -46,6 +46,27 @@ final class ReliabilityDiagnostics: @unchecked Sendable {
             try JSONEncoder().encode(entries ?? []).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         } catch { }
     }
+    private var systemDirectory: URL { file.deletingLastPathComponent().appendingPathComponent("AppleReports", isDirectory: true) }
+    private func systemFiles() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: systemDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])) ?? []
+        return files.filter {
+            guard $0.pathExtension == "json", let values = try? $0.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]) else { return false }
+            return values.isRegularFile == true && values.isSymbolicLink != true && (values.fileSize ?? Int.max) <= 1_048_576
+        }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+    func saveSystemReport(_ data: Data) {
+        guard data.count <= 1_048_576, (try? JSONSerialization.jsonObject(with: data)) != nil else { return }
+        queue.async {
+            do {
+                try FileManager.default.createDirectory(at: self.systemDirectory, withIntermediateDirectories: true)
+                // Remove before writing: never retain more than four bounded reports.
+                for old in self.systemFiles().dropLast(3) { try FileManager.default.removeItem(at: old) }
+                let name = String(format: "%.6f", Date().timeIntervalSince1970) + "-" + UUID().uuidString + ".json"
+                try data.write(to: self.systemDirectory.appendingPathComponent(name), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            } catch { }
+        }
+    }
     func report() async -> String {
         await withCheckedContinuation { continuation in
             queue.async {
@@ -54,19 +75,25 @@ final class ReliabilityDiagnostics: @unchecked Sendable {
                 let version = info["CFBundleShortVersionString"] as? String ?? "—"
                 let build = info["CFBundleVersion"] as? String ?? "—"
                 let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
                 let events = values.map { entry in
                     let failure = entry.domain.map { " [\($0):\(entry.code ?? 0)]" } ?? ""
                     return "\(formatter.string(from: entry.date)) \(entry.event.rawValue)\(failure)"
                 }
+                let apple = self.systemFiles().suffix(4).compactMap { try? String(contentsOf: $0, encoding: .utf8) }
                 continuation.resume(returning: (["Home Movie \(version) (\(build))", ProcessInfo.processInfo.operatingSystemVersionString,
-                    "Local support events; this is not a full crash report.",
-                    "An unfinished operation may indicate interruption, force quit or termination.", ""] + events).joined(separator: "\n"))
+                    "Local support events; Apple performance/crash reports appear below when delivered.",
+                    "An unfinished operation may indicate interruption, force quit or termination.", ""] + events + apple).joined(separator: "\n"))
             }
         }
     }
     func clear() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            queue.async { self.entries = []; self.persist(); continuation.resume() }
+            queue.async {
+                self.entries = []; self.persist()
+                for file in self.systemFiles() { try? FileManager.default.removeItem(at: file) }
+                continuation.resume()
+            }
         }
     }
 }

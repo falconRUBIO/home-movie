@@ -108,7 +108,9 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
     var onStatusChanged: ((LiveLookStatus) -> Void)?
     private func report(_ status: LiveLookStatus) {
         guard self.status != status else { return }
-        self.status = status; onStatusChanged?(status)
+        self.status = status
+        if status == .ready { ReliabilityDiagnostics.shared.record(.firstPreviewFrame) }
+        onStatusChanged?(status)
     }
     func configure(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false) {
         let nextFrames = active && (cube != nil || passthrough) ? frames : nil
