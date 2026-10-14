@@ -84,17 +84,6 @@ actor ProjectStore {
         if !fm.fileExists(atPath: filmicaURL.path) {
             try encoder.encode(filmica).write(to: filmicaURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         }
-        for (reference, resource) in LUTReference.additionalBundledLooks {
-            let destination = root.appendingPathComponent(reference.path)
-            if !fm.fileExists(atPath: destination.path) {
-                guard let bundled = Bundle.main.url(forResource: resource, withExtension: "json") else {
-                    throw HomeMovieError.message("The \(reference.name) look is unavailable.")
-                }
-                let cube = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: bundled))
-                try cube.validate()
-                try encoder.encode(cube).write(to: destination, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            }
-        }
         if !cleanedTransfers {
             // These are app-owned temporary copies, never the source recordings.
             for folder in ["RestoreStaging", "OutgoingBackups"] {
@@ -119,6 +108,12 @@ actor ProjectStore {
             try validate(decoded)
             catalog = decoded
         } else { try write(catalog) }
+        var migrated = catalog
+        for index in migrated.movies.indices where migrated.movies[index].look?.isRetiredBundledLook == true {
+            migrated.movies[index].look = .filmica
+            migrated.movies[index].revision += 1
+        }
+        if migrated.movies != catalog.movies { try write(migrated) }
         var notices: [String] = []
         let journalFiles = try fm.contentsOfDirectory(at: root.appendingPathComponent("Journal"), includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" }
         var pending: [(URL, CaptureTicket)] = []
@@ -204,6 +199,7 @@ actor ProjectStore {
         return files.compactMap { file in
             guard file.pathExtension == "json", let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent) else { return nil }
             let reference = LUTReference(id: id, name: "Look")
+            guard !reference.isRetiredBundledLook else { return nil }
             guard let cube = try? ColorCube.load(reference, root: root) else { return nil }
             return LUTReference(id: id, name: id == LUTReference.filmica.id ? LUTReference.filmica.name : cube.name)
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -233,6 +229,7 @@ actor ProjectStore {
         try requireIdle()
         let i = try index(movieID)
         guard catalog.movies[i].captureProfile == .appleLog else { throw HomeMovieError.message("Looks are available for Apple Log movies.") }
+        let look = look?.isRetiredBundledLook == true ? LUTReference.filmica : look
         if let look { _ = try ColorCube.load(look, root: root) }
         guard catalog.movies[i].look != look else { return }
         var next = catalog; next.movies[i].look = look; next.movies[i].revision += 1; try write(next)

@@ -7,7 +7,7 @@ struct LUTReference: Codable, Equatable, Sendable {
     static let filmica = LUTReference(id: UUID(uuidString: "BAA6B811-4136-44D8-92ED-56C78AF001CA")!, name: "Cinema")
     static let cinemaTwo = LUTReference(id: UUID(uuidString: "2FAA1534-0DAD-41F0-928C-AC4B9E014422")!, name: "Cinema II")
     static let cinemaThree = LUTReference(id: UUID(uuidString: "3FAA1534-0DAD-41F0-928C-AC4B9E014433")!, name: "Cinema III")
-    static let additionalBundledLooks: [(reference: LUTReference, resource: String)] = [(.cinemaTwo, "CinemaTwo"), (.cinemaThree, "CinemaThree")]
+    var isRetiredBundledLook: Bool { id == Self.cinemaTwo.id || id == Self.cinemaThree.id }
     var id: UUID
     var name: String
     var displayName: String { id == Self.filmica.id ? "Cinema" : name }
@@ -71,6 +71,7 @@ struct ColorCube: Codable, Sendable {
         try cube.validate(); return cube
     }
     static func load(_ reference: LUTReference, root: URL) throws -> ColorCube {
+        let reference = reference.isRetiredBundledLook ? LUTReference.filmica : reference
         let url = root.appendingPathComponent(reference.path)
         let info = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
         guard info.isRegularFile == true, info.isSymbolicLink != true, (info.fileSize ?? 0) <= 8_000_000 else {
