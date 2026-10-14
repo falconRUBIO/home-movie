@@ -26,6 +26,24 @@ final class ReliabilityDiagnosticsTests: XCTestCase {
         XCTAssertFalse(cleared.contains("recordingStarted"))
         XCTAssertFalse(cleared.contains("OtherError:42"))
     }
+    func testAppleReportsAreBoundedPersistedAndCleared() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = ReliabilityDiagnostics(file: directory.appendingPathComponent("events.json"))
+        for index in 0..<6 { log.saveSystemReport(Data("{\"sample\":\(index)}".utf8)) }
+        log.saveSystemReport(Data("not JSON".utf8))
+        log.saveSystemReport(Data(repeating: 32, count: 1_048_577))
+        let report = await log.report()
+        XCTAssertTrue(report.contains("sample"))
+        let files = try FileManager.default.contentsOfDirectory(at: directory.appendingPathComponent("AppleReports"), includingPropertiesForKeys: nil)
+        XCTAssertEqual(files.count, 4)
+        let reopened = ReliabilityDiagnostics(file: directory.appendingPathComponent("events.json"))
+        let restored = await reopened.report()
+        XCTAssertTrue(restored.contains("sample"))
+        await reopened.clear()
+        let cleared = await reopened.report()
+        XCTAssertFalse(cleared.contains("sample"))
+    }
     func testStorageFailureDoesNotPreventInMemoryDiagnostics() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

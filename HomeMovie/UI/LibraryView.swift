@@ -313,6 +313,9 @@ struct PrivacyView: View {
             Section("Your movies") {
                 Text("Home Movie keeps recordings and edit information on this iPhone. It has no account system, advertising, or analytics service, and does not upload your movies to a developer server.")
             }
+            Section("Diagnostics") {
+                Text("A bounded support log and Apple performance/crash reports stay on this iPhone. Reports can include technical device information and stack traces. They are shared only when you choose Share Diagnostics; no developer analytics endpoint receives them automatically.")
+            }
             Section("Permissions") {
                 Text("Camera and microphone access record video and sound. Photos access only adds copies when you choose to save a movie or enable original-scene copies. Home Movie does not request access to read your photo library.")
             }

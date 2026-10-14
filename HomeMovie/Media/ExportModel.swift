@@ -12,6 +12,7 @@ import UIKit
     private var session: AVAssetExportSession?
     private var job: Task<Void, Never>?
     private var backgroundObserver: NSObjectProtocol?
+    private var thermalObserver: NSObjectProtocol?
     private var committedRevision: Int?
     private var committedMovieID: UUID?
     private var savingPhotos = false
@@ -31,8 +32,19 @@ import UIKit
                 self.cancel()
             }
         }
+        thermalObserver = NotificationCenter.default.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.running, ProcessInfo.processInfo.thermalState == .critical else { return }
+                ReliabilityDiagnostics.shared.record(.resourcePressure)
+                self.notice = "Export paused because your iPhone is too warm. Let it cool, then export again."
+                self.cancel()
+            }
+        }
     }
-    deinit { if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) } }
+    deinit {
+        if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) }
+        if let thermalObserver { NotificationCenter.default.removeObserver(thermalObserver) }
+    }
     static func matchesExport(_ info: MediaInfo, movie: Movie) -> Bool {
         abs(info.duration.seconds - movie.duration.seconds) < 0.15 &&
         abs(info.size.width - movie.format.canvas.width) < 1 &&
@@ -83,6 +95,9 @@ import UIKit
                     }
                 }
                 try await app.store.requireSpace(bytes: Int64(min(seconds * 2_000_000, Double(Int64.max / 2))) + 300_000_000)
+                guard ProcessInfo.processInfo.thermalState != .critical else {
+                    throw HomeMovieError.message("Let your iPhone cool before exporting again.")
+                }
                 let bundle = try await app.assembler.build(movie: movie, root: app.store.root, filmEffects: movie.exportEffects)
                 try Task.checkCancellation()
                 guard let export = AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality), export.supportedFileTypes.contains(.mp4) else {

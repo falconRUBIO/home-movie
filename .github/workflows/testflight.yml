@@ -2,6 +2,15 @@ name: Upload internal TestFlight beta
 
 on:
   workflow_dispatch:
+    inputs:
+      distribution:
+        description: Internal beta or an App Store-capable candidate (not an App Store submission)
+        type: choice
+        required: true
+        default: internal
+        options:
+          - internal
+          - app-store-candidate
 
 permissions:
   contents: read
@@ -43,6 +52,8 @@ jobs:
           export BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
           python3 scripts/generate_project.py
           python3 scripts/validate_source.py
+          python3 -m unittest discover -s scripts -p "test_release_check.py"
+          python3 scripts/release_check.py
       - name: Require all simulator tests to pass
         run: bash scripts/test_simulator.sh
       - name: Install signing tools
@@ -52,6 +63,7 @@ jobs:
           echo "$RUNNER_TEMP/signing-tools/bin" >> "$GITHUB_PATH"
       - name: Sign and upload to Apple
         env:
+          DISTRIBUTION: ${{ inputs.distribution }}
           APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
@@ -61,8 +73,14 @@ jobs:
           keychain initialize
           app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --strict-match-identifier --create
           keychain add-certificates
-          xcode-project use-profiles --project HomeMovie.xcodeproj --custom-export-options='{"testFlightInternalTestingOnly": true}'
+          if [ "$DISTRIBUTION" = "app-store-candidate" ]; then
+            xcode-project use-profiles --project HomeMovie.xcodeproj --custom-export-options='{"testFlightInternalTestingOnly": false}'
+          else
+            xcode-project use-profiles --project HomeMovie.xcodeproj --custom-export-options='{"testFlightInternalTestingOnly": true}'
+          fi
           xcode-project build-ipa --project HomeMovie.xcodeproj --scheme HomeMovie --disable-xcpretty 2>&1 | tee build/archive.log
+          python3 scripts/release_check.py --ipa build/ios/ipa/*.ipa
+          python3 scripts/package_symbols.py
           app-store-connect publish --path 'build/ios/ipa/*.ipa' --enable-package-validation
       - name: Package test results
         if: always()
@@ -78,6 +96,7 @@ jobs:
           path: |
             build/xcodebuild.log
             build/archive.log
+            build/debug-symbols-*.zip
             build/TestResults.xcresult.zip
           if-no-files-found: warn
           retention-days: 14

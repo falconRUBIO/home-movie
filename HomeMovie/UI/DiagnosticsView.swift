@@ -6,7 +6,7 @@ struct DiagnosticsView: View {
     var body: some View {
         Form {
             Section {
-                Text("Recent camera, recording and export events stay on this iPhone. No video, audio or movie titles are included. Nothing is sent automatically.")
+                Text("Recent camera, recording and export events stay on this iPhone. Apple reports can include technical device information and stack traces. No video, audio or movie titles are added. Nothing is sent automatically.")
                     .font(.subheadline).foregroundStyle(.secondary)
                 if !report.isEmpty {
                     ShareLink(item: report) { Label("Share Diagnostics", systemImage: "square.and.arrow.up") }
