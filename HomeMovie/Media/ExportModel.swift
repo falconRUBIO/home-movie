@@ -111,7 +111,7 @@ import UIKit
             session = nil; running = false; job = nil
         }
     }
-    func cancel() { if running && notice == nil { notice = "Export canceled. Your original scenes are safe." }; job?.cancel() }
+    func cancel() { if running && notice == nil { notice = "Export canceled. Your original scenes are safe." }; session?.cancelExport(); job?.cancel() }
     func saveToPhotos() async {
         guard let exportedURL, !savingPhotos else { return }
         savingPhotos = true; defer { savingPhotos = false }

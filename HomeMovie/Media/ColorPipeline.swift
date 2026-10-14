@@ -148,7 +148,7 @@ final class LogVideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendabl
     let supportsWideColorSourceFrames = true
     let supportsHDRSourceFrames = true
     let canConformColorOfSourceFrames = false
-    private let queue = DispatchQueue(label: "HomeMovie.log-render", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "HomeMovie.log-render", qos: .userInitiated, autoreleaseFrequency: .workItem)
     private let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .cacheIntermediates: false])
     private let filmRenderer = FilmEffectsRenderer()
     private let cancellationLock = NSLock()
@@ -159,31 +159,35 @@ final class LogVideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendabl
     func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
         let started = currentGeneration()
         queue.async {
-            guard self.currentGeneration() == started else { request.finishCancelledRequest(); return }
-            do {
-                guard let instruction = request.videoCompositionInstruction as? ColorInstruction,
-                      let source = request.sourceFrame(byTrackID: instruction.trackID),
-                      let destination = request.renderContext.newPixelBuffer() else {
-                    throw HomeMovieError.message("A video frame could not be prepared.")
-                }
-                var image = CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()])
-                image = try instruction.applyingColor(to: image)
-                let sourceFlip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: CGFloat(CVPixelBufferGetHeight(source)))
-                let outputFlip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: request.renderContext.size.height)
-                image = image.transformed(by: sourceFlip.concatenating(instruction.transform).concatenating(outputFlip))
-                let bounds = CGRect(origin: .zero, size: request.renderContext.size)
-                if instruction.filmEffects.isActive {
-                    let content = image.extent.intersection(bounds)
-                    image = try self.filmRenderer.render(image.cropped(to: content), settings: instruction.filmEffects, time: request.compositionTime, contentBounds: content)
-                }
-                image = image.composited(over: CIImage(color: .black).cropped(to: bounds)).cropped(to: bounds)
-                self.context.render(image, to: destination, bounds: bounds, colorSpace: nil)
+            // AVFoundation can submit many frames without a run-loop pool drain.
+            // Release Core Image filters and their temporary resources after each frame.
+            autoreleasepool {
                 guard self.currentGeneration() == started else { request.finishCancelledRequest(); return }
-                CVBufferSetAttachment(destination, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
-                CVBufferSetAttachment(destination, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
-                CVBufferSetAttachment(destination, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
-                request.finish(withComposedVideoFrame: destination)
-            } catch { request.finish(with: error) }
+                do {
+                    guard let instruction = request.videoCompositionInstruction as? ColorInstruction,
+                          let source = request.sourceFrame(byTrackID: instruction.trackID),
+                          let destination = request.renderContext.newPixelBuffer() else {
+                        throw HomeMovieError.message("A video frame could not be prepared.")
+                    }
+                    var image = CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()])
+                    image = try instruction.applyingColor(to: image)
+                    let sourceFlip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: CGFloat(CVPixelBufferGetHeight(source)))
+                    let outputFlip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: request.renderContext.size.height)
+                    image = image.transformed(by: sourceFlip.concatenating(instruction.transform).concatenating(outputFlip))
+                    let bounds = CGRect(origin: .zero, size: request.renderContext.size)
+                    if instruction.filmEffects.isActive {
+                        let content = image.extent.intersection(bounds)
+                        image = try self.filmRenderer.render(image.cropped(to: content), settings: instruction.filmEffects, time: request.compositionTime, contentBounds: content)
+                    }
+                    image = image.composited(over: CIImage(color: .black).cropped(to: bounds)).cropped(to: bounds)
+                    self.context.render(image, to: destination, bounds: bounds, colorSpace: nil)
+                    guard self.currentGeneration() == started else { request.finishCancelledRequest(); return }
+                    CVBufferSetAttachment(destination, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+                    CVBufferSetAttachment(destination, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
+                    CVBufferSetAttachment(destination, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+                    request.finish(withComposedVideoFrame: destination)
+                } catch { request.finish(with: error) }
+            }
         }
     }
 }
