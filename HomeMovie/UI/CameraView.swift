@@ -89,7 +89,7 @@ struct CameraView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     init(app: AppModel, movieID: UUID) {
         self.app = app; _movieID = State(initialValue: movieID)
-        _camera = StateObject(wrappedValue: CameraModel(app: app))
+        _camera = StateObject(wrappedValue: app.camera)
     }
     private var countdown: Int? { recordingCountdown.remaining ?? dollyCountdown.remaining }
     private var startDelay: Int { DollyStartDelay.effective(handsFreeStart ? dollyStartDelaySeconds : 0, dollyOpen: smoothZoomOpen) }
@@ -226,7 +226,7 @@ struct CameraView: View {
         .onChange(of: movie?.recordingFormat) { _, format in
             if camera.options?.dualCameraPrepared == true { camera.service.setPiPLayout(camera.pipLayout, canvasFormat: format) }
         }
-        .onDisappear { cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
+        .onDisappear { app.cancelCameraWarmup(); cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
             else if !watching && !showingRecovery && !camera.busy { Task { await prepareCamera() } }
@@ -846,9 +846,6 @@ struct CameraView: View {
                     .allowsHitTesting(false)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("\(dollyCountdown.remaining != nil ? "Dolly" : "Recording") in \(countdown) seconds")
-            }
-            if camera.state == .preparing {
-                ProgressView("Preparing camera…").padding().background(.black.opacity(0.8), in: Capsule())
             }
             if camera.state == .denied {
                 VStack(spacing: 12) {

@@ -22,6 +22,7 @@ struct LibraryView: View {
     }
     private func openMovie(_ movie: Movie) {
         lastMovieID = movie.id.uuidString
+        app.prewarmCamera(movieID: movie.id)
         path.append(movie.id)
     }
     var body: some View {
@@ -108,7 +109,7 @@ struct LibraryView: View {
             }
             .navigationDestination(for: UUID.self) { id in CameraView(app: app, movieID: id) }
             .sheet(isPresented: $creating) {
-                NewMovieView { id in creating = false; lastMovieID = id.uuidString; path.append(id) }
+                NewMovieView { id in creating = false; lastMovieID = id.uuidString; app.prewarmCamera(movieID: id); path.append(id) }
             }
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $backups) { BackupView() }
@@ -134,7 +135,7 @@ struct LibraryView: View {
             } message: { Text("You can restore the movie and its original scenes in Settings.") }
             .task { if !app.loaded { await app.load() } }
             .onChange(of: app.loaded) { _, ready in
-                if ready && openLastMovie, let id = UUID(uuidString: lastMovieID), app.activeMovies.contains(where: { $0.id == id }) { path = [id] }
+                if ready && openLastMovie, let id = UUID(uuidString: lastMovieID), app.activeMovies.contains(where: { $0.id == id }) { app.prewarmCamera(movieID: id); path = [id] }
             }
         }
         .alert("Home Movie", isPresented: Binding(get: { app.error != nil }, set: { if !$0 { app.error = nil } })) {
