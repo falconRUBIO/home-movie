@@ -16,7 +16,7 @@ import AVFoundation
     @Published var photosCopyStatus: String?
     @Published var recoveryNotice: String?
     @Published var storageBytes: Int64 = 0
-    init(store: ProjectStore = ProjectStore()) { self.store = store }
+    init(store: ProjectStore = ProjectStore()) { self.store = store; ReliabilityDiagnostics.shared.record(.appLaunched) }
     var activeMovies: [Movie] { movies.filter { $0.deletedAt == nil } }
     func movie(_ id: UUID) -> Movie? { movies.first { $0.id == id } }
     func prewarmCamera(movieID: UUID) {

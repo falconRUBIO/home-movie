@@ -229,6 +229,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         })
         observers.append(center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: nil, queue: nil) { [weak self] notification in
             guard let self, notification.object as? AVCaptureSession === self.session else { return }
+            ReliabilityDiagnostics.shared.record(.cameraFailed, error: notification.userInfo?[AVCaptureSessionErrorKey] as? Error)
             let text = (notification.userInfo?[AVCaptureSessionErrorKey] as? Error)?.localizedDescription ?? "Camera unavailable. Try resuming the camera."
             self.queue.async {
                 self.stopSmoothZoomOnQueue(); self.requestStop(); self.turnOffTorch(); self.configured = false
