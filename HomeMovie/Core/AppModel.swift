@@ -3,6 +3,8 @@ import AVFoundation
 
 @MainActor final class AppModel: ObservableObject {
     let store: ProjectStore
+    lazy var camera = CameraModel(app: self)
+    private var cameraWarmup: Task<Void, Never>?
     let assembler = MediaAssembler()
     let photosSafety = PhotosSafetyService()
     @Published var movies: [Movie] = []
@@ -17,6 +19,18 @@ import AVFoundation
     init(store: ProjectStore = ProjectStore()) { self.store = store }
     var activeMovies: [Movie] { movies.filter { $0.deletedAt == nil } }
     func movie(_ id: UUID) -> Movie? { movies.first { $0.id == id } }
+    func prewarmCamera(movieID: UUID) {
+        guard let movie = movie(movieID) else { return }
+        let camera = camera
+        cameraWarmup?.cancel()
+        cameraWarmup = Task {
+            guard !Task.isCancelled else { return }
+            await camera.prepare(profile: movie.captureProfile, movieID: movieID,
+                dualCamera: movie.dualCameraCapture == true, layout: movie.preferredPiPLayout,
+                canvasFormat: movie.recordingFormat, enablePiP: movie.dualCameraCapture == true)
+        }
+    }
+    func cancelCameraWarmup() { cameraWarmup?.cancel(); cameraWarmup = nil }
     func load() async {
         guard !loading else { return }; loading = true
         defer { loading = false }

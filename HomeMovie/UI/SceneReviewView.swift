@@ -229,9 +229,16 @@ struct SceneReviewView: View {
     }
     private var lightComparisonControls: some View {
         HStack(spacing: 12) {
-            Button(comparing ? "Show Adjusted" : "Before") { comparing.toggle() }
-                .frame(minWidth: 44, minHeight: 44).disabled(!adjustments.isActive || busy)
-                .accessibilityHint("Compare against the selected look before light adjustments")
+            Text(comparing ? "Original" : "Hold Original")
+                .foregroundStyle(comparing ? .primary : .secondary)
+                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                .onLongPressGesture(minimumDuration: 0, pressing: { pressing in
+                    if !busy { comparing = pressing }
+                }, perform: {})
+                .accessibilityElement().accessibilityAddTraits(.isButton)
+                .accessibilityLabel(comparing ? "Show adjusted" : "Compare original light")
+                .accessibilityAction { comparing.toggle() }
+                .accessibilityHint("Hold to compare before light adjustments; the selected look stays applied")
             Button("Reset") { adjustments = .neutral; comparing = false }
                 .frame(minWidth: 44, minHeight: 44).disabled(!adjustments.isActive || busy)
         }
