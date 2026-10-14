@@ -71,6 +71,7 @@ struct CameraView: View {
     @State private var showingDollyHelp = false
     @State private var showingDollySettings = false
     @State private var showingPiPLayout = false
+    @State private var preparedPiPForSettings = false
     @State private var showingPiPCompatibility = false
     @State private var viewfinderSize = CGSize.zero
     @State private var pipDragStart: CGPoint?
@@ -239,13 +240,18 @@ struct CameraView: View {
         }) { RecordingRecoveryView().environmentObject(app) }
         .sheet(isPresented: $showingDollyHelp) { dollyHelp }
         .sheet(isPresented: $showingDollySettings) { dollySettings }
-        .sheet(isPresented: $showingPiPLayout) {
+        .sheet(isPresented: $showingPiPLayout, onDismiss: {
+            if preparedPiPForSettings {
+                preparedPiPForSettings = false
+                Task { await prepareCamera() }
+            }
+        }) {
             PiPLayoutView(layout: Binding(get: { camera.pipLayout }, set: { camera.updatePiPLayout($0, movieID: movieID) }),
                 format: movie?.recordingFormat ?? MovieFormat.captureFormat(angle: camera.options?.angle ?? 90) ?? .portrait,
                 rearFrames: camera.service.pipRearFrames, frontFrames: camera.service.pipPresenterFrames,
                 ready: camera.options?.piPAvailable == true, canPrepare: camera.options?.canPreparePiP == true,
                 logMode: movie?.captureProfile == .appleLog, obstacles: [],
-                onPrepare: { enableDualCamera() })
+                onPrepare: { preparePiPSettingsPreview() })
         }
         .sheet(isPresented: $showingPiPCompatibility) { pipCompatibility }
         .alert("Recording Details", isPresented: $showingErrorDetails) {
@@ -1064,6 +1070,22 @@ struct CameraView: View {
             }.navigationTitle("Picture-in-Picture").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showingPiPCompatibility = false } } }
         }.presentationDetents([.medium]).presentationDragIndicator(.visible)
+    }
+    private func preparePiPSettingsPreview() {
+        guard !camera.busy, !pipConfiguring, let movie, movie.captureProfile == .standard,
+              camera.options?.canPreparePiP == true, camera.options?.piPAvailable != true else { return }
+        pipConfiguring = true
+        preparedPiPForSettings = true
+        Task {
+            defer { pipConfiguring = false }
+            guard showingPiPLayout, scenePhase == .active else { return }
+            // Settings needs both live feeds even when PiP is off in the viewfinder.
+            // Do not dismiss the sheet, enable the inset or persist a Dual Camera choice.
+            await camera.prepare(profile: .standard, movieID: movieID, dualCamera: true,
+                layout: camera.pipLayout,
+                canvasFormat: movie.recordingFormat ?? MovieFormat.captureFormat(angle: camera.options?.angle ?? 90) ?? .portrait,
+                enablePiP: false)
+        }
     }
     private func enableDualCamera() {
         guard !camera.busy, !pipConfiguring, countdown == nil, let movie, movie.captureProfile == .standard, camera.options?.canPreparePiP == true else { return }

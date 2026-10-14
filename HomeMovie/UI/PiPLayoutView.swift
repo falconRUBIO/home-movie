@@ -86,7 +86,7 @@ struct PiPLayoutView: View {
                         if !ready {
                             Section {
                                 if logMode { Text(CameraCompatibility.logPiPExplanation) }
-                                else { Button("Use Dual Camera", action: onPrepare).disabled(!canPrepare) }
+                                else { Button("Retry Live Preview", action: onPrepare).disabled(!canPrepare) }
                             } footer: {
                                 Text(logMode ? "PiP is available in Standard movies." : canPrepare ? "Turn on both cameras for a live preview. PiP records at 1080p, 30 fps." : "Dual Camera is unavailable on this iPhone.")
                             }
@@ -97,6 +97,9 @@ struct PiPLayoutView: View {
             .navigationTitle("Picture in Picture").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }.presentationDetents([.large]).presentationDragIndicator(.visible)
+            .task {
+                if !ready, canPrepare, !logMode { onPrepare() }
+            }
     }
     private var preview: some View {
         ZStack {
