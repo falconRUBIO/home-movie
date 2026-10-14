@@ -161,9 +161,11 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         sessionLock.lock(); selectedSession = session; sessionLock.unlock()
     }
     private let queue = DispatchQueue(label: "HomeMovie.Capture", qos: .userInitiated)
-    private let output = AVCaptureMovieFileOutput()
-    private let standardVideo = AVCaptureVideoDataOutput()
-    private let standardAudio = AVCaptureAudioDataOutput()
+    // Construct capture outputs and enumerate MultiCam formats on the capture queue,
+    // rather than blocking SwiftUI while the camera model is created.
+    private lazy var output = AVCaptureMovieFileOutput()
+    private lazy var standardVideo = AVCaptureVideoDataOutput()
+    private lazy var standardAudio = AVCaptureAudioDataOutput()
     private let standardCopies = CaptureFrameCopy()
     private var previewHandoff: CameraPreviewHandoff?
     private var previewHandoffAnnounced = true
@@ -175,9 +177,9 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
     let liveFrames = LiveFrames()
     let pipRearFrames = LiveFrames()
     let pipPresenterFrames = LiveFrames()
-    private let piPCapable = SeamlessCapture.canPreparePiP()
+    private lazy var piPCapable = SeamlessCapture.canPreparePiP()
     private var dualCameraRequested = false
-    private let liveOutput = AVCaptureVideoDataOutput()
+    private lazy var liveOutput = AVCaptureVideoDataOutput()
     private let liveQueue = DispatchQueue(label: "HomeMovie.live-look", qos: .userInteractive)
     private var videoInput: AVCaptureDeviceInput?
     private var coordinator: AVCaptureDevice.RotationCoordinator?
@@ -322,10 +324,14 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         if session.isRunning { session.stopRunning() }
         seamless = nil
         selectSession(singleSession)
-        singleSession.beginConfiguration()
-        singleSession.inputs.forEach { singleSession.removeInput($0) }
-        singleSession.outputs.forEach { singleSession.removeOutput($0) }
-        singleSession.commitConfiguration()
+        // Ordinary capture clears and rebuilds in the single transaction below.
+        // Only clear the unused single-camera session separately when entering MultiCam.
+        if preparedForPiP {
+            singleSession.beginConfiguration()
+            singleSession.inputs.forEach { singleSession.removeInput($0) }
+            singleSession.outputs.forEach { singleSession.removeOutput($0) }
+            singleSession.commitConfiguration()
+        }
         if preparedForPiP, configuredProfile == .standard, let dual = SeamlessCapture(queue: queue, frames: liveFrames,
             rearFrames: pipRearFrames, presenterFrames: pipPresenterFrames, front: front, preparedForPiP: preparedForPiP,
             layout: pipLayout, canvasFormat: canvasFormat) {

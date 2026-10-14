@@ -93,9 +93,24 @@ struct RecordingFlipHandoff {
         self.app = app
         service.onEvent = { [weak self] event in Task { @MainActor in await self?.receive(event) } }
     }
+    private struct PreparationConfiguration: Equatable {
+        let profile: CaptureProfile
+        let movieID: UUID?
+        let dualCamera: Bool
+        let layout: PiPLayout
+        let canvasFormat: MovieFormat?
+        let enablePiP: Bool
+    }
+    private var preparationConfiguration: PreparationConfiguration?
     func prepare(profile: CaptureProfile = .standard, movieID: UUID? = nil, dualCamera: Bool = false,
                  layout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil, enablePiP: Bool = false) async {
         guard !busy else { return }
+        let configuration = PreparationConfiguration(profile: profile, movieID: movieID, dualCamera: dualCamera,
+            layout: layout, canvasFormat: canvasFormat, enablePiP: enablePiP)
+        // View presentation and foreground callbacks may request the same camera.
+        // Keep an in-flight or ready session instead of showing Preparing again.
+        if active, preparationConfiguration == configuration, state == .preparing || state == .ready { return }
+        preparationConfiguration = configuration
         let requestID = UUID(); preparationID = requestID
         if preferencesMovieID != movieID { pipPresentation = PiPPresentation() }
         preferencesMovieID = movieID; pipLayout = layout; pipSetupFailed = false; enablePiPWhenReady = enablePiP
