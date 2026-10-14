@@ -33,6 +33,10 @@ import UIKit
     }
 }
 @MainActor final class MovieAppDelegate: NSObject, UIApplicationDelegate {
+    func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
+        ReliabilityDiagnostics.shared.record(.lowMemory)
+    }
+
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         OrientationPolicy.shared.mask
     }

@@ -263,6 +263,7 @@ struct SettingsView: View {
                     LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                     LabeledContent("Build", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")
                 }
+                Section("Support") { NavigationLink("Diagnostics", destination: DiagnosticsView()) }
                 Section("Launch") { Toggle("Open last movie", isOn: $openLastMovie) }
                 Section { NavigationLink("Privacy", destination: PrivacyView()) }
                 Section("Protection") {

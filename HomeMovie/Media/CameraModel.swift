@@ -110,6 +110,7 @@ struct RecordingFlipHandoff {
         // View presentation and foreground callbacks may request the same camera.
         // Keep an in-flight or ready session instead of showing Preparing again.
         if active, preparationConfiguration == configuration, state == .preparing || state == .ready { return }
+        ReliabilityDiagnostics.shared.record(.cameraRequested)
         preparationConfiguration = configuration
         let requestID = UUID(); preparationID = requestID
         if preferencesMovieID != movieID { pipPresentation = PiPPresentation() }
@@ -132,6 +133,7 @@ struct RecordingFlipHandoff {
         activeMovieID = movieID; elapsedBeforeSegment = elapsed ?? .zero
         self.elapsed = elapsedBeforeSegment; beganAt = nil
         continuingRecording = elapsed != nil
+        ReliabilityDiagnostics.shared.record(.recordingRequested)
         state = .starting; savedScene = false; hasRecoverableTake = false; message = nil; startCancelled = false
         operation = Task {
             var pendingTicket: CaptureTicket?
@@ -151,6 +153,7 @@ struct RecordingFlipHandoff {
                 service.record(ticket: ticket, url: path, angle: angle)
                 pendingTicket = nil
             } catch {
+                ReliabilityDiagnostics.shared.record(.recordingFailed, error: error)
                 if let pendingTicket { try? await app.store.abandonUnstarted(pendingTicket) }
                 state = .failed; message = error.localizedDescription; endBackgroundTime()
             }
@@ -233,6 +236,7 @@ struct RecordingFlipHandoff {
     func receive(_ event: CaptureEvent) async {
         switch event {
         case .ready(let options):
+            if state == .preparing { ReliabilityDiagnostics.shared.record(.cameraReady) }
             self.options = options; rememberedFront = options.isFront
             if (state == .preparing || state == .ready), recordingFlip == nil, active, interruption == nil { state = .ready }
             if enablePiPWhenReady, options.piPAvailable, active, state == .ready {
@@ -254,6 +258,7 @@ struct RecordingFlipHandoff {
             guard activeSceneID == sceneID else { return }
             if state == .recording { return }
             guard active, !startCancelled, state == .starting, interruption == nil else { service.stop(); return }
+            ReliabilityDiagnostics.shared.record(.recordingStarted)
             state = .recording; beganAt = ProcessInfo.processInfo.systemUptime; elapsed = elapsedBeforeSegment
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
@@ -277,6 +282,7 @@ struct RecordingFlipHandoff {
                     return
                 }
                 recordingFlip = nil
+                ReliabilityDiagnostics.shared.record(.recordingFinished)
                 savedScene = true
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 state = active && interruption == nil ? .ready : .interrupted
@@ -288,16 +294,19 @@ struct RecordingFlipHandoff {
                     FileManager.default.fileExists(atPath: $0.store.root.appendingPathComponent(ticket.staging).path) ||
                     FileManager.default.fileExists(atPath: $0.store.root.appendingPathComponent(ticket.source).path)
                 } ?? false
+                ReliabilityDiagnostics.shared.record(.recordingFailed, error: error)
                 hasRecoverableTake = hasFile
                 if !hasFile { try? await app?.store.abandonUnstarted(ticket) }
                 message = error.localizedDescription
             }
         case .interrupted(let text):
+            ReliabilityDiagnostics.shared.record(.cameraInterrupted)
             switchingCamera = false
             recordingFlip = nil
             interruption = text; message = text; startCancelled = true
             if busy { state = .finalizing; beginBackgroundTime() } else { state = .interrupted }
         case .failed(let text):
+            ReliabilityDiagnostics.shared.record(.cameraFailed)
             switchingCamera = false
             recordingFlip = nil
             message = text

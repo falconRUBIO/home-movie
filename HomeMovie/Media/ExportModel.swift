@@ -60,6 +60,7 @@ import UIKit
         guard !running else { return }
         if committedMovieID == movie.id, committedRevision == movie.revision,
            let exportedURL, FileManager.default.fileExists(atPath: exportedURL.path) { return }
+        ReliabilityDiagnostics.shared.record(.exportRequested)
         exportedURL = nil; running = true; progress = 0; error = nil; notice = nil
         job = Task {
             var output: URL?
@@ -76,6 +77,7 @@ import UIKit
                     try Task.checkCancellation()
                     if let info = try? await MediaInspector.inspect(candidate), Self.matchesExport(info, movie: movie) {
                         try Task.checkCancellation()
+                        ReliabilityDiagnostics.shared.record(.exportFinished)
                         exportedURL = candidate; committedRevision = movie.revision; committedMovieID = movie.id
                         progress = 1; running = false; job = nil; return
                     }
@@ -103,8 +105,10 @@ import UIKit
                 guard Self.matchesExport(info, movie: movie) else {
                     throw HomeMovieError.message("The exported duration, frame size or audio did not match your movie. Please try again.")
                 }
+                ReliabilityDiagnostics.shared.record(.exportFinished)
                 exportedURL = destination; committedRevision = movie.revision; committedMovieID = movie.id; progress = 1
             } catch {
+                ReliabilityDiagnostics.shared.record(error is CancellationError || notice != nil ? .exportCancelled : .exportFailed, error: error)
                 if let output { try? FileManager.default.removeItem(at: output) }
                 if !(error is CancellationError) && notice == nil { self.error = error.localizedDescription }
             }
