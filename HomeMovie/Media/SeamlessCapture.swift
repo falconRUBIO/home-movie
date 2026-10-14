@@ -104,6 +104,9 @@ final class ContinuousTakePipeline: @unchecked Sendable {
     private let writer: ContinuousTakeWriter
     private let compositor = PiPFrameRenderer()
     private let writingQueue: DispatchQueue
+    private let onPiPFallback: (@Sendable () -> Void)?
+    private let renderPiP: ((CIImage, CGSize) -> CVPixelBuffer?)?
+    private var reportedPiPFallback = false // Writing queue only.
     private let videoSlot = DispatchSemaphore(value: 1)
     private let audioSlots = DispatchSemaphore(value: 8)
     private let callbackQueue: DispatchQueue
@@ -111,9 +114,12 @@ final class ContinuousTakePipeline: @unchecked Sendable {
     let outputURL: URL
     private(set) var finishing = false // Capture queue only.
     init(url: URL, angle: CGFloat, callbackQueue: DispatchQueue,
-         writingQueue: DispatchQueue = DispatchQueue(label: "HomeMovie.continuousWriter", qos: .userInitiated)) throws {
+         writingQueue: DispatchQueue = DispatchQueue(label: "HomeMovie.continuousWriter", qos: .userInitiated, autoreleaseFrequency: .workItem),
+         onPiPFallback: (@Sendable () -> Void)? = nil,
+         renderPiP: ((CIImage, CGSize) -> CVPixelBuffer?)? = nil) throws {
         writer = try ContinuousTakeWriter(url: url, angle: angle)
         canvas = writer.canvas; outputURL = url; self.callbackQueue = callbackQueue; self.writingQueue = writingQueue
+        self.onPiPFallback = onPiPFallback; self.renderPiP = renderPiP
     }
     @discardableResult func appendVideo(_ image: CVPixelBuffer, presenter: CVPixelBuffer?, presentation: PiPPresentation?,
                      at time: CMTime, angle: CGFloat, presenterAngle: CGFloat,
@@ -121,26 +127,35 @@ final class ContinuousTakePipeline: @unchecked Sendable {
         guard !finishing, videoSlot.wait(timeout: .now()) == .success else { return false }
         writingQueue.async { [self] in
             defer { videoSlot.signal() }
-            let accepted: Bool
-            if !writer.canAcceptVideo { accepted = false }
-            else if let presentation {
-                let composition = PiPCompositor.image(background: image, presenter: presenter, canvas: canvas,
-                    backgroundAngle: angle, presenterAngle: presenterAngle, presentation: presentation)
-                if let rendered = compositor.render(composition, canvas: canvas) {
-                    accepted = writer.appendRenderedVideo(rendered, at: time)
-                } else {
-                    accepted = writer.appendVideo(image, at: time, sourceAngle: angle)
-                }
-            } else { accepted = writer.appendVideo(image, at: time, sourceAngle: angle) }
-            let failure = writer.failure ?? (writer.writer.status == .failed ? writer.writer.error : nil)
-            callbackQueue.async { completion(accepted, failure) }
+            autoreleasepool {
+                let accepted: Bool
+                if !writer.canAcceptVideo { accepted = false }
+                else if let presentation {
+                    let composition = PiPCompositor.image(background: image, presenter: presenter, canvas: canvas,
+                        backgroundAngle: angle, presenterAngle: presenterAngle, presentation: presentation)
+                    let rendered: CVPixelBuffer?
+                    if let renderPiP { rendered = renderPiP(composition, canvas) }
+                    else { rendered = compositor.render(composition, canvas: canvas) }
+                    if let rendered {
+                        accepted = writer.appendRenderedVideo(rendered, at: time)
+                    } else {
+                        accepted = writer.appendVideo(image, at: time, sourceAngle: angle)
+                        if accepted, presentation.opacity > 0, !reportedPiPFallback {
+                            reportedPiPFallback = true
+                            if let onPiPFallback { callbackQueue.async(execute: onPiPFallback) }
+                        }
+                    }
+                } else { accepted = writer.appendVideo(image, at: time, sourceAngle: angle) }
+                let failure = writer.failure ?? (writer.writer.status == .failed ? writer.writer.error : nil)
+                callbackQueue.async { completion(accepted, failure) }
+            }
         }
         return true
     }
     func appendAudio(_ sample: CMSampleBuffer) {
         guard !finishing, audioSlots.wait(timeout: .now()) == .success else { return }
         writingQueue.async { [self] in
-            defer { audioSlots.signal() }; writer.appendAudio(sample)
+            defer { audioSlots.signal() }; autoreleasepool { writer.appendAudio(sample) }
         }
     }
     func finish(_ completion: @escaping @Sendable (Error?) -> Void) {
@@ -334,7 +349,10 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     }
     func record(ticket: CaptureTicket, url: URL, angle: CGFloat) throws {
         guard take == nil, session.isRunning else { throw HomeMovieError.message("The camera is not ready.") }
-        take = try ContinuousTakePipeline(url: url, angle: angle, callbackQueue: queue); self.ticket = ticket; announcedStart = false
+        take = try ContinuousTakePipeline(url: url, angle: angle, callbackQueue: queue,
+            onPiPFallback: { [weak self] in
+                self?.onNotice?("Some frames were saved without PiP because the inset could not render. Main video and audio continue.")
+            }); self.ticket = ticket; announcedStart = false
         let frontObserved = frontRotation?.videoRotationAngleForHorizonLevelCapture ?? angle
         let rearObserved = backRotation?.videoRotationAngleForHorizonLevelCapture ?? angle
         recordedPresenterAngle = (MovieFormat.captureFormat(angle: frontObserved) ?? .portrait).recordingAngle(observed: frontObserved)
