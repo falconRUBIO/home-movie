@@ -498,9 +498,9 @@ struct CameraView: View {
         Button(action: toggleDollyPlayback) {
             HStack(spacing: 6) {
                 Image(systemName: dollyCountdown.remaining != nil ? "xmark" : activeDolly == nil ? "play.fill" : "stop.fill")
-                Text(dollyCountdown.remaining != nil ? "Cancel" : activeDolly == nil ? "Start Dolly · \(DollyZoomDuration.validated(dollySeconds))s" : "Stop Dolly")
+                Text(dollyCountdown.remaining != nil ? "Cancel" : activeDolly == nil ? "Go" : "Stop")
             }.font(.caption.weight(.semibold)).foregroundStyle(.yellow)
-                .frame(minWidth: 108, minHeight: 44)
+                .frame(minWidth: 44, minHeight: 44)
                 .padding(.horizontal, 8)
                 .background(.white.opacity(0.1), in: Capsule())
         }.buttonStyle(DollyLensButtonStyle())
@@ -609,24 +609,13 @@ struct CameraView: View {
         }.preferredColorScheme(.dark).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
     }
     private func smoothZoomBar(options: CameraOptions) -> some View {
-        VStack(spacing: 4) {
-            HStack {
-                Text("Dolly").font(.caption.weight(.semibold))
-                Spacer()
-                Button {
-                    cancelCountdown(); camera.endSmoothZoom(); activeDolly = nil
-                    smoothZoomOpen = false
-                } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
-                .accessibilityLabel("Close Dolly")
-            }
+        VStack(spacing: 0) {
             dollyTrack(options: options)
                 .disabled(countdown != nil || activeDolly != nil)
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Start").foregroundStyle(.secondary)
-                    Text(zoomLabel(preparedDollyStart ?? options.zoom, multiplier: options.multiplier)).monospacedDigit()
-                }
-                Spacer()
+            HStack(spacing: 4) {
+                dollyStartDelayMenu
+                dollyDurationMenu.disabled(countdown != nil || activeDolly != nil)
+                Spacer(minLength: 0)
                 Button {
                     guard let start = preparedDollyStart, let end = preparedDollyTarget else { return }
                     preparedDollyStart = end; preparedDollyTarget = start
@@ -634,24 +623,35 @@ struct CameraView: View {
                     UISelectionFeedbackGenerator().selectionChanged()
                 } label: {
                     Image(systemName: (preparedDollyTarget ?? options.zoom) >= (preparedDollyStart ?? options.zoom) ? "arrow.right" : "arrow.left")
-                        .frame(width: 44, height: 44).background(.white.opacity(0.12), in: Circle())
-                }.accessibilityLabel("Reverse direction")
+                        .frame(width: 44, height: 44).background(.white.opacity(0.1), in: Circle())
+                }.accessibilityLabel("Reverse Dolly direction")
                     .disabled(countdown != nil || activeDolly != nil)
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("End").foregroundStyle(.secondary)
-                    Text(zoomLabel(preparedDollyTarget ?? options.maximum, multiplier: options.multiplier)).monospacedDigit()
-                }
+                dollyPlaybackButton
+                Button {
+                    cancelCountdown(); camera.endSmoothZoom(); activeDolly = nil; smoothZoomOpen = false
+                } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                .accessibilityLabel("Close Dolly")
             }.font(.caption)
-            HStack {
-                dollyStartDelayMenu
-                Spacer(minLength: 4)
-                dollyDurationMenu.disabled(countdown != nil || activeDolly != nil)
-            }
-            dollyPlaybackButton
-        }.padding(.horizontal, 12).padding(.bottom, 8)
+        }.padding(.horizontal, 8).padding(.vertical, 4)
             .contentShape(Rectangle()).onTapGesture { }
             .disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum)
+    }
+    private func dollyLensStops(options: CameraOptions) -> [CGFloat] {
+        // Familiar displayed zoom values, including digital stops beyond the lens range.
+        // Keep the hardware ceiling in More rather than presenting it as a native lens.
+        let displayed: [CGFloat] = [0.5, 1, 2, 4, 8]
+        return displayed.map { $0 / options.multiplier }
+            .filter { $0 >= options.minimum && $0 <= options.maximum }
+    }
+    private func chooseDollyLens(_ factor: CGFloat, options: CameraOptions) {
+        guard countdown == nil, activeDolly == nil else { return }
+        // A lens tap immediately shows that lens and updates the starting handle.
+        preparedDollyStart = factor
+        if preparedDollyTarget == nil || abs((preparedDollyTarget ?? factor) - factor) < 0.001 {
+            preparedDollyTarget = factor < options.maximum ? min(options.maximum, factor * 2) : options.minimum
+        }
+        camera.zoom(factor); camera.beginSmoothZoom()
+        UISelectionFeedbackGenerator().selectionChanged()
     }
     private func setDollyEndpoint(_ factor: CGFloat, start: Bool) {
         guard activeDolly == nil, countdown == nil else { return }
@@ -698,11 +698,25 @@ struct CameraView: View {
                     setDollyEndpoint(factor, start: draggingDollyStart == true)
                 }.onEnded { _ in draggingDollyStart = nil })
         }.frame(height: 44)
-        HStack {
-            Text(zoomLabel(options.minimum, multiplier: options.multiplier))
-            Spacer()
-            Text(zoomLabel(options.maximum, multiplier: options.multiplier))
-        }.font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            ForEach(dollyLensStops(options: options), id: \.self) { factor in
+                Button { chooseDollyLens(factor, options: options) } label: {
+                    Text(zoomLabel(factor, multiplier: options.multiplier))
+                        .font(.caption.monospacedDigit().weight(.medium))
+                        .foregroundStyle(abs(factor - options.zoom) < 0.06 ? .yellow : .white)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }.buttonStyle(DollyLensButtonStyle())
+                    .accessibilityLabel("Set starting lens to \(zoomLabel(factor, multiplier: options.multiplier))")
+            }
+            Menu {
+                ForEach(ExtendedZoomTargets.available(minimum: options.minimum, maximum: options.maximum,
+                    multiplier: options.multiplier), id: \.self) { factor in
+                    Button(zoomLabel(factor, multiplier: options.multiplier)) { chooseDollyLens(factor, options: options) }
+                }
+            } label: {
+                Image(systemName: "ellipsis").frame(width: 44, height: 44)
+            }.accessibilityLabel("More zoom values")
+        }.disabled(countdown != nil || activeDolly != nil)
     }
     private var dollyStartDelayMenu: some View {
         Menu {
@@ -719,7 +733,7 @@ struct CameraView: View {
         } label: {
             HStack(spacing: 3) {
                 Image(systemName: "timer")
-                Text(startDelay == 0 ? "Delay Off" : "Delay \(startDelay)s").monospacedDigit()
+                Text(startDelay == 0 ? "Off" : "\(startDelay)s").monospacedDigit()
             }.font(.caption.weight(.medium)).foregroundStyle(dollyDelayedStart ? .yellow : .white)
                 .frame(minWidth: 44, minHeight: 44)
         }.accessibilityLabel("Start delay")
@@ -737,7 +751,7 @@ struct CameraView: View {
                 }
             } label: {
                 HStack(spacing: 3) {
-                    Text("Duration \(DollyZoomDuration.validated(dollySeconds))s").monospacedDigit()
+                    Text("\(DollyZoomDuration.validated(dollySeconds))s").monospacedDigit()
                     Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
                 }.font(.caption.weight(.medium)).frame(minWidth: 44, minHeight: 44)
             }.accessibilityLabel("Dolly duration")
