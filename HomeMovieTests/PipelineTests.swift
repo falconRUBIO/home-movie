@@ -60,16 +60,19 @@ final class PipelineTests: XCTestCase {
         let original = try await MediaAssembler().build(movie: movie, root: store.root, showOriginalLog: true)
         XCTAssertEqual((original.videoComposition.instructions.first as? ColorInstruction)?.adjustments, .neutral)
     }
-    func testSuppliedLooksAreInstalledAndOriginalCinemaRemainsDefault() async throws {
+    func testOnlyOriginalCinemaIsInstalledAndRetiredSelectionFallsBack() async throws {
         let store = try await makeStore()
         let looks = await store.availableLooks()
-        XCTAssertTrue([LUTReference.filmica.id, LUTReference.cinemaTwo.id, LUTReference.cinemaThree.id].allSatisfy { id in looks.contains { $0.id == id } })
-        let movie = try await store.create(name: "Default look", format: .landscape, profile: .appleLog)
-        XCTAssertEqual(movie.look?.id, LUTReference.filmica.id)
-        for (reference, _) in LUTReference.additionalBundledLooks {
-            let cube = try ColorCube.load(reference, root: store.root)
-            XCTAssertEqual(cube.dimension, 65); try cube.validate()
-        }
+        XCTAssertEqual(looks.map(\.id), [LUTReference.filmica.id])
+        let movie = try await store.create(name: "Original look", format: .landscape, profile: .appleLog)
+        try await store.setLook(movieID: movie.id, look: .cinemaTwo)
+        let saved = await store.snapshot()
+        XCTAssertEqual(saved.first?.look?.id, LUTReference.filmica.id)
+        let original = try ColorCube.load(.filmica, root: store.root)
+        let retired = try ColorCube.load(.cinemaThree, root: store.root)
+        XCTAssertEqual(original.rgba, retired.rgba)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.root.appendingPathComponent(LUTReference.cinemaTwo.path).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.root.appendingPathComponent(LUTReference.cinemaThree.path).path))
     }
 
     func testFilmEffectsStandardPreviewAndExportShareRenderingWhileWatchStaysClean() async throws {
@@ -125,7 +128,7 @@ final class PipelineTests: XCTestCase {
         let sourceBytes = try Data(contentsOf: source)
         for format in [MovieFormat.landscape, .portrait] {
             var movie = Movie(name: "Short Log effects", format: format, profile: .appleLog)
-            movie.look = .cinemaTwo
+            movie.look = .filmica
             movie.scenes = [Scene(id: UUID(), sequence: 0, source: source.lastPathComponent,
                 capturedAt: Date(), timeZone: "UTC", sourceDuration: MediaTime(seconds: 0.4),
                 trimStart: MediaTime(seconds: 0), trimEnd: MediaTime(seconds: 0.4),
@@ -139,7 +142,7 @@ final class PipelineTests: XCTestCase {
             movie.filmEffects = effects
             let bundle = try await MediaAssembler().build(movie: movie, root: store.root, filmEffects: effects)
             let instruction = try XCTUnwrap(bundle.videoComposition.instructions.first as? ColorInstruction)
-            XCTAssertEqual(instruction.cube?.dimension, 65)
+            XCTAssertEqual(instruction.cube?.dimension, try ColorCube.filmica.get().dimension)
             XCTAssertTrue(instruction.adjustments.isActive)
             let destination = store.root.appendingPathComponent("short-log-\(format.rawValue).mp4")
             let session = try XCTUnwrap(AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality))

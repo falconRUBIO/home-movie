@@ -42,6 +42,47 @@ final class ContinuousCaptureTests: XCTestCase {
         XCTAssertNotEqual(withPiP.dataProvider?.data as Data?, withoutPiP.dataProvider?.data as Data?)
     }
 
+    func testPiPRenderFailurePreservesMovieAndAudioAndReportsOnce() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let fallback = expectation(description: "One warning for the take")
+        fallback.assertForOverFulfill = true
+        let take = try ContinuousTakePipeline(url: url, angle: 0,
+            callbackQueue: DispatchQueue(label: "test.pipelineFallback"),
+            onPiPFallback: { fallback.fulfill() }, renderPiP: { _, _ in nil })
+        let rear = try frame(red: true), front = try frame(red: false)
+        let presentation = PiPPresentation(rect: CGRect(x: 0.65, y: 0.65, width: 0.3, height: 0.3), opacity: 1, enabled: true)
+        for index in 0..<12 {
+            let time = CMTime(value: Int64(300 + index), timescale: 30)
+            var written = false
+            for _ in 0..<100 {
+                written = await withCheckedContinuation { continuation in
+                    let admitted = take.appendVideo(rear, presenter: front, presentation: presentation,
+                        at: time, angle: 0, presenterAngle: 0) { accepted, error in
+                            XCTAssertNil(error); continuation.resume(returning: accepted)
+                        }
+                    if !admitted { continuation.resume(returning: false) }
+                }
+                if written { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(written)
+            take.appendAudio(try audio(at: time))
+        }
+        let finished = expectation(description: "Asynchronous movie and audio finish")
+        take.finish { error in XCTAssertNil(error); finished.fulfill() }
+        await fulfillment(of: [finished, fallback], timeout: 30)
+        let asset = AVURLAsset(url: url)
+        let videos = try await asset.loadTracks(withMediaType: .video)
+        let audios = try await asset.loadTracks(withMediaType: .audio)
+        XCTAssertEqual(videos.count, 1); XCTAssertEqual(audios.count, 1)
+        let range = try await XCTUnwrap(audios.first).load(.timeRange)
+        XCTAssertGreaterThanOrEqual(range.duration.seconds, 0.35)
+        let generator = AVAssetImageGenerator(asset: asset)
+        let decoded = try await generator.image(at: CMTime(value: 8, timescale: 30)).image
+        XCTAssertEqual(decoded.width, 1920); XCTAssertEqual(decoded.height, 1080)
+    }
+
     func testSingleWriterKeepsAudioAcrossOrdinaryFlipAndMissingVideoFrames() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
         defer { try? FileManager.default.removeItem(at: url) }

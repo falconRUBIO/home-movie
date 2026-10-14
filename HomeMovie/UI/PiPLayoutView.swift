@@ -1,6 +1,7 @@
 import SwiftUI
 import MetalKit
 import CoreImage
+import UIKit
 
 struct PiPControl: View {
     let enabled: Bool
@@ -50,8 +51,8 @@ struct PiPLayoutView: View {
                     .frame(height: geometry.size.height * (format == .portrait ? 0.49 : 0.38))
                     .background(Color.black)
                     Form {
-                        Section {
-                            Picker("Framing", selection: $layout.orientation) {
+                        Section("Framing") {
+                            Picker("Orientation", selection: $layout.orientation) {
                                 ForEach(PiPOrientation.allCases) { orientation in
                                     Text(orientation.title).tag(orientation)
                                 }
@@ -72,21 +73,31 @@ struct PiPLayoutView: View {
                                     Text("Closer")
                                 }.font(.caption).foregroundStyle(.secondary)
                             }
-                        } header: { Text("Front Camera") } footer: {
-                            Text("Frame yourself without turning your iPhone. The main video stays the same.")
                         }
-                        Section("Inset") {
+                        Section("Size") {
                             Picker("Size", selection: $layout.size) {
                                 ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
                             }.pickerStyle(.segmented)
-                            Picker("Position", selection: $layout.corner) {
-                                ForEach(PiPCorner.allCases) { corner in Text(corner.title).tag(corner) }
+                        }
+                        Section("Position") {
+                            HStack(spacing: 12) {
+                                ForEach(PiPCorner.allCases) { corner in
+                                    Button { layout.corner = corner; UISelectionFeedbackGenerator().selectionChanged() } label: {
+                                        ZStack(alignment: alignment(for: corner)) {
+                                            RoundedRectangle(cornerRadius: 5).strokeBorder(.secondary.opacity(0.5), lineWidth: 1)
+                                            RoundedRectangle(cornerRadius: 2).fill(layout.corner == corner ? Color.accentColor : Color.secondary)
+                                                .frame(width: 16, height: 12).padding(5)
+                                        }.frame(width: 48, height: 36).frame(maxWidth: .infinity, minHeight: 44)
+                                            .background(layout.corner == corner ? Color.accentColor.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                                    }.buttonStyle(.plain).accessibilityLabel(corner.title)
+                                        .accessibilityAddTraits(layout.corner == corner ? .isSelected : [])
+                                }
                             }
                         }
                         if !ready {
                             Section {
                                 if logMode { Text(CameraCompatibility.logPiPExplanation) }
-                                else { Button("Use Dual Camera", action: onPrepare).disabled(!canPrepare) }
+                                else { Button("Retry Live Preview", action: onPrepare).disabled(!canPrepare) }
                             } footer: {
                                 Text(logMode ? "PiP is available in Standard movies." : canPrepare ? "Turn on both cameras for a live preview. PiP records at 1080p, 30 fps." : "Dual Camera is unavailable on this iPhone.")
                             }
@@ -97,6 +108,17 @@ struct PiPLayoutView: View {
             .navigationTitle("Picture in Picture").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }.presentationDetents([.large]).presentationDragIndicator(.visible)
+            .task {
+                if !ready, canPrepare, !logMode { onPrepare() }
+            }
+    }
+    private func alignment(for corner: PiPCorner) -> Alignment {
+        switch corner {
+        case .topLeft: .topLeading
+        case .topRight: .topTrailing
+        case .bottomLeft: .bottomLeading
+        case .bottomRight: .bottomTrailing
+        }
     }
     private var preview: some View {
         ZStack {

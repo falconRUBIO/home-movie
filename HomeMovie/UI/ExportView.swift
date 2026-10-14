@@ -21,15 +21,22 @@ struct ExportView: View {
                     } footer: { Text("Keep Home Movie open while exporting.") }
                 } else if export.exportedURL != nil {
                     Section {
+                        Label("Movie Ready", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                         Button("Save to Photos", systemImage: "photo") {
                             savingPhotos = true
                             Task { await export.saveToPhotos(); savingPhotos = false }
                         }.disabled(savingPhotos)
-                        Button("Save to Files", systemImage: "folder") { savingFiles = true }.disabled(savingPhotos)
                         Button("Share Video", systemImage: "square.and.arrow.up") { sharing = true }.disabled(savingPhotos)
+                        Button("Save to Files", systemImage: "folder") { savingFiles = true }.disabled(savingPhotos)
                     }
                 } else {
-                    Section { Button("Export Movie") { export.start(movie: currentMovie, app: app) } }
+                    Section {
+                        Button { export.start(movie: currentMovie, app: app) } label: {
+                            Label("Export Movie", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+                            .disabled(currentMovie.activeScenes.isEmpty)
+                    }
                 }
 
                 Section {
@@ -41,11 +48,9 @@ struct ExportView: View {
                 Section {
                     Button { detent = .large; showingEffects = true } label: {
                         HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Film Effects").foregroundStyle(.primary)
-                                Text(currentMovie.exportEffects.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                            }
+                            Text("Film Effects").foregroundStyle(.primary)
                             Spacer()
+                            Text(currentMovie.exportEffects.summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
                         }.padding(.vertical, 2)
                     }.disabled(export.running || savingPhotos || currentMovie.activeScenes.isEmpty)
