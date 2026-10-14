@@ -64,6 +64,7 @@ struct CameraView: View {
     @State private var zoomDragging = false
     @StateObject private var recordingCountdown = RecordingCountdown()
     @StateObject private var dollyCountdown = RecordingCountdown()
+    @State private var draggingDollyStart: Bool?
     @State private var preparedDollyStart: CGFloat?
     @State private var preparedDollyTarget: CGFloat?
     @State private var activeDolly: DollyZoomRoute?
@@ -192,7 +193,7 @@ struct CameraView: View {
         configuredCamera
         .onChange(of: camera.state) { _, state in
             if state == .starting { addedSceneID = nil }
-            if state != .ready && state != .recording { dollyCountdown.cancel() }
+            if state != .ready && state != .recording && state != .starting { dollyCountdown.cancel() }
             if state == .failed || state == .interrupted || state == .denied || state == .preparing {
                 cancelCountdown()
             }
@@ -357,14 +358,15 @@ struct CameraView: View {
         if let options = camera.options, !options.lenses.isEmpty {
             VStack(spacing: 0) {
                 if smoothZoomOpen {
-                    dollyGuidance(options: options)
                     smoothZoomBar(options: options)
                 }
+                if !smoothZoomOpen {
                 ViewThatFits(in: .horizontal) {
                     lensButtons(options: options)
                     ScrollView(.horizontal) { lensButtons(options: options) }
                         .scrollIndicators(.hidden).frame(height: dynamicTypeSize.isAccessibilitySize ? 64 : 44)
                 }.padding(4)
+                }
             }.dollyControlGlass().frame(maxWidth: 360)
         }
     }
@@ -381,6 +383,7 @@ struct CameraView: View {
                     else {
                         syncSmoothPosition(); smoothZoomOpen = true
                         preparedDollyStart = options.zoom
+                        preparedDollyTarget = options.zoom < options.maximum ? min(options.maximum, options.zoom * 2) : options.minimum
                         camera.beginSmoothZoom()
                         UISelectionFeedbackGenerator().selectionChanged()
                     }
@@ -418,7 +421,7 @@ struct CameraView: View {
             UIAccessibility.post(notification: .announcement, argument: "Dolly complete")
         }
         activeDolly = nil
-        if smoothZoomOpen { preparedDollyStart = camera.options?.zoom }
+        // Keep both endpoints available for reversing or repeating the move.
     }
     private func lensButton(label: String, factor: CGFloat, options: CameraOptions) -> some View {
         let selected = abs(factor - options.zoom) < 0.06
@@ -481,12 +484,12 @@ struct CameraView: View {
             UIAccessibility.post(notification: .announcement, argument: "Dolly stopped")
         } else if let target = preparedDollyTarget {
             let seconds = DollyZoomDuration.validated(dollySeconds)
+            if let start = preparedDollyStart { camera.zoom(start); camera.beginSmoothZoom() }
             dollyCountdown.start(seconds: startDelay, canStart: {
                 smoothZoomOpen && scenePhase == .active && !camera.switchingCamera &&
-                    (camera.state == .ready || camera.state == .recording) &&
+                    (camera.state == .ready || camera.state == .starting || camera.state == .recording) &&
                     preparedDollyTarget == target
             }, onStart: {
-                preparedDollyStart = nil; preparedDollyTarget = nil
                 beginDolly(to: target, seconds: seconds)
             })
         }
@@ -495,7 +498,7 @@ struct CameraView: View {
         Button(action: toggleDollyPlayback) {
             HStack(spacing: 6) {
                 Image(systemName: dollyCountdown.remaining != nil ? "xmark" : activeDolly == nil ? "play.fill" : "stop.fill")
-                Text(dollyCountdown.remaining != nil ? "Cancel" : activeDolly == nil ? "Start Dolly" : "Stop Dolly")
+                Text(dollyCountdown.remaining != nil ? "Cancel" : activeDolly == nil ? "Start Dolly · \(DollyZoomDuration.validated(dollySeconds))s" : "Stop Dolly")
             }.font(.caption.weight(.semibold)).foregroundStyle(.yellow)
                 .frame(minWidth: 108, minHeight: 44)
                 .padding(.horizontal, 8)
@@ -503,13 +506,13 @@ struct CameraView: View {
         }.buttonStyle(DollyLensButtonStyle())
             .disabled(recordingCountdown.remaining != nil || camera.switchingCamera ||
                 camera.state != .ready && camera.state != .recording ||
-                activeDolly == nil && preparedDollyTarget == nil)
+                activeDolly == nil && (preparedDollyTarget == nil || abs((preparedDollyTarget ?? 0) - (preparedDollyStart ?? 0)) < 0.001))
             .accessibilityLabel(dollyCountdown.remaining != nil ? "Cancel Dolly countdown" : activeDolly == nil ? "Start Dolly" : "Stop Dolly")
             .accessibilityHint("Controls the zoom move. Recording is controlled separately.")
     }
     private func beginDolly(to target: CGFloat, seconds: Int) {
         guard let options = camera.options else { return }
-        activeDolly = DollyZoomRoute(start: Double(options.zoom), destination: Double(target), seconds: seconds)
+        activeDolly = DollyZoomRoute(start: Double(preparedDollyStart ?? options.zoom), destination: Double(target), seconds: seconds)
         camera.dollyZoom(to: target, seconds: seconds)
         if activeDolly != nil {
             UIAccessibility.post(notification: .announcement, argument: "Dolly to \(zoomLabel(target, multiplier: options.multiplier)), \(DollyZoomDuration.validated(seconds)) seconds")
@@ -583,10 +586,10 @@ struct CameraView: View {
         NavigationStack {
             List {
                 Section("Move between lenses") {
-                    Text("Open Dolly at your current zoom, choose a destination lens, then tap Start Dolly. Selecting a lens does not move the camera. The outlined lens is your destination; the dot shows actual zoom.")
-                    Text("Start Dolly becomes Stop Dolly during a move. Stop holds the current zoom. Choosing a different lens stops the move and selects the next destination; tap Start Dolly to move again.")
-                    Text("Dragging or pinching always controls zoom immediately. It takes over from an automatic move and clears the selected destination. Choose a lens again for another automatic move.")
-                    Text("Record controls recording; Start Dolly controls the zoom move. Delay waits before either starts; Move sets the zoom duration. During a take, Start Dolly counts down without interrupting recording. Tap Cancel to cancel that countdown, or the red Stop button to end the take.")
+                    Text("Drag the Start and End handles on the full zoom scale. The preview shows Start. Tap the circular arrow to reverse direction, then tap Start Dolly. The small moving dot shows actual zoom.")
+                    Text("Start Dolly becomes Stop Dolly during a move. Stop holds the current zoom. Reverse Direction swaps Start and End and shows the new starting frame.")
+                    Text("Dragging Start changes the preview. Dragging End chooses the destination without moving the preview. Pinching the video takes over manual zoom.")
+                    Text("Record controls recording; Start Dolly controls the zoom move. Delay waits only before the Dolly move; recording starts immediately. Duration sets the zoom duration. During a take, Start Dolly counts down without interrupting recording. Tap Cancel to cancel that countdown, or the red Stop button to end the take.")
                     Text("Tap the video to focus, including during a Dolly move. Lens and Dolly controls adjust zoom without changing focus.")
                 }
                 Section("Automatic duration") {
@@ -596,7 +599,7 @@ struct CameraView: View {
                     Text("Drag faster or slower to control zoom. Slow gives a gentler response, Normal is balanced, and Fast responds more quickly. This setting does not change the automatic duration.")
                 }
                 Section("Start Delay") {
-                    Text("The timer on the left sets an optional 3, 5 or 7 second delay before recording. The duration on the right controls the Dolly move itself. The delay applies to Record only while Dolly is open. Your selected destination stays ready; tap Start Dolly after recording begins. Start Dolly uses the same delay, while recording continues. Tap Start Dolly again to cancel the pending move without stopping recording.")
+                    Text("Delay sets an optional 3, 5 or 7 second wait before the Dolly move. Duration controls the move itself. Record starts immediately, including during a Dolly countdown. Tap Start Dolly again to cancel the pending move without stopping recording.")
                 }
                 Section {
                     Button("Show Dolly Tips Again") { dollyGuidanceLearned = false; showingDollyHelp = false }
@@ -606,95 +609,100 @@ struct CameraView: View {
         }.preferredColorScheme(.dark).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
     }
     private func smoothZoomBar(options: CameraOptions) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
+        VStack(spacing: 4) {
+            HStack {
+                Text("Dolly").font(.caption.weight(.semibold))
+                Spacer()
+                Button {
+                    cancelCountdown(); camera.endSmoothZoom(); activeDolly = nil
+                    smoothZoomOpen = false
+                } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                .accessibilityLabel("Close Dolly")
+            }
+            dollyTrack(options: options)
+                .disabled(countdown != nil || activeDolly != nil)
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Start").foregroundStyle(.secondary)
+                    Text(zoomLabel(preparedDollyStart ?? options.zoom, multiplier: options.multiplier)).monospacedDigit()
+                }
+                Spacer()
+                Button {
+                    guard let start = preparedDollyStart, let end = preparedDollyTarget else { return }
+                    preparedDollyStart = end; preparedDollyTarget = start
+                    camera.zoom(end); camera.beginSmoothZoom()
+                    UISelectionFeedbackGenerator().selectionChanged()
+                } label: {
+                    Image(systemName: (preparedDollyTarget ?? options.zoom) >= (preparedDollyStart ?? options.zoom) ? "arrow.right" : "arrow.left")
+                        .frame(width: 44, height: 44).background(.white.opacity(0.12), in: Circle())
+                }.accessibilityLabel("Reverse direction")
+                    .disabled(countdown != nil || activeDolly != nil)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("End").foregroundStyle(.secondary)
+                    Text(zoomLabel(preparedDollyTarget ?? options.maximum, multiplier: options.multiplier)).monospacedDigit()
+                }
+            }.font(.caption)
+            HStack {
                 dollyStartDelayMenu
-                dollyZoomValue(options: options).disabled(countdown != nil)
-                dollyTrack(options: options).frame(minWidth: 88).disabled(countdown != nil)
-                dollyDurationMenu.disabled(countdown != nil)
-                dollyPlaybackButton
+                Spacer(minLength: 4)
+                dollyDurationMenu.disabled(countdown != nil || activeDolly != nil)
             }
-            VStack(spacing: 0) {
-                HStack {
-                    dollyStartDelayMenu
-                    dollyZoomValue(options: options).disabled(countdown != nil)
-                    Spacer(minLength: 8)
-                    dollyDurationMenu.disabled(countdown != nil)
-                }
-                HStack(spacing: 8) {
-                    dollyTrack(options: options).disabled(countdown != nil)
-                    dollyPlaybackButton
-                }
-            }
-        }.padding(.horizontal, 12).padding(.vertical, 5)
+            dollyPlaybackButton
+        }.padding(.horizontal, 12).padding(.bottom, 8)
             .contentShape(Rectangle()).onTapGesture { }
-            .frame(maxWidth: 360).disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum || recordingCountdown.remaining != nil)
+            .disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum)
     }
-    private func dollyZoomValue(options: CameraOptions) -> some View {
-        Menu {
-            Section("Zoom") {
-                ForEach(options.lenses.filter { $0.factor >= options.minimum && $0.factor <= options.maximum }) { lens in
-                    Button(lens.label) { selectLens(lens.factor) }
-                }
-            }
-            Section("Extended zoom") {
-                ForEach(ExtendedZoomTargets.available(minimum: options.minimum, maximum: options.maximum,
-                    multiplier: options.multiplier), id: \.self) { factor in
-                    Button(zoomLabel(factor, multiplier: options.multiplier)) { selectLens(factor) }
-                }
-            }
-        } label: {
-            Text(zoomLabel(options.zoom, multiplier: options.multiplier))
-                .font(.caption.monospacedDigit()).frame(minWidth: 42, minHeight: 44)
-        }.accessibilityLabel("Zoom target")
-            .accessibilityValue(zoomLabel(options.zoom, multiplier: options.multiplier))
-            .accessibilityHint("Choose a destination without moving. Tap Start Dolly to start using the selected duration.")
+    private func setDollyEndpoint(_ factor: CGFloat, start: Bool) {
+        guard activeDolly == nil, countdown == nil else { return }
+        if start {
+            preparedDollyStart = factor
+            camera.zoom(factor); camera.beginSmoothZoom()
+        } else { preparedDollyTarget = factor }
     }
-    private func dollyTrack(options: CameraOptions) -> some View {
-            GeometryReader { geometry in
-                let width = max(1, geometry.size.width - 16)
-                let actualPosition = SmoothZoomFilter.position(Double(options.zoom), minimum: Double(options.minimum), maximum: Double(options.maximum))
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.3)).frame(height: 2).padding(.horizontal, 8)
-                    if let route = displayedDolly {
-                        let start = SmoothZoomFilter.position(route.start, minimum: Double(options.minimum), maximum: Double(options.maximum))
-                        let end = SmoothZoomFilter.position(route.destination, minimum: Double(options.minimum), maximum: Double(options.maximum))
-                        Capsule().fill(.yellow.opacity(0.25)).frame(width: max(2, CGFloat(abs(end - start)) * width), height: 3)
-                            .offset(x: 8 + CGFloat(min(start, end)) * width)
-                        if activeDolly != nil {
-                            let reached = start + (end - start) * route.progress(at: Double(options.zoom))
-                            Capsule().fill(.yellow).frame(width: max(2, CGFloat(abs(reached - start)) * width), height: 3)
-                                .offset(x: 8 + CGFloat(min(start, reached)) * width)
+    @ViewBuilder private func dollyTrack(options: CameraOptions) -> some View {
+        GeometryReader { geometry in
+            let width = max(1, geometry.size.width - 44)
+            let start = preparedDollyStart ?? options.zoom
+            let end = preparedDollyTarget ?? options.maximum
+            let a = CGFloat(SmoothZoomFilter.position(Double(start), minimum: Double(options.minimum), maximum: Double(options.maximum)))
+            let b = CGFloat(SmoothZoomFilter.position(Double(end), minimum: Double(options.minimum), maximum: Double(options.maximum)))
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.3)).frame(height: 3).padding(.horizontal, 22)
+                Capsule().fill(.yellow).frame(width: max(2, abs(b - a) * width), height: 3)
+                    .offset(x: 22 + min(a, b) * width)
+                ForEach(options.lenses.filter { $0.factor > options.minimum && $0.factor < options.maximum }) { lens in
+                    Rectangle().fill(.white.opacity(0.5)).frame(width: 1, height: 8)
+                        .offset(x: 22 + CGFloat(SmoothZoomFilter.position(Double(lens.factor), minimum: Double(options.minimum), maximum: Double(options.maximum))) * width)
+                }
+                ForEach([true, false], id: \.self) { isStart in
+                    Circle().fill(isStart ? Color.white : Color.yellow).frame(width: 22, height: 22)
+                        .overlay(Text(isStart ? "S" : "E").font(.system(size: 10, weight: .bold)).foregroundStyle(.black))
+                        .offset(x: 11 + (isStart ? a : b) * width)
+                        .accessibilityElement().accessibilityLabel(isStart ? "Start zoom" : "End zoom")
+                        .accessibilityValue(zoomLabel(isStart ? start : end, multiplier: options.multiplier))
+                        .accessibilityAdjustableAction { direction in
+                            let value = (isStart ? start : end) * CGFloat(pow(2, direction == .increment ? 0.1 : -0.1))
+                            setDollyEndpoint(min(options.maximum, max(options.minimum, value)), start: isStart)
                         }
-                        Circle().strokeBorder(.yellow, lineWidth: 1.5).frame(width: 8, height: 8)
-                            .offset(x: 4 + CGFloat(end) * width)
-                    }
-                    ForEach(options.lenses.filter { $0.factor >= options.minimum && $0.factor <= options.maximum }) { lens in
-                        Rectangle().fill(.white.opacity(0.45)).frame(width: 1, height: 6)
-                            .offset(x: 8 + CGFloat(SmoothZoomFilter.position(Double(lens.factor), minimum: Double(options.minimum), maximum: Double(options.maximum))) * width)
-                    }
-                    if let target = preparedDollyTarget, activeDolly == nil {
-                        Circle().strokeBorder(.yellow, lineWidth: 2).frame(width: 18, height: 18)
-                            .offset(x: CGFloat(SmoothZoomFilter.position(Double(target), minimum: Double(options.minimum), maximum: Double(options.maximum))) * width - 1)
-                    }
-                    Circle().fill(activeDolly == nil ? .white : .yellow).frame(width: 14, height: 14)
-                        .offset(x: 1 + CGFloat(actualPosition) * width)
-                }.frame(height: 44).contentShape(Rectangle())
-                    .animation(reduceMotion ? nil : .linear(duration: 0.05), value: actualPosition)
-                    .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                        zoomDragging = true
-                        setSmoothPosition(Double((value.location.x - 8) / width), options: options, inputTime: value.time.timeIntervalSinceReferenceDate)
-                    }.onEnded { value in
-                        setSmoothPosition(Double((value.location.x - 8) / width), options: options, inputTime: value.time.timeIntervalSinceReferenceDate, inputEnded: true)
-                        zoomDragging = false
-                    })
-            }.frame(height: 44)
-                .accessibilityElement(children: .ignore).accessibilityLabel("Zoom")
-                .accessibilityValue(String(format: "%.1f times", Double(options.zoom * options.multiplier)))
-                .accessibilityAdjustableAction { direction in
-                    let factor = Double(options.zoom) * pow(2, direction == .increment ? 0.05 : -0.05)
-                    setSmoothPosition(SmoothZoomFilter.position(factor, minimum: Double(options.minimum), maximum: Double(options.maximum)), options: options)
                 }
+                if activeDolly != nil {
+                    Circle().fill(.yellow).frame(width: 6, height: 6)
+                        .offset(x: 19 + CGFloat(SmoothZoomFilter.position(Double(options.zoom), minimum: Double(options.minimum), maximum: Double(options.maximum))) * width, y: -16)
+                }
+            }.frame(height: 44).contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                    let position = min(1, max(0, (value.location.x - 22) / width))
+                    if draggingDollyStart == nil { draggingDollyStart = abs(position - a) <= abs(position - b) }
+                    let factor = options.minimum * CGFloat(pow(Double(options.maximum / options.minimum), Double(position)))
+                    setDollyEndpoint(factor, start: draggingDollyStart == true)
+                }.onEnded { _ in draggingDollyStart = nil })
+        }.frame(height: 44)
+        HStack {
+            Text(zoomLabel(options.minimum, multiplier: options.multiplier))
+            Spacer()
+            Text(zoomLabel(options.maximum, multiplier: options.multiplier))
+        }.font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
     }
     private var dollyStartDelayMenu: some View {
         Menu {
@@ -716,7 +724,7 @@ struct CameraView: View {
                 .frame(minWidth: 44, minHeight: 44)
         }.accessibilityLabel("Start delay")
             .accessibilityValue(startDelay == 0 ? "Off" : "\(startDelay) seconds")
-            .accessibilityHint("Wait before Record or Play starts. During recording, Play delays only the Dolly move.")
+            .accessibilityHint("Wait before the Dolly move starts. Recording always starts immediately.")
             .disabled(camera.state != .ready && camera.state != .recording || countdown != nil)
     }
     private var dollyDurationMenu: some View {
@@ -729,7 +737,7 @@ struct CameraView: View {
                 }
             } label: {
                 HStack(spacing: 3) {
-                    Text("Move \(DollyZoomDuration.validated(dollySeconds))s").monospacedDigit()
+                    Text("Duration \(DollyZoomDuration.validated(dollySeconds))s").monospacedDigit()
                     Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
                 }.font(.caption.weight(.medium)).frame(minWidth: 44, minHeight: 44)
             }.accessibilityLabel("Dolly duration")
@@ -873,7 +881,6 @@ struct CameraView: View {
             }
         }.buttonStyle(.plain)
             .disabled(camera.switchingCamera && !camera.recordingSessionActive || pipConfiguring || undoingTake ||
-                dollyCountdown.remaining != nil && !camera.recordingSessionActive ||
                 !camera.recordingSessionActive && camera.state != .ready)
             .opacity(!camera.recordingSessionActive && camera.state != .ready ? 0.4 : 1)
             .accessibilityLabel(recordingCountdown.remaining != nil ? "Cancel recording countdown" : camera.state == .starting ? "Cancel starting recording" : camera.state == .finalizing ? "Saving recording" : camera.recordingSessionActive ? "Stop recording" : "Record next scene")
@@ -968,13 +975,8 @@ struct CameraView: View {
         String(format: "%g×", Double((factor * multiplier * 10).rounded() / 10))
     }
     private func startRecording() {
-        guard !pipConfiguring, camera.state == .ready, countdown == nil, scenePhase == .active else { return }
-        guard dollyDelayedStart else { camera.record(movieID: movieID); return }
-        recordingCountdown.start(seconds: startDelay, canStart: {
-            camera.state == .ready && scenePhase == .active
-        }, onStart: {
-            camera.record(movieID: movieID)
-        })
+        guard !pipConfiguring, camera.state == .ready, recordingCountdown.remaining == nil, scenePhase == .active else { return }
+        camera.record(movieID: movieID)
     }
     private func cancelCountdown() {
         recordingCountdown.cancel(); dollyCountdown.cancel()
