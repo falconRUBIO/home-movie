@@ -333,6 +333,31 @@ actor ProjectStore {
         guard next.movies[m].scenes[c].validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
         next.movies[m].revision += 1; try write(next)
     }
+    /// Move an active scene to the target's position without altering any clip media or edits.
+    func moveScene(movieID: UUID, sceneID: UUID, to targetID: UUID) throws {
+        try requireIdle()
+        let m = try index(movieID)
+        var ordered = catalog.movies[m].activeScenes
+        guard catalog.movies[m].deletedAt == nil,
+              let source = ordered.firstIndex(where: { $0.id == sceneID }),
+              let target = ordered.firstIndex(where: { $0.id == targetID }) else {
+            throw HomeMovieError.message("This scene is no longer available.")
+        }
+        guard source != target else { return }
+        let moved = ordered.remove(at: source)
+        ordered.insert(moved, at: target)
+        // Reuse active sequence slots so deleted scenes retain unique positions for restore.
+        let positions = catalog.movies[m].activeScenes.map(\.sequence)
+        var next = catalog
+        for (offset, scene) in ordered.enumerated() {
+            if let index = next.movies[m].scenes.firstIndex(where: { $0.id == scene.id }) {
+                next.movies[m].scenes[index].sequence = positions[offset]
+            }
+        }
+        next.movies[m].revision += 1
+        try write(next)
+    }
+
     func undoLastTake(movieID: UUID, expectedSceneID: UUID) throws {
         try requireIdle()
         let m = try index(movieID)

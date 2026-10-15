@@ -5,6 +5,35 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    @MainActor func testSceneReorderingPersistsAndPreservesDeletedScenes() async throws {
+        let store = try await makeStore()
+        let project = try await store.create(name: "Reordering", format: .landscape)
+        for _ in 0..<3 { _ = try await record(project, into: store) }
+        let snapshots = await store.snapshot()
+        let original = try XCTUnwrap(snapshots.first)
+        let scenes = original.activeScenes
+        try await store.setSceneDeleted(movieID: project.id, sceneID: scenes[1].id, deleted: true)
+        try await store.moveScene(movieID: project.id, sceneID: scenes[2].id, to: scenes[0].id)
+        let reopened = ProjectStore(root: store.root)
+        _ = try await reopened.load()
+        let saved = await reopened.snapshot()
+        let moved = try XCTUnwrap(saved.first)
+        XCTAssertEqual(moved.activeScenes.map(\.id), [scenes[2].id, scenes[0].id])
+        XCTAssertGreaterThan(moved.revision, original.revision)
+        XCTAssertEqual(Set(moved.scenes.map(\.sequence)).count, 3)
+        for scene in scenes {
+            var expected = scene
+            let actual = try XCTUnwrap(moved.scenes.first { $0.id == scene.id })
+            expected.sequence = actual.sequence
+            expected.deletedAt = actual.deletedAt
+            XCTAssertEqual(actual, expected, "Reordering must preserve media, trims and looks")
+        }
+        try await reopened.moveScene(movieID: project.id, sceneID: scenes[2].id, to: scenes[0].id)
+        try await reopened.setSceneDeleted(movieID: project.id, sceneID: scenes[1].id, deleted: false)
+        let restored = await reopened.snapshot()
+        XCTAssertEqual(restored.first?.activeScenes.map(\.id), scenes.map(\.id))
+    }
+
     @MainActor func testExportValidationRejectsLostAudioAndWrongGeometry() async throws {
         let store = try await makeStore()
         let created = try await store.create(name: "Export validation", format: .landscape)

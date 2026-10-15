@@ -22,6 +22,8 @@ struct WatchMovieView: View {
     @State private var importingLook = false
     @State private var changingLook = false
     @State private var showOriginalLog = false
+    @State private var reordering = false
+    @State private var dropTargetID: UUID?
     @State private var playbackRequestID = UUID()
     private var movie: Movie? { app.movie(movieID) }
     var body: some View {
@@ -142,9 +144,22 @@ struct WatchMovieView: View {
             }
         }
         .onDisappear { player?.pause() }
-        .alert("Look unavailable", isPresented: Binding(get: { app.error != nil }, set: { if !$0 { app.error = nil } })) {
+        .alert("Unable to Update Movie", isPresented: Binding(get: { app.error != nil }, set: { if !$0 { app.error = nil } })) {
             Button("OK") { app.error = nil }
         } message: { Text(app.error ?? "") }
+    }
+
+    private func moveScene(_ sceneID: UUID, to targetID: UUID) {
+        guard !reordering else { return }
+        reordering = true
+        dropTargetID = nil
+        player?.pause()
+        Task {
+            defer { reordering = false }
+            await app.run {
+                try await app.store.moveScene(movieID: movieID, sceneID: sceneID, to: targetID)
+            }
+        }
     }
 
     private func selectLook(_ look: LUTReference?) {
@@ -173,7 +188,35 @@ struct WatchMovieView: View {
                                 Text(durationLabel(item.element.playableDuration)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                             }
                         }.buttonStyle(.plain).accessibilityLabel("Review scene \(item.offset + 1)")
-                            .accessibilityHint("Opens playback and trimming controls")
+                             .accessibilityHint("Tap to review. Touch and hold, then drag onto another scene to reorder.")
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(dropTargetID == item.element.id ? Color.accentColor : .clear, lineWidth: 3)
+                                    .allowsHitTesting(false)
+                            }
+                            .draggable("\(movieID.uuidString):\(item.element.id.uuidString)")
+                            .dropDestination(for: String.self) { values, _ in
+                                guard !reordering, values.count == 1,
+                                      let value = values.first else { return false }
+                                let parts = value.split(separator: ":")
+                                guard parts.count == 2, String(parts[0]) == movieID.uuidString,
+                                      let sourceID = UUID(uuidString: String(parts[1])),
+                                      movie.activeScenes.contains(where: { $0.id == sourceID }),
+                                      sourceID != item.element.id else { return false }
+                                moveScene(sourceID, to: item.element.id)
+                                return true
+                            } isTargeted: { targeted in
+                                if targeted { dropTargetID = item.element.id }
+                                else if dropTargetID == item.element.id { dropTargetID = nil }
+                            }
+                            .accessibilityAction(named: "Move Earlier") {
+                                guard item.offset > 0 else { return }
+                                moveScene(item.element.id, to: movie.activeScenes[item.offset - 1].id)
+                            }
+                            .accessibilityAction(named: "Move Later") {
+                                guard item.offset + 1 < movie.activeScenes.count else { return }
+                                moveScene(item.element.id, to: movie.activeScenes[item.offset + 1].id)
+                            }
                     }
                 }.padding(.horizontal, 20)
             }.scrollIndicators(.visible).fixedSize(horizontal: false, vertical: true)
