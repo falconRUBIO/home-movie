@@ -51,12 +51,27 @@ struct PiPLayoutView: View {
                     .frame(height: geometry.size.height * (format == .portrait ? 0.49 : 0.38))
                     .background(Color.black)
                     Form {
-                        Section("Framing") {
-                            Picker("Orientation", selection: $layout.orientation) {
-                                ForEach(PiPOrientation.allCases) { orientation in
-                                    Text(orientation.title).tag(orientation)
+                        Section {
+                            Picker("Layout", selection: $layout.composition) {
+                                ForEach(PiPComposition.allCases) { composition in
+                                    Label(composition.title, systemImage: composition.symbol).tag(composition)
                                 }
-                            }.pickerStyle(.segmented)
+                            }.pickerStyle(.inline)
+                        } header: { Text("Layout") } footer: {
+                            if layout.composition != .inset {
+                                Text(layout.composition == .topAndBottom
+                                    ? "Rear camera above. Front camera below. Both fill half the video."
+                                    : "Rear camera on the left. Front camera on the right. Both fill half the video.")
+                            }
+                        }
+                        Section("Front Camera") {
+                            if layout.composition == .inset {
+                                Picker("Orientation", selection: $layout.orientation) {
+                                    ForEach(PiPOrientation.allCases) { orientation in
+                                        Text(orientation.title).tag(orientation)
+                                    }
+                                }.pickerStyle(.segmented)
+                            }
                             VStack(spacing: 12) {
                                 HStack {
                                     Text("Zoom")
@@ -74,23 +89,25 @@ struct PiPLayoutView: View {
                                 }.font(.caption).foregroundStyle(.secondary)
                             }
                         }
-                        Section("Size") {
-                            Picker("Size", selection: $layout.size) {
-                                ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
-                            }.pickerStyle(.segmented)
-                        }
-                        Section("Position") {
-                            HStack(spacing: 12) {
-                                ForEach(PiPCorner.allCases) { corner in
-                                    Button { layout.corner = corner; UISelectionFeedbackGenerator().selectionChanged() } label: {
-                                        ZStack(alignment: alignment(for: corner)) {
-                                            RoundedRectangle(cornerRadius: 5).strokeBorder(.secondary.opacity(0.5), lineWidth: 1)
-                                            RoundedRectangle(cornerRadius: 2).fill(layout.corner == corner ? Color.accentColor : Color.secondary)
-                                                .frame(width: 16, height: 12).padding(5)
-                                        }.frame(width: 48, height: 36).frame(maxWidth: .infinity, minHeight: 44)
-                                            .background(layout.corner == corner ? Color.accentColor.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 8))
-                                    }.buttonStyle(.plain).accessibilityLabel(corner.title)
-                                        .accessibilityAddTraits(layout.corner == corner ? .isSelected : [])
+                        if layout.composition == .inset {
+                            Section("Size") {
+                                Picker("Size", selection: $layout.size) {
+                                    ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
+                                }.pickerStyle(.segmented)
+                            }
+                            Section("Position") {
+                                HStack(spacing: 12) {
+                                    ForEach(PiPCorner.allCases) { corner in
+                                        Button { layout.corner = corner; UISelectionFeedbackGenerator().selectionChanged() } label: {
+                                            ZStack(alignment: alignment(for: corner)) {
+                                                RoundedRectangle(cornerRadius: 5).strokeBorder(.secondary.opacity(0.5), lineWidth: 1)
+                                                RoundedRectangle(cornerRadius: 2).fill(layout.corner == corner ? Color.accentColor : Color.secondary)
+                                                    .frame(width: 16, height: 12).padding(5)
+                                            }.frame(width: 48, height: 36).frame(maxWidth: .infinity, minHeight: 44)
+                                                .background(layout.corner == corner ? Color.accentColor.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                                        }.buttonStyle(.plain).accessibilityLabel(corner.title)
+                                            .accessibilityAddTraits(layout.corner == corner ? .isSelected : [])
+                                    }
                                 }
                             }
                         }
@@ -108,6 +125,7 @@ struct PiPLayoutView: View {
             .navigationTitle("Picture in Picture").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }.presentationDetents([.large]).presentationDragIndicator(.visible)
+            .sensoryFeedback(.selection, trigger: layout.composition)
             .task {
                 if !ready, canPrepare, !logMode { onPrepare() }
             }
@@ -131,7 +149,7 @@ struct PiPLayoutView: View {
                         Color(white: 0.12)
                         Image(systemName: format == .portrait ? "rectangle.portrait" : "rectangle")
                             .font(.largeTitle).foregroundStyle(.white.opacity(0.3))
-                        RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.2))
+                        RoundedRectangle(cornerRadius: layout.composition == .inset ? 6 : 0).fill(.white.opacity(0.2))
                             .overlay { Image(systemName: "person.fill").foregroundStyle(.white) }
                             .frame(width: rect.width * geometry.size.width, height: rect.height * geometry.size.height)
                             .position(x: rect.midX * geometry.size.width, y: rect.midY * geometry.size.height)
@@ -139,7 +157,9 @@ struct PiPLayoutView: View {
                 }
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityLabel("\(format == .portrait ? "Portrait" : "Landscape") video with \(layout.orientation.title.lowercased()) presenter inset at \(layout.corner.title.lowercased())")
+            .accessibilityLabel(layout.composition == .inset
+                ? "\(format == .portrait ? "Portrait" : "Landscape") video with \(layout.orientation.title.lowercased()) presenter inset at \(layout.corner.title.lowercased())"
+                : "\(layout.composition.title) preview, rear and front cameras equally sized")
     }
 
 }
@@ -224,7 +244,7 @@ final class PiPMetalView: MTKView {
             presenterAngle: liveSource?.pip?.presenterAngle ??
                 (MovieFormat.captureFormat(angle: presenter?.angle ?? 90) ?? .portrait).recordingAngle(observed: presenter?.angle ?? 90),
             presentation: live != nil ? (liveSource?.pip?.presentation ?? PiPPresentation()) :
-                PiPPresentation(rect: PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero,
+                PiPPresentation(composition: layout.composition, rect: PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero,
                     opacity: 1, enabled: true, corner: layout.corner, zoom: layout.framingZoom))
         if live != nil, sourceFront, liveSource?.pip == nil {
             image = image.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: canvas.width, ty: 0))

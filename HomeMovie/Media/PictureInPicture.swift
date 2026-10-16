@@ -20,19 +20,44 @@ enum PiPOrientation: String, Codable, CaseIterable, Identifiable, Sendable {
     var id: Self { self }
     var title: String { rawValue.capitalized }
 }
+enum PiPComposition: String, Codable, CaseIterable, Identifiable, Sendable {
+    case inset, topAndBottom, sideBySide
+    var id: Self { self }
+    var title: String {
+        switch self { case .inset: "Inset"; case .topAndBottom: "Top & Bottom"; case .sideBySide: "Side by Side" }
+    }
+    var symbol: String {
+        switch self {
+        case .inset: "rectangle.on.rectangle"
+        case .topAndBottom: "rectangle.split.1x2"
+        case .sideBySide: "rectangle.split.2x1"
+        }
+    }
+    /// Front camera's region, measured from the top-left of the movie.
+    var presenterRect: CGRect? {
+        switch self {
+        case .inset: nil
+        case .topAndBottom: CGRect(x: 0, y: 0.5, width: 1, height: 0.5)
+        case .sideBySide: CGRect(x: 0.5, y: 0, width: 0.5, height: 1)
+        }
+    }
+}
 struct PiPLayout: Codable, Equatable, Sendable {
     var corner = PiPCorner.bottomRight
     var size = PiPSize.small
     var orientation = PiPOrientation.landscape
+    var composition = PiPComposition.inset
     var zoom: CGFloat = 1
     var framingZoom: CGFloat { Self.clampedZoom(zoom) }
     static func clampedZoom(_ value: CGFloat) -> CGFloat { value.isFinite ? min(2, max(1, value)) : 1 }
-    init(corner: PiPCorner = .bottomRight, size: PiPSize = .small, orientation: PiPOrientation = .landscape, zoom: CGFloat = 1) {
+    init(corner: PiPCorner = .bottomRight, size: PiPSize = .small, orientation: PiPOrientation = .landscape, zoom: CGFloat = 1, composition: PiPComposition = .inset) {
+        self.composition = composition
         self.corner = corner; self.size = size; self.orientation = orientation; self.zoom = Self.clampedZoom(zoom)
     }
-    private enum CodingKeys: String, CodingKey { case corner, size, orientation, zoom }
+    private enum CodingKeys: String, CodingKey { case corner, size, orientation, zoom, composition }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        composition = try values.decodeIfPresent(PiPComposition.self, forKey: .composition) ?? .inset
         corner = try values.decode(PiPCorner.self, forKey: .corner)
         size = try values.decode(PiPSize.self, forKey: .size)
         orientation = try values.decodeIfPresent(PiPOrientation.self, forKey: .orientation) ?? .landscape
@@ -40,6 +65,7 @@ struct PiPLayout: Codable, Equatable, Sendable {
     }
 }
 struct PiPPresentation: Equatable, Sendable {
+    var composition = PiPComposition.inset
     var rect = CGRect.zero // UIKit-normalized coordinates in the actual movie canvas.
     var opacity: CGFloat = 0
     var enabled = false
@@ -88,6 +114,7 @@ enum PiPGeometry {
         return rect(closest)
     }
     static func rect(layout: PiPLayout, canvas: CGSize, obstacles: [CGRect] = []) -> CGRect? {
+        if let split = layout.composition.presenterRect { return split }
         let center = desiredCenter(corner: layout.corner, canvas: canvas, size: layout.size, orientation: layout.orientation)
         return safeRect(center: center, canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles)
             ?? safeRect(center: center, canvas: canvas, size: layout.size, orientation: layout.orientation)
@@ -133,10 +160,12 @@ struct PiPTimeline {
         return CGPoint(x: moveFrom.x + (moveTo.x - moveFrom.x) * t, y: moveFrom.y + (moveTo.y - moveFrom.y) * t)
     }
     mutating func drag(to center: CGPoint, at time: CMTime, canvas: CGSize, obstacles: [CGRect]) {
+        guard layout.composition == .inset else { return }
         guard let rect = PiPGeometry.safeRect(center: center, canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles) else { return }
         self.center = CGPoint(x: rect.midX, y: rect.midY); moveFrom = nil; moveTo = nil
     }
     @discardableResult mutating func settle(at time: CMTime, canvas: CGSize, obstacles: [CGRect]) -> PiPLayout {
+        guard layout.composition == .inset else { return layout }
         let current = currentCenter(at: time, canvas: canvas)
         layout.corner = PiPGeometry.nearestCorner(to: current, layout: layout, canvas: canvas, obstacles: obstacles)
         let target = PiPGeometry.rect(layout: layout, canvas: canvas, obstacles: obstacles)
@@ -144,9 +173,9 @@ struct PiPTimeline {
         center = moveTo; return layout
     }
     func presentation(at time: CMTime, canvas: CGSize, obstacles: [CGRect] = []) -> PiPPresentation {
-        let rect = PiPGeometry.safeRect(center: currentCenter(at: time, canvas: canvas), canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles)
+        let rect = layout.composition.presenterRect ?? PiPGeometry.safeRect(center: currentCenter(at: time, canvas: canvas), canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles)
             ?? PiPGeometry.rect(layout: layout, canvas: canvas)
-        return PiPPresentation(rect: rect ?? .zero, opacity: rect == nil ? 0 : opacity(at: time), enabled: enabled, corner: layout.corner, isPlaceable: rect != nil, zoom: layout.framingZoom)
+        return PiPPresentation(composition: layout.composition, rect: rect ?? .zero, opacity: rect == nil ? 0 : opacity(at: time), enabled: enabled, corner: layout.corner, isPlaceable: rect != nil, zoom: layout.framingZoom)
     }
 }
 // Choose a recent front frame from the same capture clock without waiting for it.
@@ -174,6 +203,31 @@ enum PiPCompositor {
         let source = CIImage(cvPixelBuffer: background)
         var result = source.transformed(by: LiveLookGeometry.transform(source: source.extent.size, target: canvas, angle: backgroundAngle, front: false)).cropped(to: bounds)
         guard presentation.opacity > 0, presentation.isPlaceable, let presenter, !presentation.rect.isEmpty else { return result }
+        if presentation.composition != .inset {
+            let frontUnit = presentation.composition.presenterRect ?? presentation.rect
+            let rearUnit = presentation.composition == .topAndBottom
+                ? CGRect(x: 0, y: 0, width: 1, height: 0.5)
+                : CGRect(x: 0, y: 0, width: 0.5, height: 1)
+            func panel(_ buffer: CVPixelBuffer, unit: CGRect, angle: CGFloat, zoom: CGFloat) -> CIImage {
+                let rect = CGRect(x: unit.minX * canvas.width, y: (1 - unit.maxY) * canvas.height,
+                                  width: unit.width * canvas.width, height: unit.height * canvas.height)
+                let image = CIImage(cvPixelBuffer: buffer)
+                return image.transformed(by: LiveLookGeometry.transform(source: image.extent.size,
+                        target: rect.size, angle: angle, front: false))
+                    .transformed(by: CGAffineTransform(a: zoom, b: 0, c: 0, d: zoom,
+                        tx: rect.width * (1 - zoom) / 2, ty: rect.height * (1 - zoom) / 2))
+                    .transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
+                    .cropped(to: rect)
+            }
+            let split = panel(presenter, unit: frontUnit, angle: presenterAngle,
+                              zoom: PiPLayout.clampedZoom(presentation.zoom))
+                .composited(over: panel(background, unit: rearUnit, angle: backgroundAngle, zoom: 1))
+                .cropped(to: bounds)
+            // Fade the entire split composition together when dual camera is toggled.
+            return split.applyingFilter("CIColorMatrix", parameters: [
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: min(1, max(0, presentation.opacity)))
+            ]).composited(over: result).cropped(to: bounds)
+        }
         let unit = presentation.rect
         let rect = CGRect(x: unit.minX * canvas.width, y: (1 - unit.maxY) * canvas.height,
             width: unit.width * canvas.width, height: unit.height * canvas.height)

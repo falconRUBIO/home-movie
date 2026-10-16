@@ -1026,7 +1026,7 @@ struct CameraView: View {
     }
     private var pipInteraction: some View {
         GeometryReader { geometry in
-            if camera.pipPresentation.opacity > 0.001 {
+            if camera.pipPresentation.opacity > 0.001, camera.pipLayout.composition == .inset {
                 let r = camera.pipPresentation.rect
                 Color.clear.frame(width: r.width * geometry.size.width, height: r.height * geometry.size.height)
                     .contentShape(Rectangle()).onTapGesture { }

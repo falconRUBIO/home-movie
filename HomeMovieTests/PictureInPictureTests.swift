@@ -6,6 +6,61 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testSplitLayoutsDecodePersistAndMatchCaptureWithoutInsetPlacement() throws {
+        let old = Data(#"{"corner":"bottomRight","size":"small"}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(PiPLayout.self, from: old).composition, .inset)
+        for mode in [PiPComposition.topAndBottom, .sideBySide] {
+            let layout = PiPLayout(corner: .topLeft, orientation: .portrait, zoom: 1.5, composition: mode)
+            XCTAssertEqual(try JSONDecoder().decode(PiPLayout.self, from: JSONEncoder().encode(layout)), layout)
+            for format in MovieFormat.allCases {
+                var timeline = PiPTimeline()
+                timeline.setLayout(layout); timeline.setEnabled(true, at: .zero)
+                let time = CMTime(seconds: 1, preferredTimescale: 30)
+                let presentation = timeline.presentation(at: time, canvas: format.canvas,
+                    obstacles: [CGRect(x: 0, y: 0, width: 1, height: 1)])
+                XCTAssertEqual(presentation.composition, mode)
+                XCTAssertEqual(presentation.rect, mode.presenterRect)
+                XCTAssertEqual(presentation.rect, PiPGeometry.rect(layout: layout, canvas: format.canvas))
+                XCTAssertEqual(presentation.rect.width * presentation.rect.height, 0.5, accuracy: 0.0001)
+                timeline.drag(to: .zero, at: time, canvas: format.canvas, obstacles: [])
+                XCTAssertEqual(timeline.settle(at: time, canvas: format.canvas, obstacles: []), layout)
+            }
+        }
+    }
+
+    func testSplitCompositorUsesCorrectEqualHalvesWithoutGaps() throws {
+        let rear = try frame(red: 0, green: 0, blue: 220)
+        let front = try frame(red: 220, green: 0, blue: 0)
+        for mode in [PiPComposition.topAndBottom, .sideBySide] {
+            for canvas in [CGSize(width: 320, height: 180), CGSize(width: 180, height: 320)] {
+                let state = PiPPresentation(composition: mode, rect: try XCTUnwrap(mode.presenterRect),
+                                            opacity: 1, enabled: true)
+                let image = PiPCompositor.image(background: rear, presenter: front, canvas: canvas,
+                    backgroundAngle: 0, presenterAngle: 0, presentation: state)
+                XCTAssertEqual(image.extent, CGRect(origin: .zero, size: canvas))
+                let rearPoint = mode == .topAndBottom
+                    ? CGPoint(x: canvas.width / 2, y: canvas.height * 0.75)
+                    : CGPoint(x: canvas.width * 0.25, y: canvas.height / 2)
+                let frontPoint = mode == .topAndBottom
+                    ? CGPoint(x: canvas.width / 2, y: canvas.height * 0.25)
+                    : CGPoint(x: canvas.width * 0.75, y: canvas.height / 2)
+                XCTAssertGreaterThan(sample(image, point: rearPoint)[2], 180)
+                XCTAssertGreaterThan(sample(image, point: frontPoint)[0], 180)
+                // Sample directly on each side of the seam.
+                for delta: CGFloat in [-1, 1] {
+                    let point = mode == .topAndBottom
+                        ? CGPoint(x: canvas.width / 2, y: canvas.height / 2 + delta)
+                        : CGPoint(x: canvas.width / 2 + delta, y: canvas.height / 2)
+                    let pixel = sample(image, point: point)
+                    XCTAssertGreaterThan(max(pixel[0], pixel[2]), 180)
+                }
+                let missing = PiPCompositor.image(background: rear, presenter: nil, canvas: canvas,
+                    backgroundAngle: 0, presenterAngle: 0, presentation: state)
+                XCTAssertGreaterThan(sample(missing, point: frontPoint)[2], 180)
+            }
+        }
+    }
+
     func testEverySelectedCornerMatchesMovieCanvasInSettingsAndCapture() throws {
         for canvas in [MovieFormat.portrait.canvas, MovieFormat.landscape.canvas] {
             for corner in PiPCorner.allCases {
@@ -442,7 +497,7 @@ final class PictureInPictureTests: XCTestCase {
         let store = ProjectStore(root: root); _ = try await store.load()
         let movie = try await store.create(name: "Tour", format: .landscape)
         let log = try await store.create(name: "Cinema", format: .portrait, profile: .appleLog)
-        let layout = PiPLayout(corner: .topLeft, size: .medium, orientation: .portrait, zoom: 1.5)
+        let layout = PiPLayout(corner: .topLeft, size: .medium, orientation: .portrait, zoom: 1.5, composition: .sideBySide)
         try await store.setPiPLayout(movieID: movie.id, layout: layout)
         try await store.setDualCameraCapture(movieID: movie.id, enabled: true)
         do { try await store.setDualCameraCapture(movieID: log.id, enabled: true); XCTFail("Log must not silently downgrade") } catch { }
