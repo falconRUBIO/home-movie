@@ -64,6 +64,7 @@ struct CameraView: View {
     @State private var zoomDragging = false
     @StateObject private var recordingCountdown = RecordingCountdown()
     @StateObject private var dollyCountdown = RecordingCountdown()
+    @GestureState private var dollyEndpointTouching = false
     @State private var draggingDollyStart: Bool?
     @State private var preparedDollyStart: CGFloat?
     @State private var preparedDollyTarget: CGFloat?
@@ -219,6 +220,12 @@ struct CameraView: View {
                 preparedDollyStart = camera.options?.zoom
             }
         }
+        .onChange(of: dollyEndpointTouching) { _, touching in
+            if !touching { finishDollyEndpointPreview() }
+        }
+        .onChange(of: smoothZoomOpen) { _, open in
+            if !open { finishDollyEndpointPreview() }
+        }
         .task(id: camera.options?.smoothMoving) { await finishDollyIfIdle() }
         .onChange(of: camera.options?.isPiPEnabled) { _, enabled in
             if enabled == true { enablePiPAfterPreparation = false }
@@ -227,9 +234,9 @@ struct CameraView: View {
         .onChange(of: movie?.recordingFormat) { _, format in
             if camera.options?.dualCameraPrepared == true { camera.service.setPiPLayout(camera.pipLayout, canvasFormat: format) }
         }
-        .onDisappear { app.cancelCameraWarmup(); cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
+        .onDisappear { finishDollyEndpointPreview(); app.cancelCameraWarmup(); cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
+            if phase != .active { finishDollyEndpointPreview(); cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
             else if !watching && !showingRecovery && !camera.busy { Task { await prepareCamera() } }
         }
     }
@@ -582,7 +589,7 @@ struct CameraView: View {
                 Section("Move between lenses") {
                     Text("Drag the Start and End handles on the full zoom scale. The preview shows Start. Tap the circular arrow to reverse direction, then tap Start Dolly. The small moving dot shows actual zoom.")
                     Text("Start Dolly becomes Stop Dolly during a move. Stop holds the current zoom. Reverse Direction swaps Start and End and shows the new starting frame.")
-                    Text("Dragging Start changes the preview. Dragging End chooses the destination without moving the preview. Pinching the video takes over manual zoom.")
+                    Text("Dragging Start changes the preview. Dragging End temporarily previews the destination; release to return to Start. Pinching the video takes over manual zoom.")
                     Text("Record controls recording; Start Dolly controls the zoom move. Delay waits only before the Dolly move; recording starts immediately. Duration sets the zoom duration. During a take, Start Dolly counts down without interrupting recording. Tap Cancel to cancel that countdown, or the red Stop button to end the take.")
                     Text("Tap the video to focus, including during a Dolly move. Lens and Dolly controls adjust zoom without changing focus.")
                 }
@@ -655,7 +662,19 @@ struct CameraView: View {
         if start {
             preparedDollyStart = factor
             camera.zoom(factor); camera.beginSmoothZoom()
-        } else { preparedDollyTarget = factor }
+        } else {
+            preparedDollyTarget = factor
+            if draggingDollyStart == false {
+                camera.zoom(factor); camera.beginSmoothZoom()
+            }
+        }
+    }
+    private func finishDollyEndpointPreview() {
+        let previewingEnd = draggingDollyStart == false
+        draggingDollyStart = nil
+        guard previewingEnd, activeDolly == nil, countdown == nil,
+              let start = preparedDollyStart else { return }
+        camera.zoom(start); camera.beginSmoothZoom()
     }
     @ViewBuilder private func dollyTrack(options: CameraOptions) -> some View {
         GeometryReader { geometry in
@@ -694,12 +713,18 @@ struct CameraView: View {
                         .offset(x: 19 + CGFloat(SmoothZoomFilter.position(Double(options.zoom), minimum: Double(options.minimum), maximum: Double(options.maximum))) * width, y: -16)
                 }
             }.frame(height: 44).contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                .gesture(DragGesture(minimumDistance: 0)
+                    .updating($dollyEndpointTouching) { _, touching, _ in touching = true }
+                    .onChanged { value in
                     let position = min(1, max(0, (value.location.x - 22) / width))
-                    if draggingDollyStart == nil { draggingDollyStart = abs(position - a) <= abs(position - b) }
+                    if draggingDollyStart == nil {
+                        draggingDollyStart = abs(position - a) <= abs(position - b)
+                        // Keep S stable while live camera zoom follows the E handle.
+                        if preparedDollyStart == nil { preparedDollyStart = options.zoom }
+                    }
                     let factor = options.minimum * CGFloat(pow(Double(options.maximum / options.minimum), Double(position)))
                     setDollyEndpoint(factor, start: draggingDollyStart == true)
-                }.onEnded { _ in draggingDollyStart = nil })
+                }.onEnded { _ in finishDollyEndpointPreview() })
         }.frame(height: 44)
         GeometryReader { geometry in
             let width = max(1, geometry.size.width - 44)
