@@ -16,6 +16,18 @@ import UIKit
         }
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: next)) { _ in }
     }
+    // A camera's sensor compensation angle describes video pixels, not the
+    // orientation of the interface the user is currently looking at.
+    static func interfaceFormat(_ orientation: UIInterfaceOrientation, observed: CGFloat) -> MovieFormat {
+        switch orientation {
+        case .portrait, .portraitUpsideDown: return .portrait
+        case .landscapeLeft, .landscapeRight: return .landscape
+        default: return MovieFormat.captureFormat(angle: observed) ?? .portrait
+        }
+    }
+    func currentInterfaceFormat(observed: CGFloat) -> MovieFormat {
+        Self.interfaceFormat(currentScene?.interfaceOrientation ?? .unknown, observed: observed)
+    }
     func captureAngle(format: MovieFormat, observed: CGFloat) -> CGFloat {
         switch currentScene?.interfaceOrientation {
         case .portrait where format == .portrait: return 90

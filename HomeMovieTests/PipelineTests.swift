@@ -5,6 +5,18 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    @MainActor func testRecordingUILockUsesVisibleInterfaceRatherThanSensorAngle() {
+        // Portrait selfie can report a landscape capture angle (and vice versa).
+        for angle: CGFloat in [0, 90, 180, 270] {
+            XCTAssertEqual(OrientationPolicy.interfaceFormat(.portrait, observed: angle), .portrait)
+            XCTAssertEqual(OrientationPolicy.interfaceFormat(.portraitUpsideDown, observed: angle), .portrait)
+            XCTAssertEqual(OrientationPolicy.interfaceFormat(.landscapeLeft, observed: angle), .landscape)
+            XCTAssertEqual(OrientationPolicy.interfaceFormat(.landscapeRight, observed: angle), .landscape)
+        }
+        XCTAssertEqual(OrientationPolicy.interfaceFormat(.unknown, observed: 90), .portrait)
+        XCTAssertEqual(OrientationPolicy.interfaceFormat(.unknown, observed: 0), .landscape)
+    }
+
     @MainActor func testDuplicateSceneOwnsMediaPreservesEditsAndInsertsAfterOriginal() async throws {
         let store = try await makeStore()
         let project = try await store.create(name: "Duplicate", format: .landscape)
