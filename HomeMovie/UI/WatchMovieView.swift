@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import UIKit
 import UniformTypeIdentifiers
 
 struct WatchMovieView: View {
@@ -23,7 +24,8 @@ struct WatchMovieView: View {
     @State private var changingLook = false
     @State private var showOriginalLog = false
     @State private var reordering = false
-    @State private var dropTargetID: UUID?
+    @State private var undoOrder: [UUID]?
+    @State private var reorderedOrder: [UUID]?
     @State private var playbackRequestID = UUID()
     private var movie: Movie? { app.movie(movieID) }
     var body: some View {
@@ -149,15 +151,21 @@ struct WatchMovieView: View {
         } message: { Text(app.error ?? "") }
     }
 
-    private func moveScene(_ sceneID: UUID, to targetID: UUID) {
+    private func saveOrder(_ order: [UUID], expected: [UUID], undo: Bool = false) {
         guard !reordering else { return }
         reordering = true
-        dropTargetID = nil
         player?.pause()
         Task {
             defer { reordering = false }
-            await app.run {
-                try await app.store.moveScene(movieID: movieID, sceneID: sceneID, to: targetID)
+            do {
+                try await app.store.reorderScenes(movieID: movieID, order: order, expected: expected)
+                undoOrder = undo ? nil : expected
+                reorderedOrder = undo ? nil : order
+                await app.refresh()
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } catch {
+                app.error = error.localizedDescription
+                await app.refresh()
             }
         }
     }
@@ -176,50 +184,19 @@ struct WatchMovieView: View {
                 Text("Scenes").font(.headline); Spacer()
                 Text("\(movie.activeScenes.count) · \(durationLabel(movie.duration))").font(.caption).foregroundStyle(.secondary)
             }.padding(.horizontal, 20).padding(.top, 12)
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(Array(movie.activeScenes.enumerated()), id: \.element.id) { item in
-                        Button { player?.pause(); review = item.element } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                SceneThumbnail(scene: item.element, root: app.store.root, movie: movie)
-                                    .frame(width: 100, height: verticalSizeClass == .compact ? 44 : 67)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                                Text("Scene \(item.offset + 1)").font(.caption)
-                                Text(durationLabel(item.element.playableDuration)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                            }
-                        }.buttonStyle(.plain).accessibilityLabel("Review scene \(item.offset + 1)")
-                             .accessibilityHint("Tap to review. Touch and hold, then drag onto another scene to reorder.")
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 10)
-                                    .strokeBorder(dropTargetID == item.element.id ? Color.accentColor : .clear, lineWidth: 3)
-                                    .allowsHitTesting(false)
-                            }
-                            .draggable("\(movieID.uuidString):\(item.element.id.uuidString)")
-                            .dropDestination(for: String.self) { values, _ in
-                                guard !reordering, values.count == 1,
-                                      let value = values.first else { return false }
-                                let parts = value.split(separator: ":")
-                                guard parts.count == 2, String(parts[0]) == movieID.uuidString,
-                                      let sourceID = UUID(uuidString: String(parts[1])),
-                                      movie.activeScenes.contains(where: { $0.id == sourceID }),
-                                      sourceID != item.element.id else { return false }
-                                moveScene(sourceID, to: item.element.id)
-                                return true
-                            } isTargeted: { targeted in
-                                if targeted { dropTargetID = item.element.id }
-                                else if dropTargetID == item.element.id { dropTargetID = nil }
-                            }
-                            .accessibilityAction(named: "Move Earlier") {
-                                guard item.offset > 0 else { return }
-                                moveScene(item.element.id, to: movie.activeScenes[item.offset - 1].id)
-                            }
-                            .accessibilityAction(named: "Move Later") {
-                                guard item.offset + 1 < movie.activeScenes.count else { return }
-                                moveScene(item.element.id, to: movie.activeScenes[item.offset + 1].id)
-                            }
-                    }
+            ReorderableSceneStrip(movie: movie, root: app.store.root,
+                compact: verticalSizeClass == .compact, saving: reordering,
+                review: { scene in player?.pause(); review = scene },
+                reorder: { order, previous in saveOrder(order, expected: previous) })
+                .frame(height: verticalSizeClass == .compact ? 94 : 117)
+            if let undoOrder, let reorderedOrder {
+                HStack {
+                    Text("Scenes reordered").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Undo") { saveOrder(undoOrder, expected: reorderedOrder, undo: true) }
+                        .disabled(reordering)
                 }.padding(.horizontal, 20)
-            }.scrollIndicators(.visible).fixedSize(horizontal: false, vertical: true)
+            }
             Button { player?.pause(); dismiss() } label: { Label("Continue Recording", systemImage: "video").frame(minHeight: 44) }
                 .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).padding(.bottom, 8)
         }.fixedSize(horizontal: false, vertical: true).background(.bar)
@@ -275,5 +252,135 @@ struct TrimRangeControl: View {
                 if isStart { start = max(0, min(end - minimum, start + change)) }
                 else { end = min(duration, max(start + minimum, end + change)) }
             }
+    }
+}
+
+// UIKit's interactive movement supplies live gap animation, edge autoscroll,
+// and cancellation without writing intermediate positions to the project.
+private struct ReorderableSceneStrip: UIViewRepresentable {
+    let movie: Movie
+    let root: URL
+    let compact: Bool
+    let saving: Bool
+    let review: (Scene) -> Void
+    let reorder: ([UUID], [UUID]) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeUIView(context: Context) -> UICollectionView {
+        let layout = UICollectionViewFlowLayout()
+        layout.scrollDirection = .horizontal
+        layout.minimumLineSpacing = 12
+        layout.sectionInset = UIEdgeInsets(top: 0, left: 20, bottom: 0, right: 20)
+        let view = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        view.backgroundColor = .clear
+        view.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "scene")
+        view.dataSource = context.coordinator
+        view.delegate = context.coordinator
+        view.addGestureRecognizer(UILongPressGestureRecognizer(target: context.coordinator,
+                                                               action: #selector(Coordinator.hold(_:))))
+        return view
+    }
+    func updateUIView(_ view: UICollectionView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.parent = self
+        guard !coordinator.moving else { return }
+        coordinator.scenes = movie.activeScenes
+        view.isUserInteractionEnabled = !saving
+        view.reloadData()
+        view.collectionViewLayout.invalidateLayout()
+    }
+    static func dismantleUIView(_ view: UICollectionView, coordinator: Coordinator) {
+        view.cancelInteractiveMovement()
+        coordinator.moving = false
+    }
+
+    final class Coordinator: NSObject, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
+        var parent: ReorderableSceneStrip
+        var scenes: [Scene]
+        var moving = false
+        init(_ parent: ReorderableSceneStrip) {
+            self.parent = parent
+            self.scenes = parent.movie.activeScenes
+        }
+        func collectionView(_ view: UICollectionView, numberOfItemsInSection section: Int) -> Int { scenes.count }
+        func collectionView(_ view: UICollectionView, layout: UICollectionViewLayout,
+                            sizeForItemAt indexPath: IndexPath) -> CGSize {
+            CGSize(width: 100, height: parent.compact ? 94 : 117)
+        }
+        func collectionView(_ view: UICollectionView, cellForItemAt path: IndexPath) -> UICollectionViewCell {
+            let cell = view.dequeueReusableCell(withReuseIdentifier: "scene", for: path)
+            let scene = scenes[path.item]
+            let parent = parent
+            cell.contentConfiguration = UIHostingConfiguration {
+                VStack(alignment: .leading, spacing: 6) {
+                    SceneThumbnail(scene: scene, root: parent.root, movie: parent.movie)
+                        .frame(width: 100, height: parent.compact ? 44 : 67)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    Text("Scene \(path.item + 1)").font(.caption)
+                    Text(durationLabel(scene.playableDuration))
+                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                }.frame(width: 100, alignment: .topLeading)
+            }.margins(.all, 0)
+            cell.isAccessibilityElement = true
+            cell.accessibilityLabel = "Review scene \(path.item + 1)"
+            cell.accessibilityHint = "Tap to review. Touch and hold, then drag to reorder."
+            cell.accessibilityTraits = .button
+            cell.accessibilityCustomActions = [
+                UIAccessibilityCustomAction(name: "Move Earlier") { [weak self] _ in
+                    self?.accessibleMove(scene.id, delta: -1) ?? false
+                },
+                UIAccessibilityCustomAction(name: "Move Later") { [weak self] _ in
+                    self?.accessibleMove(scene.id, delta: 1) ?? false
+                }
+            ]
+            return cell
+        }
+        func accessibleMove(_ id: UUID, delta: Int) -> Bool {
+            guard !parent.saving, !moving, let index = scenes.firstIndex(where: { $0.id == id }),
+                  scenes.indices.contains(index + delta) else { return false }
+            let previous = scenes.map(\.id)
+            var order = previous
+            order.swapAt(index, index + delta)
+            parent.reorder(order, previous)
+            return true
+        }
+        func collectionView(_ view: UICollectionView, didSelectItemAt path: IndexPath) {
+            guard !moving, !parent.saving else { return }
+            parent.review(scenes[path.item])
+        }
+        func collectionView(_ view: UICollectionView, canMoveItemAt path: IndexPath) -> Bool {
+            !parent.saving && scenes.count > 1
+        }
+        func collectionView(_ view: UICollectionView, moveItemAt source: IndexPath, to destination: IndexPath) {
+            let previous = scenes.map(\.id)
+            let scene = scenes.remove(at: source.item)
+            scenes.insert(scene, at: destination.item)
+            guard source != destination else { return }
+            parent.reorder(scenes.map(\.id), previous)
+        }
+        @objc func hold(_ gesture: UILongPressGestureRecognizer) {
+            guard let view = gesture.view as? UICollectionView else { return }
+            let point = gesture.location(in: view)
+            switch gesture.state {
+            case .began:
+                guard !parent.saving, let path = view.indexPathForItem(at: point) else { return }
+                moving = view.beginInteractiveMovementForItem(at: path)
+                if moving { UISelectionFeedbackGenerator().selectionChanged() }
+            case .changed:
+                if moving { view.updateInteractiveMovementTargetPosition(point) }
+            case .ended:
+                guard moving else { return }
+                view.endInteractiveMovement()
+                moving = false
+                // Renumber captions after UIKit has finished its movement transaction.
+                DispatchQueue.main.async { view.reloadData() }
+            default:
+                guard moving else { return }
+                view.cancelInteractiveMovement()
+                moving = false
+                scenes = parent.movie.activeScenes
+                view.reloadData()
+            }
+        }
     }
 }

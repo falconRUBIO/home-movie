@@ -5,6 +5,35 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    @MainActor func testCompleteSceneOrderSupportsUndoAndRejectsStaleChanges() async throws {
+        let store = try await makeStore()
+        let project = try await store.create(name: "Reorder Undo", format: .landscape)
+        for _ in 0..<3 { _ = try await record(project, into: store) }
+        let snapshots = await store.snapshot()
+        let original = try XCTUnwrap(snapshots.first)
+        let before = original.activeScenes.map(\.id)
+        let after = [before[2], before[0], before[1]]
+        try await store.reorderScenes(movieID: project.id, order: after, expected: before)
+        let reopened = ProjectStore(root: store.root)
+        _ = try await reopened.load()
+        let saved = await reopened.snapshot()
+        XCTAssertEqual(saved.first?.activeScenes.map(\.id), after)
+        do {
+            try await reopened.reorderScenes(movieID: project.id, order: before, expected: before)
+            XCTFail("An obsolete order must be rejected")
+        } catch {}
+        do {
+            try await reopened.reorderScenes(movieID: project.id, order: [before[0], before[0], before[1]], expected: after)
+            XCTFail("Duplicate IDs must be rejected")
+        } catch {}
+        try await reopened.reorderScenes(movieID: project.id, order: before, expected: after)
+        let undone = await reopened.snapshot()
+        XCTAssertEqual(undone.first?.activeScenes.map(\.id), before)
+        for scene in original.scenes {
+            XCTAssertEqual(undone.first?.scenes.first { $0.id == scene.id }, scene)
+        }
+    }
+
     @MainActor func testSceneReorderingPersistsAndPreservesDeletedScenes() async throws {
         let store = try await makeStore()
         let project = try await store.create(name: "Reordering", format: .landscape)

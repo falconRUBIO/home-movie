@@ -333,6 +333,27 @@ actor ProjectStore {
         guard next.movies[m].scenes[c].validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
         next.movies[m].revision += 1; try write(next)
     }
+    /// Compare the complete active order before saving, including Undo, to avoid losing newer edits.
+    func reorderScenes(movieID: UUID, order: [UUID], expected: [UUID]) throws {
+        try requireIdle()
+        let m = try index(movieID)
+        let active = catalog.movies[m].activeScenes
+        guard catalog.movies[m].deletedAt == nil, active.map(\.id) == expected,
+              order.count == active.count, Set(order) == Set(expected) else {
+            throw HomeMovieError.message("The scenes have changed. Please try reordering again.")
+        }
+        guard order != expected else { return }
+        let slots = active.map(\.sequence)
+        var next = catalog
+        for (offset, id) in order.enumerated() {
+            if let index = next.movies[m].scenes.firstIndex(where: { $0.id == id }) {
+                next.movies[m].scenes[index].sequence = slots[offset]
+            }
+        }
+        next.movies[m].revision += 1
+        try write(next)
+    }
+
     /// Move an active scene to the target's position without altering any clip media or edits.
     func moveScene(movieID: UUID, sceneID: UUID, to targetID: UUID) throws {
         try requireIdle()
