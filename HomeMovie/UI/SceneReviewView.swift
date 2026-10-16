@@ -89,6 +89,7 @@ struct SceneReviewView: View {
     @State private var savingPhotos = false
     @State private var waitingForExport = false
     @State private var confirmRemove = false
+    @State private var confirmDiscard = false
     @State private var error: String?
     @State private var notice: String?
     init(movieID: UUID, scene: Scene) {
@@ -100,6 +101,10 @@ struct SceneReviewView: View {
     private var movie: Movie? { app.movie(movieID) }
     private var reviewAspect: CGFloat { movie?.format.aspect ?? (scene.width > scene.height ? 16 / 9 : 9 / 16) }
     private var busy: Bool { saving || export.running || savingPhotos || waitingForExport }
+    private var hasUnsavedEdits: Bool {
+        editedScene.trimStart != scene.trimStart || editedScene.trimEnd != scene.trimEnd
+            || adjustments != scene.lightAdjustments
+    }
     private var shownAdjustments: SceneAdjustments { comparing ? .neutral : adjustments }
     private var editedScene: Scene {
         var edited = scene
@@ -129,7 +134,10 @@ struct SceneReviewView: View {
             .navigationTitle("Review Scene").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { preview.stop(); dismiss() }.disabled(busy)
+                    Button("Cancel") {
+                        if hasUnsavedEdits { preview.player?.pause(); confirmDiscard = true }
+                        else { preview.stop(); dismiss() }
+                    }.disabled(busy)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -145,7 +153,11 @@ struct SceneReviewView: View {
                     Button("Save") { saveEditsAndClose() }.disabled(busy || preview.loading)
                 }
             }
-            .alert("Remove this scene?", isPresented: $confirmRemove) {
+            .confirmationDialog("Discard changes?", isPresented: $confirmDiscard, titleVisibility: .visible) {
+                Button("Discard Changes", role: .destructive) { preview.stop(); dismiss() }
+                Button("Keep Editing", role: .cancel) { }
+            }
+            .alert("Delete this scene?", isPresented: $confirmRemove) {
                 Button("Cancel", role: .cancel) { }
                 Button("Move to Recently Deleted", role: .destructive) {
                     saving = true
@@ -160,7 +172,10 @@ struct SceneReviewView: View {
             .task {
                 guard let movie else { error = "This movie is unavailable."; return }
                 await preview.prepare(movie: movie, scene: scene, app: app)
-                if !Task.isCancelled { await preview.update(adjustments: shownAdjustments) }
+                if !Task.isCancelled {
+                    await preview.update(adjustments: shownAdjustments)
+                    if scenePhase == .active, preview.error == nil { preview.player?.play() }
+                }
             }
             .task(id: shownAdjustments) {
                 // Coalesce slider changes and abandon obsolete paused-frame seeks.
@@ -185,7 +200,7 @@ struct SceneReviewView: View {
             }
             .onChange(of: scenePhase) { _, phase in if phase != .active { preview.player?.pause() } }
         }
-        .interactiveDismissDisabled(busy)
+        .interactiveDismissDisabled(busy || hasUnsavedEdits)
         .onDisappear { preview.stop(); export.cancel() }
     }
     private var editingPanel: some View {

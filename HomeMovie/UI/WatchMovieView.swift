@@ -284,12 +284,18 @@ private struct ReorderableSceneStrip: UIViewRepresentable {
     }
     func updateUIView(_ view: UICollectionView, context: Context) {
         let coordinator = context.coordinator
+        let previous = coordinator.parent
         coordinator.parent = self
-        guard !coordinator.moving else { return }
-        coordinator.scenes = movie.activeScenes
         view.isUserInteractionEnabled = !saving
-        view.reloadData()
-        view.collectionViewLayout.invalidateLayout()
+        guard !coordinator.moving else { return }
+        let contentChanged = coordinator.scenes != movie.activeScenes
+            || previous.movie.revision != movie.revision || previous.compact != compact
+        coordinator.scenes = movie.activeScenes
+        // Saving-state and playback updates must not recreate every thumbnail.
+        if contentChanged {
+            view.reloadData()
+            view.collectionViewLayout.invalidateLayout()
+        }
     }
     static func dismantleUIView(_ view: UICollectionView, coordinator: Coordinator) {
         view.cancelInteractiveMovement()
