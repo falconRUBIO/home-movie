@@ -49,6 +49,7 @@ struct Scene: Codable, Identifiable, Equatable, Sendable {
     var deletedAt: Date?
     var photosAssetID: String?
     var photosCopiedAt: Date?
+    var duplicateOf: UUID? = nil
     var missing = false
     var profile: CaptureProfile? = nil
     var adjustments: SceneAdjustments? = nil
@@ -85,7 +86,7 @@ struct Movie: Codable, Identifiable, Equatable, Sendable {
     var recordingFormat: MovieFormat? { scenes.isEmpty && lastRecordedAt == nil ? nil : format }
     var activeScenes: [Scene] { scenes.filter { $0.deletedAt == nil }.sorted { $0.sequence < $1.sequence } }
     var latestTake: Scene? {
-        scenes.enumerated().filter { $0.element.deletedAt == nil }.max {
+        scenes.enumerated().filter { $0.element.deletedAt == nil && $0.element.duplicateOf == nil }.max {
             $0.element.capturedAt == $1.element.capturedAt
                 ? $0.offset < $1.offset : $0.element.capturedAt < $1.element.capturedAt
         }?.element

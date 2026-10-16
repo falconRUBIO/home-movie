@@ -5,6 +5,39 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    @MainActor func testDuplicateSceneOwnsMediaPreservesEditsAndInsertsAfterOriginal() async throws {
+        let store = try await makeStore()
+        let project = try await store.create(name: "Duplicate", format: .landscape)
+        for _ in 0..<2 { _ = try await record(project, into: store) }
+        let snapshots = await store.snapshot()
+        let movie = try XCTUnwrap(snapshots.first)
+        let original = movie.activeScenes[0]
+        let latest = movie.latestTake?.id
+        let light = SceneAdjustments(exposure: 0.1, shadows: 0.2, highlights: -0.2)
+        try await store.duplicateScene(movieID: project.id, sceneID: original.id,
+            start: CMTime(seconds: 0.25, preferredTimescale: 600),
+            end: CMTime(seconds: 1.5, preferredTimescale: 600), adjustments: light)
+        let reopened = ProjectStore(root: store.root)
+        _ = try await reopened.load()
+        let saved = await reopened.snapshot()
+        let result = try XCTUnwrap(saved.first)
+        XCTAssertEqual(result.activeScenes.count, 3)
+        XCTAssertEqual(result.activeScenes[0].id, original.id)
+        XCTAssertEqual(result.activeScenes[2].id, movie.activeScenes[1].id)
+        let duplicate = result.activeScenes[1]
+        XCTAssertNotEqual(duplicate.id, original.id)
+        XCTAssertNotEqual(duplicate.source, original.source)
+        XCTAssertEqual(duplicate.duplicateOf, original.id)
+        XCTAssertEqual(duplicate.lightAdjustments, light)
+        XCTAssertEqual(duplicate.playableDuration.seconds, 1.25, accuracy: 0.001)
+        XCTAssertEqual(result.latestTake?.id, latest)
+        XCTAssertNil(duplicate.photosAssetID)
+        let originalBytes = try Data(contentsOf: store.root.appendingPathComponent(original.source))
+        XCTAssertEqual(try Data(contentsOf: store.root.appendingPathComponent(duplicate.source)), originalBytes)
+        try await reopened.setSceneDeleted(movieID: project.id, sceneID: original.id, deleted: true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.root.appendingPathComponent(duplicate.source).path))
+    }
+
     @MainActor func testUndoLastTakeUsesCaptureOrderAfterReordering() async throws {
         let store = try await makeStore()
         let project = try await store.create(name: "Latest take", format: .landscape)

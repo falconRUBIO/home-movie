@@ -333,6 +333,45 @@ actor ProjectStore {
         guard next.movies[m].scenes[c].validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
         next.movies[m].revision += 1; try write(next)
     }
+    /// Save current edits and insert an independently owned copy directly after this scene.
+    func duplicateScene(movieID: UUID, sceneID: UUID, start: CMTime, end: CMTime,
+                        adjustments: SceneAdjustments) throws {
+        try requireIdle()
+        try adjustments.validate()
+        let m = try index(movieID)
+        guard catalog.movies[m].deletedAt == nil,
+              let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID && $0.deletedAt == nil }),
+              !catalog.movies[m].scenes[c].missing else {
+            throw HomeMovieError.message("This scene is unavailable.")
+        }
+        var edited = catalog.movies[m].scenes[c]
+        edited.trimStart = MediaTime(start); edited.trimEnd = MediaTime(end)
+        edited.adjustments = adjustments.isActive ? adjustments : nil
+        guard edited.validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
+        try requireSpace(bytes: edited.bytes + 100_000_000)
+        var copy = edited
+        copy.id = UUID()
+        copy.source = "Originals/\(copy.id.uuidString).mov"
+        copy.sequence = edited.sequence + 1
+        copy.duplicateOf = edited.duplicateOf ?? edited.id
+        copy.photosAssetID = nil; copy.photosCopiedAt = nil
+        let destination = try url(copy.source)
+        try fm.copyItem(at: url(edited.source), to: destination)
+        do {
+            var next = catalog
+            next.movies[m].scenes[c] = edited
+            for index in next.movies[m].scenes.indices where next.movies[m].scenes[index].sequence >= copy.sequence {
+                next.movies[m].scenes[index].sequence += 1
+            }
+            next.movies[m].scenes.append(copy)
+            next.movies[m].revision += 1
+            try write(next)
+        } catch {
+            try? fm.removeItem(at: destination)
+            throw error
+        }
+    }
+
     /// Compare the complete active order before saving, including Undo, to avoid losing newer edits.
     func reorderScenes(movieID: UUID, order: [UUID], expected: [UUID]) throws {
         try requireIdle()

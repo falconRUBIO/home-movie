@@ -131,6 +131,16 @@ struct SceneReviewView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { preview.stop(); dismiss() }.disabled(busy)
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Save to Photos", systemImage: "square.and.arrow.down") { saveClip() }
+                            .disabled(preview.loading || preview.error != nil)
+                        Button("Duplicate", systemImage: "plus.square.on.square") { duplicateScene() }
+                        Divider()
+                        Button("Delete Scene", systemImage: "trash", role: .destructive) { confirmRemove = true }
+                    } label: { Image(systemName: "ellipsis.circle").frame(minWidth: 44, minHeight: 44) }
+                        .accessibilityLabel("Scene actions").disabled(busy)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { saveEditsAndClose() }.disabled(busy || preview.loading)
                 }
@@ -192,10 +202,6 @@ struct SceneReviewView: View {
                     if let message = notice ?? export.notice {
                         Text(message).font(.footnote).foregroundStyle(.secondary).padding(.horizontal)
                     }
-                    if tool == .trim {
-                        Button("Remove Scene", role: .destructive) { confirmRemove = true }
-                            .frame(minHeight: 44).disabled(busy)
-                    }
                 }.padding(.bottom, 16)
             }
         }
@@ -222,6 +228,10 @@ struct SceneReviewView: View {
                 Text(durationLabel(CMTime(seconds: start, preferredTimescale: 600)))
                 Spacer(); Text(durationLabel(CMTime(seconds: end, preferredTimescale: 600)))
             }.font(.caption.monospacedDigit()).foregroundStyle(.secondary).padding(.horizontal, 24)
+            Text("Duration · \(String(format: "%.1f", max(0, end - start)))s")
+                .font(.subheadline.monospacedDigit())
+                .accessibilityLabel("Trimmed duration")
+                .accessibilityValue("\(String(format: "%.1f", max(0, end - start))) seconds")
             Text("Drag either edge to trim. Your original recording stays intact.")
                 .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 25)
             Button("Reset Trim") { start = 0; end = scene.sourceDuration.seconds }.frame(minHeight: 44).disabled(busy)
@@ -297,6 +307,19 @@ struct SceneReviewView: View {
         try await app.store.editScene(movieID: movieID, sceneID: scene.id,
             start: editedScene.trimStart.cmTime, end: editedScene.trimEnd.cmTime, adjustments: adjustments)
         await app.refresh()
+    }
+    private func duplicateScene() {
+        guard !busy else { return }
+        saving = true; error = nil; comparing = false
+        preview.player?.pause()
+        Task {
+            do {
+                try await app.store.duplicateScene(movieID: movieID, sceneID: scene.id,
+                    start: editedScene.trimStart.cmTime, end: editedScene.trimEnd.cmTime, adjustments: adjustments)
+                await app.refresh()
+                preview.stop(); dismiss()
+            } catch { self.error = error.localizedDescription; saving = false }
+        }
     }
     private func saveEditsAndClose() {
         saving = true; error = nil
