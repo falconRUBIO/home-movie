@@ -383,7 +383,7 @@ actor ProjectStore {
         try requireIdle()
         let m = try index(movieID)
         guard catalog.movies[m].deletedAt == nil,
-              catalog.movies[m].activeScenes.last?.id == expectedSceneID else {
+              catalog.movies[m].latestTake?.id == expectedSceneID else {
             throw HomeMovieError.message("The latest take has changed. Please try again.")
         }
         try setSceneDeleted(movieID: movieID, sceneID: expectedSceneID, deleted: true)

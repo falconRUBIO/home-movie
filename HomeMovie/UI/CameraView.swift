@@ -179,7 +179,7 @@ struct CameraView: View {
         .onChange(of: camera.options?.maximum) { _, _ in if !zoomDragging { syncSmoothPosition() } }
         .onChange(of: camera.savedScene) { _, saved in
             if saved {
-                addedSceneID = movie?.activeScenes.last?.id
+                addedSceneID = movie?.latestTake?.id
                 UIAccessibility.post(notification: .announcement, argument: "Scene saved")
             }
         }
@@ -300,7 +300,7 @@ struct CameraView: View {
                 }
                 Button("Dolly Help", systemImage: "questionmark.circle") { showingDollyHelp = true }
                     .disabled(camera.busy)
-                if let last = movie.activeScenes.last {
+                if let last = movie.latestTake {
                     Divider()
                     Button("Undo Last Take", systemImage: "arrow.uturn.backward") { undoLastTake(last.id) }
                         .disabled(camera.busy || undoingTake)
@@ -954,7 +954,7 @@ struct CameraView: View {
                 }.frame(minWidth: 44, minHeight: 44)
                     .accessibilityElement(children: .ignore).accessibilityLabel("Saving scene")
                     .transition(.opacity)
-            } else if let id = addedSceneID, movie.activeScenes.last?.id == id, !camera.busy {
+            } else if let id = addedSceneID, movie.latestTake?.id == id, !camera.busy {
                 VStack(spacing: 0) {
                     Label("Saved", systemImage: "checkmark").font(.caption2).foregroundStyle(.secondary)
                     Button("Undo") { undoLastTake(id) }

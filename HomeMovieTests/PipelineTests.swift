@@ -5,6 +5,23 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    @MainActor func testUndoLastTakeUsesCaptureOrderAfterReordering() async throws {
+        let store = try await makeStore()
+        let project = try await store.create(name: "Latest take", format: .landscape)
+        for _ in 0..<2 { _ = try await record(project, into: store) }
+        let snapshots = await store.snapshot()
+        let movie = try XCTUnwrap(snapshots.first)
+        let latest = try XCTUnwrap(movie.latestTake)
+        let before = movie.activeScenes.map(\.id)
+        try await store.reorderScenes(movieID: project.id, order: Array(before.reversed()), expected: before)
+        let reordered = await store.snapshot()
+        XCTAssertEqual(reordered.first?.latestTake?.id, latest.id)
+        try await store.undoLastTake(movieID: project.id, expectedSceneID: latest.id)
+        let undone = await store.snapshot()
+        XCTAssertFalse(undone.first?.activeScenes.contains { $0.id == latest.id } ?? true)
+        XCTAssertEqual(undone.first?.activeScenes.count, 1)
+    }
+
     @MainActor func testCompleteSceneOrderSupportsUndoAndRejectsStaleChanges() async throws {
         let store = try await makeStore()
         let project = try await store.create(name: "Reorder Undo", format: .landscape)

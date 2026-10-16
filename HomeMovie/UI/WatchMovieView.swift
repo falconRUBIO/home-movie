@@ -186,10 +186,11 @@ struct WatchMovieView: View {
             }.padding(.horizontal, 20).padding(.top, 12)
             ReorderableSceneStrip(movie: movie, root: app.store.root,
                 compact: verticalSizeClass == .compact, saving: reordering,
+                beginReorder: { player?.pause() },
                 review: { scene in player?.pause(); review = scene },
                 reorder: { order, previous in saveOrder(order, expected: previous) })
                 .frame(height: verticalSizeClass == .compact ? 94 : 117)
-            if let undoOrder, let reorderedOrder {
+            if let undoOrder, let reorderedOrder, movie.activeScenes.map(\.id) == reorderedOrder {
                 HStack {
                     Text("Scenes reordered").font(.caption).foregroundStyle(.secondary)
                     Spacer()
@@ -262,6 +263,7 @@ private struct ReorderableSceneStrip: UIViewRepresentable {
     let root: URL
     let compact: Bool
     let saving: Bool
+    let beginReorder: () -> Void
     let review: (Scene) -> Void
     let reorder: ([UUID], [UUID]) -> Void
 
@@ -365,7 +367,10 @@ private struct ReorderableSceneStrip: UIViewRepresentable {
             case .began:
                 guard !parent.saving, let path = view.indexPathForItem(at: point) else { return }
                 moving = view.beginInteractiveMovementForItem(at: path)
-                if moving { UISelectionFeedbackGenerator().selectionChanged() }
+                if moving {
+                    parent.beginReorder()
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
             case .changed:
                 if moving { view.updateInteractiveMovementTargetPosition(point) }
             case .ended:

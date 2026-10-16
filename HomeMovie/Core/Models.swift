@@ -84,6 +84,12 @@ struct Movie: Codable, Identifiable, Equatable, Sendable {
     // Deleted scenes still lock the movie; removing a scene never changes its canvas.
     var recordingFormat: MovieFormat? { scenes.isEmpty && lastRecordedAt == nil ? nil : format }
     var activeScenes: [Scene] { scenes.filter { $0.deletedAt == nil }.sorted { $0.sequence < $1.sequence } }
+    var latestTake: Scene? {
+        scenes.enumerated().filter { $0.element.deletedAt == nil }.max {
+            $0.element.capturedAt == $1.element.capturedAt
+                ? $0.offset < $1.offset : $0.element.capturedAt < $1.element.capturedAt
+        }?.element
+    }
     var duration: CMTime { activeScenes.reduce(.zero) { CMTimeAdd($0, $1.playableDuration) } }
     var nextSequence: Int { (scenes.map(\.sequence).max() ?? -1) + 1 }
 }
