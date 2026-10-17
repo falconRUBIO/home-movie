@@ -19,6 +19,7 @@ struct ColorCube: Codable, Sendable {
     let rgba: Data
     var minimum: [Float] = [0, 0, 0]
     var maximum: [Float] = [1, 1, 1]
+    var sourceNotices: String? = nil
     func validate() throws {
         guard (2...65).contains(dimension), rgba.count == dimension * dimension * dimension * 16,
               !name.isEmpty, name.count <= 80, minimum.count == 3, maximum.count == 3,
@@ -68,7 +69,50 @@ struct ColorCube: Codable, Sendable {
         if clean.hasSuffix(" LUT") { clean = String(clean.dropLast(4)) }
         let cube = ColorCube(name: clean.isEmpty ? "Custom Look" : clean, dimension: dimension,
             rgba: rgb.withUnsafeBytes { Data($0) }, minimum: minimum, maximum: maximum)
-        try cube.validate(); return cube
+        var documented = cube
+        documented.sourceNotices = text.split(whereSeparator: \.isNewline).filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("#") || $0.trimmingCharacters(in: .whitespaces).hasPrefix("TITLE ") }.joined(separator: "\n")
+        try documented.validate(); return documented
+    }
+    /// Bake a display-referred creative LUT after a Log-to-display conversion.
+    /// Red is the fastest-changing axis in both .cube and CIColorCube data.
+    func following(_ conversion: ColorCube) throws -> ColorCube {
+        try validate(); try conversion.validate()
+        let count = conversion.dimension * conversion.dimension * conversion.dimension
+        var output = [Float](); output.reserveCapacity(count * 4)
+        rgba.withUnsafeBytes { creative in
+            conversion.rgba.withUnsafeBytes { base in
+                for sample in 0..<count {
+                    var low = [Int](), high = [Int](), fraction = [Float]()
+                    for channel in 0..<3 {
+                        let value = base.loadUnaligned(fromByteOffset: (sample * 4 + channel) * 4, as: Float.self)
+                        let position = min(1, max(0, (value - minimum[channel]) / (maximum[channel] - minimum[channel]))) * Float(dimension - 1)
+                        let index = Int(position.rounded(.down))
+                        low.append(index); high.append(min(index + 1, dimension - 1)); fraction.append(position - Float(index))
+                    }
+                    for channel in 0..<3 {
+                        var value: Float = 0
+                        for corner in 0..<8 {
+                            var index = 0, stride = 1
+                            var weight: Float = 1
+                            for axis in 0..<3 {
+                                let upper = (corner & (1 << axis)) != 0
+                                index += (upper ? high[axis] : low[axis]) * stride
+                                stride *= dimension
+                                weight *= upper ? fraction[axis] : 1 - fraction[axis]
+                            }
+                            value += creative.loadUnaligned(fromByteOffset: (index * 4 + channel) * 4, as: Float.self) * weight
+                        }
+                        output.append(value)
+                    }
+                    output.append(1)
+                }
+            }
+        }
+        var result = ColorCube(name: name, dimension: conversion.dimension,
+            rgba: output.withUnsafeBytes { Data($0) }, minimum: conversion.minimum, maximum: conversion.maximum)
+        result.sourceNotices = sourceNotices
+        try result.validate()
+        return result
     }
     static func load(_ reference: LUTReference, root: URL) throws -> ColorCube {
         let reference = reference.isRetiredBundledLook ? LUTReference.filmica : reference
