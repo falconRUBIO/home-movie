@@ -227,9 +227,13 @@ actor ProjectStore {
             guard !reference.isRetiredBundledLook else { return nil }
             guard let cube = try? ColorCube.load(reference, root: root) else { return nil }
             return LUTReference(id: id, name: id == LUTReference.filmica.id ? LUTReference.filmica.name : cube.name)
-        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }.sorted {
+            if $0.id == LUTReference.filmica.id { return $1.id != LUTReference.filmica.id }
+            if $1.id == LUTReference.filmica.id { return false }
+            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
     }
-    func importLook(from source: URL) throws -> LUTReference {
+    func importLook(from source: URL, displayReferred: Bool = false) throws -> LUTReference {
         try requireIdle()
         let access = source.startAccessingSecurityScopedResource()
         defer { if access { source.stopAccessingSecurityScopedResource() } }
@@ -244,7 +248,8 @@ actor ProjectStore {
         }
         if let coordinationError { throw coordinationError }
         if let readError { throw readError }
-        guard let imported else { throw HomeMovieError.message("This look could not be opened.") }
+        guard var imported else { throw HomeMovieError.message("This look could not be opened.") }
+        if displayReferred { imported = try imported.following(ColorCube.appleStandard.get()) }
         let reference = LUTReference(id: UUID(), name: imported.name)
         try requireSpace(bytes: 20_000_000)
         try encoder.encode(imported).write(to: url(reference.path), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
