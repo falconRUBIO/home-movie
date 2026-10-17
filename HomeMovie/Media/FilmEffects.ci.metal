@@ -43,7 +43,7 @@ float particles(float2 p, float size, uint seed, uint salt) {
 }
 
 extern "C" { namespace coreimage {
-    float4 sceneLight(sample_t input, float exposure, float shadows, float highlights) {
+    float4 sceneLight(sample_t input, float exposure, float shadows, float highlights, float warmth, float tint) {
         float3 rgb = clamp(input.rgb, 0.0, 1.0);
         float l = luminance(rgb);
         // Gentle luminance-only changes. Smooth tonal masks avoid hard thresholds;
@@ -57,6 +57,20 @@ extern "C" { namespace coreimage {
             result = rgb + (1.0 - rgb) * ((target - l) / max(1.0 - l, 0.00001));
         } else {
             result = rgb * (target / max(l, 0.00001));
+        }
+        if (warmth != 0.0 || tint != 0.0) {
+            // Independent rendition-level color balance: +warmth yellow, +tint magenta.
+            // Preserve luminance and compress chroma into gamut, avoiding channel clipping.
+            float3 cast = warmth * float3(0.12, 0.02, -0.14) + tint * float3(0.08, -0.10, 0.08);
+            float3 balanced = result * exp2(cast * 2.0);
+            balanced *= target / max(luminance(balanced), 0.00001);
+            float3 direction = balanced - float3(target);
+            float scale = 1.0;
+            for (int c = 0; c < 3; ++c) {
+                if (direction[c] > 0.000001) { scale = min(scale, (1.0 - target) / direction[c]); }
+                else if (direction[c] < -0.000001) { scale = min(scale, -target / direction[c]); }
+            }
+            result = clamp(float3(target) + direction * clamp(scale, 0.0, 1.0), 0.0, 1.0);
         }
         return float4(result, input.a);
     }
