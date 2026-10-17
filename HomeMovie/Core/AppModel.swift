@@ -41,6 +41,13 @@ import AVFoundation
             if UserDefaults.standard.bool(forKey: "copyScenesToPhotos") { retryPhotosCopies() }
         } catch { loaded = false; self.error = error.localizedDescription; loadFailure = error.localizedDescription }
     }
+    func createQuickMovie() async throws -> Movie {
+        let movie = try await store.createQuickMovie()
+        // Creation changes no media totals. Publish the durable movie immediately;
+        // a second full catalog refresh only delays camera navigation.
+        movies.insert(movie, at: 0)
+        return movie
+    }
     func refresh() async { movies = await store.snapshot(); storageBytes = await store.storageBytes() }
     func run(_ operation: () async throws -> Void) async {
         do { try await operation(); await refresh() } catch { self.error = error.localizedDescription }

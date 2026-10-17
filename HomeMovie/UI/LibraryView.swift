@@ -31,8 +31,7 @@ struct LibraryView: View {
         Task {
             defer { creating = false }
             do {
-                let movie = try await app.store.createQuickMovie()
-                await app.refresh()
+                let movie = try await app.createQuickMovie()
                 openMovie(movie)
             } catch { app.error = error.localizedDescription }
         }
@@ -126,7 +125,10 @@ struct LibraryView: View {
             .navigationTitle("Movies").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { createMovie() } label: { MovieControlIcon(systemName: "plus") }
+                    Button { createMovie() } label: {
+                        if creating { ProgressView().frame(width: 44, height: 44) }
+                        else { MovieControlIcon(systemName: "plus") }
+                    }
                         .accessibilityLabel("New Movie").disabled(!app.loaded || creating)
                 }
                 ToolbarItem(placement: .topBarLeading) {
