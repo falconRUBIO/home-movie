@@ -61,7 +61,7 @@ import UIKit
         try scene.lightAdjustments.validate()
         var clip = movie
         // Scene identity separates clip caches from the full movie and other clips.
-        clip.id = scene.id; clip.scenes = [scene]; clip.filmEffects = nil
+        clip.id = scene.id; clip.scenes = [scene]
         clip.name = "Scene \(scene.sequence + 1)"
         return clip
     }
@@ -157,4 +157,3 @@ import UIKit
         }
     }
 }
-
