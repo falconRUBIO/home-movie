@@ -25,6 +25,12 @@ struct LibraryView: View {
         app.prewarmCamera(movieID: movie.id)
         path.append(movie.id)
     }
+    private func thumbnailActionIcon(_ symbol: String) -> some View {
+        Image(systemName: symbol).font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(.white).frame(width: 48, height: 48)
+            .background(.black.opacity(0.4), in: Circle()).homeGlass()
+            .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+    }
     var body: some View {
         NavigationStack(path: $path) {
             Group {
@@ -50,27 +56,36 @@ struct LibraryView: View {
                         LazyVGrid(columns: movieColumns, alignment: .leading, spacing: 24) {
                             ForEach(app.activeMovies) { movie in
                                 VStack(alignment: .leading, spacing: 9) {
-                                    ZStack(alignment: .bottomLeading) {
+                                    ZStack(alignment: .bottom) {
                                         Button { openMovie(movie) } label: {
                                             SceneThumbnail(scene: movie.activeScenes.first, root: app.store.root, movie: movie)
                                                 .frame(height: 210).clipShape(RoundedRectangle(cornerRadius: 22))
-                                                .overlay(alignment: .bottomTrailing) {
-                                                    Text(durationLabel(movie.duration)).font(.caption.monospacedDigit())
-                                                        .padding(.horizontal, 9).padding(.vertical, 5).homeGlass(interactive: false).padding(12)
+                                                .overlay(alignment: .topTrailing) {
+                                                    if !movie.activeScenes.isEmpty {
+                                                        Text(durationLabel(movie.duration)).font(.caption.monospacedDigit())
+                                                            .padding(.horizontal, 9).padding(.vertical, 5)
+                                                            .homeGlass(interactive: false).padding(12)
+                                                    }
                                                 }
                                                 .contentShape(RoundedRectangle(cornerRadius: 22))
                                         }.buttonStyle(.plain).accessibilityLabel("Record into \(movie.name), \(durationLabel(movie.duration))")
                                             .accessibilityHint("Opens the camera to add scenes")
-                                        if !movie.activeScenes.isEmpty {
-                                            Button { playingMovie = movie } label: {
-                                                Image(systemName: "play.fill").font(.system(size: 18, weight: .semibold))
-                                                    .foregroundStyle(.white).frame(width: 48, height: 48)
-                                                    .background(.black.opacity(0.4), in: Circle()).homeGlass()
-                                                    .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
-                                            }.buttonStyle(.plain).padding(14)
-                                                .accessibilityLabel("Play \(movie.name)")
-                                                .accessibilityHint("Plays the full movie from the beginning")
-                                        }
+                                        HStack {
+                                            if !movie.activeScenes.isEmpty {
+                                                Button { playingMovie = movie } label: {
+                                                    thumbnailActionIcon("play.fill")
+                                                }.buttonStyle(.plain)
+                                                    .accessibilityLabel("Play \(movie.name)")
+                                                    .accessibilityHint("Plays the full movie from the beginning")
+                                            }
+                                            Spacer(minLength: 8)
+                                            Button { openMovie(movie) } label: {
+                                                thumbnailActionIcon("video.fill")
+                                            }.buttonStyle(.plain)
+                                                .accessibilityLabel(movie.activeScenes.isEmpty
+                                                    ? "Start Recording in \(movie.name)" : "Continue Recording in \(movie.name)")
+                                                .accessibilityHint("Opens the camera. Recording starts when you tap Record.")
+                                        }.padding(12)
                                     }
                                     HStack(alignment: .top) {
                                         Button { openMovie(movie) } label: {
