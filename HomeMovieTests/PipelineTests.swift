@@ -1676,3 +1676,70 @@ final class PipelineTests: XCTestCase {
     }
 }
 
+
+
+extension PipelineTests {
+    func testDisplayLookCompositionPreservesConversionAndNotices() throws {
+        let identity = try ColorCube.parse("""
+        # Original test notice
+        TITLE "Identity"
+        LUT_3D_SIZE 2
+        0 0 0
+        1 0 0
+        0 1 0
+        1 1 0
+        0 0 1
+        1 0 1
+        0 1 1
+        1 1 1
+        """, name: "Display Test")
+        let standard = try ColorCube.appleStandard.get()
+        let combined = try identity.following(standard)
+        XCTAssertEqual(combined.dimension, standard.dimension)
+        XCTAssertEqual(combined.minimum, standard.minimum)
+        XCTAssertEqual(combined.maximum, standard.maximum)
+        XCTAssertTrue(combined.sourceNotices?.contains("Original test notice") == true)
+        var maximumError: Float = 0
+        combined.rgba.withUnsafeBytes { actual in
+            standard.rgba.withUnsafeBytes { expected in
+                for index in 0..<(standard.rgba.count / 4) {
+                    maximumError = max(maximumError, abs(actual.loadUnaligned(fromByteOffset: index * 4, as: Float.self) -
+                        expected.loadUnaligned(fromByteOffset: index * 4, as: Float.self)))
+                }
+            }
+        }
+        XCTAssertLessThan(maximumError, 0.000002)
+        let roundTrip = try JSONDecoder().decode(ColorCube.self, from: JSONEncoder().encode(combined))
+        XCTAssertEqual(roundTrip.sourceNotices, identity.sourceNotices)
+    }
+}
+
+
+extension PipelineTests {
+    func testDisplayLookCompositionUsesDomainAndRedFastestOrder() throws {
+        // Maps [0, 2] RGB to inverted [1, 0] RGB.
+        let look = try ColorCube.parse("""
+        LUT_3D_SIZE 2
+        DOMAIN_MIN 0 0 0
+        DOMAIN_MAX 2 2 2
+        1 1 1
+        0 1 1
+        1 0 1
+        0 0 1
+        1 1 0
+        0 1 0
+        1 0 0
+        0 0 0
+        """, name: "Domain test")
+        var points: [Float] = []
+        for _ in 0..<8 { points.append(contentsOf: [0.5, 1, 1.5, 1]) }
+        let conversion = ColorCube(name: "Test conversion", dimension: 2,
+            rgba: points.withUnsafeBytes { Data($0) })
+        let combined = try look.following(conversion)
+        combined.rgba.withUnsafeBytes { bytes in
+            XCTAssertEqual(bytes.loadUnaligned(fromByteOffset: 0, as: Float.self), 0.75, accuracy: 0.000001)
+            XCTAssertEqual(bytes.loadUnaligned(fromByteOffset: 4, as: Float.self), 0.50, accuracy: 0.000001)
+            XCTAssertEqual(bytes.loadUnaligned(fromByteOffset: 8, as: Float.self), 0.25, accuracy: 0.000001)
+        }
+    }
+}
