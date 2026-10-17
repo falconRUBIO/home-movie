@@ -6,6 +6,27 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testNewInsetSizesStartAtFormerMediumAndFitEveryCanvas() throws {
+        XCTAssertEqual(PiPSize.small.fraction, 0.36, accuracy: 0.0001)
+        XCTAssertGreaterThan(PiPSize.medium.fraction, PiPSize.small.fraction)
+        XCTAssertGreaterThan(PiPSize.large.fraction, PiPSize.medium.fraction)
+        for format in MovieFormat.allCases {
+            for size in PiPSize.allCases {
+                for orientation in PiPOrientation.allCases {
+                    for corner in PiPCorner.allCases {
+                        let layout = PiPLayout(corner: corner, size: size, orientation: orientation)
+                        let rect = try XCTUnwrap(PiPGeometry.rect(layout: layout, canvas: format.canvas))
+                        XCTAssertGreaterThanOrEqual(rect.minX, 0)
+                        XCTAssertGreaterThanOrEqual(rect.minY, 0)
+                        XCTAssertLessThanOrEqual(rect.maxX, 1)
+                        XCTAssertLessThanOrEqual(rect.maxY, 1)
+                        XCTAssertEqual(try JSONDecoder().decode(PiPLayout.self, from: JSONEncoder().encode(layout)), layout)
+                    }
+                }
+            }
+        }
+    }
+
     func testSwappingSplitCamerasMovesPixelsAndPersistsWithoutChangingInsetPreferences() throws {
         let rear = try frame(red: 0, green: 0, blue: 220)
         let front = try frame(red: 220, green: 0, blue: 0)
