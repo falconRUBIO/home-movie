@@ -58,12 +58,20 @@ struct ExportView: View {
                 if let notice = export.notice { Section { Text(notice).foregroundStyle(.secondary) } }
                 if let error = export.error { Section { Text(error).foregroundStyle(.red) } }
             }
+            .saveStatusToast($export.saveFeedback)
             .navigationDestination(isPresented: $showingEffects) { FilmEffectsView(movie: currentMovie).environmentObject(app) }
             .onChange(of: currentMovie.revision) { _, _ in export.invalidate() }
             .navigationTitle("Export Movie").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(export.running || savingPhotos) } }
-            .sheet(isPresented: $sharing) { if let url = export.exportedURL { SystemShareSheet(url: url) } }
-            .sheet(isPresented: $savingFiles) { if let url = export.exportedURL { SystemFilesExporter(url: url) } }
+            .sheet(isPresented: $sharing) { if let url = export.exportedURL { SystemShareSheet(url: url) { activity, completed, error in
+                if error != nil { export.saveFeedback = SaveToast(kind: .failure, message: "Couldn’t complete sharing. Please try again.") }
+                else if completed {
+                    export.saveFeedback = SaveToast(kind: .success, message: activity == .saveToCameraRoll ? "Saved to Photos" : "Share completed")
+                }
+            } } }
+            .sheet(isPresented: $savingFiles) { if let url = export.exportedURL { SystemFilesExporter(url: url) { completed in
+                if completed { export.saveFeedback = SaveToast(kind: .success, message: "Saved to Files") }
+            } } }
         }
         .presentationDetents([.medium, .large], selection: $detent)
         .interactiveDismissDisabled(export.running || savingPhotos || showingEffects)

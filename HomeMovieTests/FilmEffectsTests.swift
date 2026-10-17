@@ -87,6 +87,32 @@ final class FilmEffectsTests: XCTestCase {
         XCTAssertGreaterThan(h[index + 1], h[index + 2])
         XCTAssertNotEqual(b, h)
     }
+    func testOpticalControlsHaveVisibleResponseOnUnclippedHighlightsAndPreserveDarkAreas() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)
+        let base = CIImage(color: CIColor(red: 0.08, green: 0.08, blue: 0.08)).cropped(to: bounds)
+        let light = CIImage(color: CIColor(red: 0.9, green: 0.9, blue: 0.9))
+            .cropped(to: CGRect(x: 100, y: 100, width: 56, height: 56))
+        let source = light.composited(over: base).cropped(to: bounds)
+        let renderer = FilmEffectsRenderer()
+        for halation in [false, true] {
+            var settings = FilmEffectsSettings.off
+            settings.bloomEnabled = !halation; settings.halationEnabled = halation
+            settings.bloomAmount = 0.6; settings.halationAmount = 0.6
+            settings.bloomSensitivity = 0.5; settings.halationSensitivity = 0.5
+            settings.bloomSpread = 0.5; settings.halationSpread = 0.5
+            let result = pixels(try renderer.render(source, settings: settings, time: .zero))
+            let edge = (128 * 256 + 98) * 4
+            XCTAssertGreaterThan(result[edge], 0.095, "Highlight diffusion should be visible at useful settings")
+            if halation { XCTAssertGreaterThan(result[edge], result[edge + 1]) }
+            else { XCTAssertEqual(result[edge], result[edge + 2], accuracy: 0.001) }
+            XCTAssertEqual(result[(10 * 256 + 10) * 4], 0.08, accuracy: 0.003)
+            let full = result[edge]
+            settings.bloomAmount = 0.1; settings.halationAmount = 0.1
+            let reduced = pixels(try renderer.render(source, settings: settings, time: .zero))
+            XCTAssertGreaterThan(full, reduced[edge])
+        }
+    }
+
     func testEffectsSettingsPersistAndInvalidateExportRevision() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

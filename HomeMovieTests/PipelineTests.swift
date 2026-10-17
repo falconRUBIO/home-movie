@@ -5,6 +5,32 @@ import MetalKit
 @testable import HomeMovie
 
 final class PipelineTests: XCTestCase {
+    @MainActor func testQuickMoviesStartStandardWithoutNamingAndRecordingSettingsLockAfterFirstScene() async throws {
+        let store = try await makeStore()
+        let first = try await store.createQuickMovie()
+        let second = try await store.createQuickMovie()
+        XCTAssertFalse(first.name.isEmpty)
+        XCTAssertNotEqual(first.name, second.name)
+        XCTAssertEqual(first.captureProfile, .standard)
+        XCTAssertNil(first.look)
+        XCTAssertNil(first.recordingFormat)
+        try await store.setMovieRecordingSettings(movieID: first.id, profile: .appleLog, look: .filmica)
+        let logSnapshots = await store.snapshot()
+        XCTAssertEqual(logSnapshots.first { $0.id == first.id }?.captureProfile, .appleLog)
+        try await store.setMovieRecordingSettings(movieID: first.id, profile: .standard, look: nil)
+        try await store.rename(first.id, name: "Optional custom title")
+        let renamed = await store.snapshot()
+        XCTAssertEqual(renamed.first { $0.id == first.id }?.name, "Optional custom title")
+        _ = try await record(first, into: store)
+        do {
+            try await store.setMovieRecordingSettings(movieID: first.id, profile: .appleLog, look: .filmica)
+            XCTFail("Existing recordings must not be relabeled as Log")
+        } catch {}
+        let saved = await store.snapshot()
+        XCTAssertEqual(saved.first { $0.id == first.id }?.captureProfile, .standard)
+        XCTAssertEqual(saved.first { $0.id == first.id }?.activeScenes.count, 1)
+    }
+
     @MainActor func testRecordingUILockUsesVisibleInterfaceRatherThanSensorAngle() {
         // Portrait selfie can report a landscape capture angle (and vice versa).
         for angle: CGFloat in [0, 90, 180, 270] {
@@ -838,7 +864,10 @@ final class PipelineTests: XCTestCase {
         let model = ExportModel(authorizePhotos: { true }, writePhotosVideo: { try await writer.write($0) })
         model.exportedURL = URL(fileURLWithPath: "/tmp/fixture-export.mp4")
         await model.saveToPhotos(); XCTAssertNotNil(model.error); XCTAssertNil(model.notice)
+        XCTAssertEqual(model.saveFeedback?.kind, .failure)
         await model.saveToPhotos(); XCTAssertNil(model.error); XCTAssertNotNil(model.notice)
+        XCTAssertEqual(model.saveFeedback?.kind, .success)
+        XCTAssertEqual(model.saveFeedback?.message, "Saved to Photos")
     }
     @MainActor func testPhotosExportDoesNotClaimSuccessWithoutAReceipt() async {
         let model = ExportModel(authorizePhotos: { true }, writePhotosVideo: { _ in "" })
@@ -875,6 +904,7 @@ final class PipelineTests: XCTestCase {
             await Task.yield()
         }
         let startedCalls = await writer.calls
+        XCTAssertEqual(model.saveFeedback?.kind, .saving)
         guard startedCalls == 1 else { first.cancel(); XCTFail("First save did not start"); return }
         await model.saveToPhotos() // The first write is deliberately still in flight.
         let calls = await writer.calls

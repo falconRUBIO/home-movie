@@ -357,6 +357,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             }); self.ticket = ticket; announcedStart = false
         let frontObserved = frontRotation?.videoRotationAngleForHorizonLevelCapture ?? angle
         let rearObserved = backRotation?.videoRotationAngleForHorizonLevelCapture ?? angle
+        // Keep source sensor compensation independent of the output canvas.
         recordedPresenterAngle = (MovieFormat.captureFormat(angle: frontObserved) ?? .portrait).recordingAngle(observed: frontObserved)
         recordedRearAngle = (MovieFormat.captureFormat(angle: rearObserved) ?? .portrait).recordingAngle(observed: rearObserved)
     }

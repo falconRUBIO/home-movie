@@ -50,6 +50,17 @@ struct PiPLayoutView: View {
                     }
                     .frame(height: geometry.size.height * (format == .portrait ? 0.49 : 0.38))
                     .background(Color.black)
+                    if layout.composition != .inset {
+                        Button {
+                            layout.splitSwapped.toggle()
+                            UISelectionFeedbackGenerator().selectionChanged()
+                        } label: {
+                            Label("Swap Cameras", systemImage: layout.composition == .topAndBottom
+                                ? "arrow.up.arrow.down" : "arrow.left.arrow.right")
+                                .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+                        }.buttonStyle(.plain)
+                            .accessibilityHint("Exchanges the front and rear views")
+                    }
                     Form {
                         Section {
                             Picker("Layout", selection: $layout.composition) {
@@ -59,9 +70,7 @@ struct PiPLayoutView: View {
                             }.pickerStyle(.inline)
                         } header: { Text("Layout") } footer: {
                             if layout.composition != .inset {
-                                Text(layout.composition == .topAndBottom
-                                    ? "Rear camera above. Front camera below. Both fill half the video."
-                                    : "Rear camera on the left. Front camera on the right. Both fill half the video.")
+                                Text(splitDescription)
                             }
                         }
                         Section("Front Camera") {
@@ -130,6 +139,12 @@ struct PiPLayoutView: View {
                 if !ready, canPrepare, !logMode { onPrepare() }
             }
     }
+    private var splitDescription: String {
+        if layout.composition == .topAndBottom {
+            return layout.splitSwapped ? "Front camera above. Rear camera below." : "Rear camera above. Front camera below."
+        }
+        return layout.splitSwapped ? "Front camera on the left. Rear camera on the right." : "Rear camera on the left. Front camera on the right."
+    }
     private func alignment(for corner: PiPCorner) -> Alignment {
         switch corner {
         case .topLeft: .topLeading
@@ -159,7 +174,7 @@ struct PiPLayoutView: View {
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityLabel(layout.composition == .inset
                 ? "\(format == .portrait ? "Portrait" : "Landscape") video with \(layout.orientation.title.lowercased()) presenter inset at \(layout.corner.title.lowercased())"
-                : "\(layout.composition.title) preview, rear and front cameras equally sized")
+                : "\(layout.composition.title) preview. \(splitDescription)")
     }
 
 }
@@ -244,7 +259,7 @@ final class PiPMetalView: MTKView {
             presenterAngle: liveSource?.pip?.presenterAngle ??
                 (MovieFormat.captureFormat(angle: presenter?.angle ?? 90) ?? .portrait).recordingAngle(observed: presenter?.angle ?? 90),
             presentation: live != nil ? (liveSource?.pip?.presentation ?? PiPPresentation()) :
-                PiPPresentation(composition: layout.composition, rect: PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero,
+                PiPPresentation(composition: layout.composition, splitSwapped: layout.splitSwapped, rect: PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero,
                     opacity: 1, enabled: true, corner: layout.corner, zoom: layout.framingZoom))
         if live != nil, sourceFront, liveSource?.pip == nil {
             image = image.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: canvas.width, ty: 0))

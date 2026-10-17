@@ -13,11 +13,7 @@ enum PiPSize: String, Codable, CaseIterable, Identifiable, Sendable {
     case small, medium, large
     var id: Self { self }
     var fraction: CGFloat {
-        switch self {
-        case .small: 0.36
-        case .medium: 0.44
-        case .large: 0.52
-        }
+        switch self { case .small: 0.36; case .medium: 0.44; case .large: 0.52 }
     }
     var title: String { rawValue.capitalized }
 }
@@ -47,22 +43,34 @@ enum PiPComposition: String, Codable, CaseIterable, Identifiable, Sendable {
         case .sideBySide: CGRect(x: 0.5, y: 0, width: 0.5, height: 1)
         }
     }
+    func presenterRect(swapped: Bool) -> CGRect? {
+        guard let rect = presenterRect else { return nil }
+        guard swapped else { return rect }
+        return self == .topAndBottom
+            ? CGRect(x: 0, y: 0, width: 1, height: 0.5)
+            : CGRect(x: 0, y: 0, width: 0.5, height: 1)
+    }
+
 }
 struct PiPLayout: Codable, Equatable, Sendable {
     var corner = PiPCorner.bottomRight
     var size = PiPSize.small
     var orientation = PiPOrientation.landscape
     var composition = PiPComposition.inset
+    var splitSwapped = false
     var zoom: CGFloat = 1
     var framingZoom: CGFloat { Self.clampedZoom(zoom) }
     static func clampedZoom(_ value: CGFloat) -> CGFloat { value.isFinite ? min(2, max(1, value)) : 1 }
-    init(corner: PiPCorner = .bottomRight, size: PiPSize = .small, orientation: PiPOrientation = .landscape, zoom: CGFloat = 1, composition: PiPComposition = .inset) {
+    init(corner: PiPCorner = .bottomRight, size: PiPSize = .small, orientation: PiPOrientation = .landscape, zoom: CGFloat = 1, composition: PiPComposition = .inset, splitSwapped: Bool = false) {
+        self.splitSwapped = splitSwapped
         self.composition = composition
         self.corner = corner; self.size = size; self.orientation = orientation; self.zoom = Self.clampedZoom(zoom)
     }
-    private enum CodingKeys: String, CodingKey { case corner, size, orientation, zoom, composition }
+    var splitPresenterRect: CGRect? { composition.presenterRect(swapped: splitSwapped) }
+    private enum CodingKeys: String, CodingKey { case corner, size, orientation, zoom, composition, splitSwapped }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        splitSwapped = try values.decodeIfPresent(Bool.self, forKey: .splitSwapped) ?? false
         composition = try values.decodeIfPresent(PiPComposition.self, forKey: .composition) ?? .inset
         corner = try values.decode(PiPCorner.self, forKey: .corner)
         size = try values.decode(PiPSize.self, forKey: .size)
@@ -72,6 +80,7 @@ struct PiPLayout: Codable, Equatable, Sendable {
 }
 struct PiPPresentation: Equatable, Sendable {
     var composition = PiPComposition.inset
+    var splitSwapped = false
     var rect = CGRect.zero // UIKit-normalized coordinates in the actual movie canvas.
     var opacity: CGFloat = 0
     var enabled = false
@@ -120,7 +129,7 @@ enum PiPGeometry {
         return rect(closest)
     }
     static func rect(layout: PiPLayout, canvas: CGSize, obstacles: [CGRect] = []) -> CGRect? {
-        if let split = layout.composition.presenterRect { return split }
+        if let split = layout.splitPresenterRect { return split }
         let center = desiredCenter(corner: layout.corner, canvas: canvas, size: layout.size, orientation: layout.orientation)
         return safeRect(center: center, canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles)
             ?? safeRect(center: center, canvas: canvas, size: layout.size, orientation: layout.orientation)
@@ -179,9 +188,9 @@ struct PiPTimeline {
         center = moveTo; return layout
     }
     func presentation(at time: CMTime, canvas: CGSize, obstacles: [CGRect] = []) -> PiPPresentation {
-        let rect = layout.composition.presenterRect ?? PiPGeometry.safeRect(center: currentCenter(at: time, canvas: canvas), canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles)
+        let rect = layout.splitPresenterRect ?? PiPGeometry.safeRect(center: currentCenter(at: time, canvas: canvas), canvas: canvas, size: layout.size, orientation: layout.orientation, obstacles: obstacles)
             ?? PiPGeometry.rect(layout: layout, canvas: canvas)
-        return PiPPresentation(composition: layout.composition, rect: rect ?? .zero, opacity: rect == nil ? 0 : opacity(at: time), enabled: enabled, corner: layout.corner, isPlaceable: rect != nil, zoom: layout.framingZoom)
+        return PiPPresentation(composition: layout.composition, splitSwapped: layout.splitSwapped, rect: rect ?? .zero, opacity: rect == nil ? 0 : opacity(at: time), enabled: enabled, corner: layout.corner, isPlaceable: rect != nil, zoom: layout.framingZoom)
     }
 }
 // Choose a recent front frame from the same capture clock without waiting for it.
@@ -210,10 +219,8 @@ enum PiPCompositor {
         var result = source.transformed(by: LiveLookGeometry.transform(source: source.extent.size, target: canvas, angle: backgroundAngle, front: false)).cropped(to: bounds)
         guard presentation.opacity > 0, presentation.isPlaceable, let presenter, !presentation.rect.isEmpty else { return result }
         if presentation.composition != .inset {
-            let frontUnit = presentation.composition.presenterRect ?? presentation.rect
-            let rearUnit = presentation.composition == .topAndBottom
-                ? CGRect(x: 0, y: 0, width: 1, height: 0.5)
-                : CGRect(x: 0, y: 0, width: 0.5, height: 1)
+            let frontUnit = presentation.composition.presenterRect(swapped: presentation.splitSwapped) ?? presentation.rect
+            let rearUnit = presentation.composition.presenterRect(swapped: !presentation.splitSwapped) ?? .zero
             func panel(_ buffer: CVPixelBuffer, unit: CGRect, angle: CGFloat, zoom: CGFloat) -> CIImage {
                 let rect = CGRect(x: unit.minX * canvas.width, y: (1 - unit.maxY) * canvas.height,
                                   width: unit.width * canvas.width, height: unit.height * canvas.height)

@@ -193,6 +193,31 @@ actor ProjectStore {
         movie.look = look
         var next = catalog; next.movies.append(movie); try write(next); return movie
     }
+    func createQuickMovie() throws -> Movie {
+        try requireIdle()
+        let names = Set(catalog.movies.map(\.name))
+        var number = 1
+        while names.contains("Movie \(number)") { number += 1 }
+        return try create(name: "Movie \(number)", format: .portrait, profile: .standard, useDefaultLook: false)
+    }
+    func setMovieRecordingSettings(movieID: UUID, profile: CaptureProfile, look: LUTReference?) throws {
+        try requireIdle()
+        let i = try index(movieID)
+        let movie = catalog.movies[i]
+        guard movie.deletedAt == nil else { throw HomeMovieError.message("This movie is unavailable.") }
+        guard movie.captureProfile == profile || movie.scenes.isEmpty && movie.lastRecordedAt == nil else {
+            throw HomeMovieError.message("The recording format is set by the first scene.")
+        }
+        let selected = profile == .appleLog ? look : nil
+        if let selected { _ = try ColorCube.load(selected, root: root) }
+        var next = catalog
+        next.movies[i].profile = profile == .standard ? nil : profile
+        next.movies[i].look = selected
+        if profile == .appleLog { next.movies[i].dualCameraCapture = nil }
+        guard next.movies[i] != movie else { return }
+        next.movies[i].revision += 1
+        try write(next)
+    }
     func availableLooks() -> [LUTReference] {
         let directory = root.appendingPathComponent("Looks")
         let files = (try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
@@ -288,6 +313,8 @@ actor ProjectStore {
         let staging = try url(ticket.staging), source = try url(ticket.source)
         let input = fm.fileExists(atPath: source.path) ? source : staging
         let info = try await MediaInspector.inspect(input)
+        ReliabilityDiagnostics.shared.record(.recordingGeometry, capture: .init(canvas: ticket.format,
+            savedWidth: Int(info.size.width), savedHeight: Int(info.size.height)))
         if ticket.profile == .appleLog && info.profile != .appleLog {
             throw HomeMovieError.message("The recording’s Apple Log metadata could not be verified.")
         }

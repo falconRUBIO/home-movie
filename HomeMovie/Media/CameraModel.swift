@@ -110,6 +110,14 @@ struct RecordingFlipHandoff {
         // View presentation and foreground callbacks may request the same camera.
         // Keep an in-flight or ready session instead of showing Preparing again.
         if active, preparationConfiguration == configuration, state == .preparing || state == .ready { return }
+        if active, state == .ready, options?.dualCameraPrepared == dualCamera, options?.profile == profile,
+           let previous = preparationConfiguration, previous.profile == profile, previous.movieID == movieID, previous.dualCamera == dualCamera {
+            preparationConfiguration = configuration
+            pipLayout = layout
+            service.setPiPLayout(layout, canvasFormat: canvasFormat)
+            if dualCamera, options?.isPiPEnabled != enablePiP { service.setPiPEnabled(enablePiP) }
+            return
+        }
         ReliabilityDiagnostics.shared.record(.cameraRequested)
         preparationConfiguration = configuration
         let requestID = UUID(); preparationID = requestID
@@ -123,18 +131,20 @@ struct RecordingFlipHandoff {
     }
     func record(movieID: UUID, continuingAt elapsed: CMTime? = nil) {
         guard state == .ready, !switchingCamera, active, let app else { return }
-        guard let observed = options?.angle, let automatic = MovieFormat.captureFormat(angle: observed),
+        guard let observed = options?.angle, MovieFormat.captureFormat(angle: observed) != nil,
               let movie = app.movie(movieID), options?.profile == movie.captureProfile else { return }
         let interfaceFormat = OrientationPolicy.shared.currentInterfaceFormat(observed: observed)
-        let format = movie.recordingFormat ?? (options?.dualCameraPrepared == true ? interfaceFormat : automatic)
-        let recordingFormat = options?.dualCameraPrepared == true ? format : automatic
+        let format = movie.recordingFormat ?? interfaceFormat
+        let recordingFormat = options?.dualCameraPrepared == true ? format : interfaceFormat
         let angle = recordingFormat.recordingAngle(observed: observed)
         // Keep the camera controls oriented to the phone; PiP's movie canvas is independent.
         takeFormat = OrientationPolicy.shared.currentInterfaceFormat(observed: observed)
         activeMovieID = movieID; elapsedBeforeSegment = elapsed ?? .zero
         self.elapsed = elapsedBeforeSegment; beganAt = nil
         continuingRecording = elapsed != nil
-        ReliabilityDiagnostics.shared.record(.recordingRequested)
+        ReliabilityDiagnostics.shared.record(.recordingRequested, capture: .init(
+            camera: options?.isFront == true ? .front : .rear, interface: interfaceFormat,
+            canvas: recordingFormat, sensorAngle: Double(observed)))
         state = .starting; savedScene = false; hasRecoverableTake = false; message = nil; startCancelled = false
         operation = Task {
             var pendingTicket: CaptureTicket?
