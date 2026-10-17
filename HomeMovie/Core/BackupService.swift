@@ -150,6 +150,10 @@ actor BackupService {
             let references = Dictionary(restored.compactMap { $0.look }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             var restoredLooks: [UUID: LUTReference] = [:]
             for look in references.values {
+                if look.isRetiredBundledLook {
+                    restoredLooks[look.id] = .filmica
+                    continue
+                }
                 try Task.checkCancellation()
                 guard let expected = backup.files[look.path], expected.bytes > 0, expected.bytes <= 8_000_000 else {
                     throw HomeMovieError.message("The backup’s look data is invalid.")

@@ -30,7 +30,7 @@ for paths, refs, builds in [(app_sources, app_files, app_build), (tests, test_fi
         ref = add(relative, 'PBXFileReference', lastKnownFileType='sourcecode.swift', path=relative, sourceTree='<group>')
         refs.append(ref); builds.append(add(relative + ':build', 'PBXBuildFile', fileRef=ref))
 resources = []
-for path, filetype in [('HomeMovie/PrivacyInfo.xcprivacy', 'text.xml'), ('HomeMovie/Assets.xcassets', 'folder.assetcatalog'), ('HomeMovie/Resources/AppleLogToRec709.lut', 'file'), ('HomeMovie/Resources/Filmica.json', 'text.json'), ('HomeMovie/Resources/Amber.json', 'text.json'), ('HomeMovie/Resources/Heritage.json', 'text.json'), ('HomeMovie/Resources/Ember.json', 'text.json')]:
+for path, filetype in [('HomeMovie/PrivacyInfo.xcprivacy', 'text.xml'), ('HomeMovie/Assets.xcassets', 'folder.assetcatalog'), ('HomeMovie/Resources/AppleLogToRec709.lut', 'file'), ('HomeMovie/Resources/Filmica.json', 'text.json')]:
     ref = add(path, 'PBXFileReference', lastKnownFileType=filetype, path=path, sourceTree='<group>')
     app_files.append(ref); resources.append(add(path + ':build', 'PBXBuildFile', fileRef=ref))
 app = add('app-product', 'PBXFileReference', explicitFileType='wrapper.application', path='HomeMovie.app', sourceTree='BUILT_PRODUCTS_DIR')
@@ -80,4 +80,3 @@ scheme = f'''<?xml version="1.0" encoding="UTF-8"?>
 scheme_dir = project / 'xcshareddata/xcschemes'; scheme_dir.mkdir(parents=True, exist_ok=True)
 (scheme_dir / 'HomeMovie.xcscheme').write_text(scheme)
 print(f'Generated project: {len(app_sources)} source files, {len(tests)} test files')
-

@@ -28,7 +28,7 @@ final class SceneAdjustmentsTests: XCTestCase {
         let input = gray(0.7)
         let values = Array(repeating: [Float(0.2), Float(0.2), Float(0.2), Float(1)], count: 8).flatMap { $0 }
         let cube = ColorCube(name: "Constant", dimension: 2, rgba: values.withUnsafeBytes { Data($0) })
-        let recipe = SceneAdjustments(exposure: 0.5)
+        let recipe = SceneAdjustments(exposure: 0.5, warmth: 0.4, tint: -0.3)
         let instruction = ColorInstruction(range: CMTimeRange(start: .zero, duration: CMTime(value: 1, timescale: 30)),
             trackID: 1, transform: .identity, cube: cube, adjustments: recipe)
         let expected = sample(try recipe.apply(to: cube.apply(to: input)))
@@ -82,5 +82,45 @@ final class SceneAdjustmentsTests: XCTestCase {
         let data = try JSONEncoder().encode(scene)
         let decoded = try JSONDecoder().decode(Scene.self, from: data)
         XCTAssertEqual(decoded.lightAdjustments, .neutral)
+    }
+}
+
+
+extension SceneAdjustmentsTests {
+    func testLegacyRecipesDecodeWithNeutralColorBalanceAndRoundTripNewValues() throws {
+        let legacy = Data(#"{"exposure":0.25,"shadows":-0.2,"highlights":0.1}"#.utf8)
+        let decoded = try JSONDecoder().decode(SceneAdjustments.self, from: legacy)
+        XCTAssertEqual(decoded.exposure, 0.25)
+        XCTAssertEqual(decoded.warmth, 0)
+        XCTAssertEqual(decoded.tint, 0)
+        let recipe = SceneAdjustments(exposure: 0.25, warmth: -0.4, tint: 0.6)
+        XCTAssertEqual(try JSONDecoder().decode(SceneAdjustments.self, from: JSONEncoder().encode(recipe)), recipe)
+        XCTAssertThrowsError(try SceneAdjustments(warmth: .nan).validate())
+        XCTAssertThrowsError(try SceneAdjustments(tint: 1.01).validate())
+    }
+    func testWarmthAndTintDirectionsPreserveLuminanceAndNeutralEndpoints() throws {
+        let input = gray(0.5)
+        for direction in [-1.0, 1.0] {
+            let warm = sample(try SceneAdjustments(warmth: direction).apply(to: input))
+            let tint = sample(try SceneAdjustments(tint: direction).apply(to: input))
+            XCTAssertGreaterThan((warm[0] - warm[2]) * Float(direction), 0)
+            XCTAssertGreaterThan(((tint[0] + tint[2]) / 2 - tint[1]) * Float(direction), 0)
+            for values in [warm, tint] {
+                XCTAssertEqual(values[0] * 0.2126 + values[1] * 0.7152 + values[2] * 0.0722, 0.5, accuracy: 0.0001)
+                XCTAssertEqual(values[3], 1, accuracy: 0.0001)
+            }
+        }
+        for warmth in [-1.0, 1.0] {
+            for tint in [-1.0, 1.0] {
+                let recipe = SceneAdjustments(warmth: warmth, tint: tint)
+                for level in [0.0, 0.01, 0.5, 0.99, 1.0] {
+                    let pixel = sample(try recipe.apply(to: gray(CGFloat(level))))
+                    XCTAssertTrue(pixel.allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 1 })
+                    if level == 0 || level == 1 {
+                        for channel in 0..<3 { XCTAssertEqual(pixel[channel], Float(level), accuracy: 0.0001) }
+                    }
+                }
+            }
+        }
     }
 }

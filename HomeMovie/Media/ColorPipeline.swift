@@ -10,8 +10,7 @@ struct LUTReference: Codable, Equatable, Sendable {
     static let amber = LUTReference(id: UUID(uuidString: "F19A0001-C031-4A52-9D61-50D0A3000001")!, name: "Amber")
     static let heritage = LUTReference(id: UUID(uuidString: "F19A0002-C031-4A52-9D61-50D0A3000002")!, name: "Heritage")
     static let ember = LUTReference(id: UUID(uuidString: "F19A0003-C031-4A52-9D61-50D0A3000003")!, name: "Ember")
-    static let originalFilmLooks: [LUTReference] = [.amber, .heritage, .ember]
-    var isRetiredBundledLook: Bool { id == Self.cinemaTwo.id || id == Self.cinemaThree.id }
+    var isRetiredBundledLook: Bool { id == Self.cinemaTwo.id || id == Self.cinemaThree.id || id == Self.amber.id || id == Self.heritage.id || id == Self.ember.id }
     var id: UUID
     var name: String
     var displayName: String { id == Self.filmica.id ? "Cinema" : name }
@@ -135,17 +134,6 @@ struct ColorCube: Codable, Sendable {
         try cube.validate()
         return ColorCube(name: "Cinema", dimension: cube.dimension, rgba: cube.rgba, minimum: cube.minimum, maximum: cube.maximum)
     }
-    // Cache composed tables once per process, then install durable backup-ready copies.
-    static let originalFilmLooks: Result<[(LUTReference, ColorCube)], Error> = Result {
-        let standard = try appleStandard.get()
-        return try LUTReference.originalFilmLooks.map { reference in
-            guard let file = Bundle.main.url(forResource: reference.name, withExtension: "json") else {
-                throw HomeMovieError.message("The \(reference.name) look is unavailable.")
-            }
-            let creative = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: file))
-            return (reference, try creative.following(standard))
-        }
-    }
     static let appleStandard: Result<ColorCube, Error> = Result {
         guard let url = Bundle.main.url(forResource: "AppleLogToRec709", withExtension: "lut") else {
             throw HomeMovieError.message("The standard Log look is unavailable.")
@@ -251,4 +239,3 @@ final class LogVideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendabl
         }
     }
 }
-

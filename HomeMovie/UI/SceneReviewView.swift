@@ -285,21 +285,36 @@ struct SceneReviewView: View {
                 ForEach(SceneLightControl.allCases) { Text($0.rawValue).tag($0) }
             }.pickerStyle(.segmented).disabled(busy)
             lightSlider(lightControl.rawValue, value: selectedLightValue)
+            lightSlider("Warmth", value: $adjustments.warmth, endpoints: ("Blue", "Yellow"))
+            lightSlider("Tint", value: $adjustments.tint, endpoints: ("Green", "Magenta"))
             Text("Adjust this scene while watching the preview. Save remembers its light settings for playback and export.")
                 .font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
         }.padding(.horizontal, 20).disabled(preview.loading || preview.error != nil)
     }
-    private func lightSlider(_ title: String, value: Binding<Double>) -> some View {
+    private func lightSlider(_ title: String, value: Binding<Double>, endpoints: (String, String)? = nil) -> some View {
         VStack(spacing: 4) {
             HStack {
                 Text(title); Spacer()
-                Text(value.wrappedValue * 100, format: .number.precision(.fractionLength(0)))
+                Text(abs(value.wrappedValue) < 0.005 ? "0" : String(format: "%+.0f", value.wrappedValue * 100))
                     .monospacedDigit().foregroundStyle(.secondary)
+                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    .onTapGesture(count: 2) { if !busy && !comparing { value.wrappedValue = 0 } }
+                    .accessibilityLabel("\(title) value")
+                    .accessibilityHint("Use the Reset to Zero action to reset this control")
+                    .accessibilityAction(named: "Reset to Zero") { if !busy && !comparing { value.wrappedValue = 0 } }
             }.font(.subheadline)
             Slider(value: value, in: -1...1, step: 0.01)
                 .frame(minHeight: 44).disabled(busy || comparing)
+                .overlay { Rectangle().fill(.secondary).frame(width: 1, height: 8).allowsHitTesting(false).accessibilityHidden(true) }
                 .accessibilityLabel(title)
                 .accessibilityValue(Text(value.wrappedValue * 100, format: .number.precision(.fractionLength(0))))
+            if let endpoints {
+                HStack {
+                    Text(endpoints.0)
+                    Spacer()
+                    Text(endpoints.1)
+                }.font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
+            }
         }
     }
     private var photosFooter: some View {
