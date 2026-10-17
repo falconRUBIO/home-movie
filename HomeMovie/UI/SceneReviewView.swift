@@ -475,7 +475,8 @@ private struct SceneAdjustmentRuler: UIViewRepresentable {
         var value: Binding<Double>
         init(value: Binding<Double>) { self.value = value }
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            guard let view = scrollView as? SceneRulerScrollView, !view.applying, view.bounds.width > 0 else { return }
+            guard let view = scrollView as? SceneRulerScrollView, !view.applying,
+                  view.readyForInput, view.isDragging || view.isDecelerating else { return }
             let next = view.value(at: scrollView.contentOffset.x)
             view.displayedValue = next
             if value.wrappedValue != next { value.wrappedValue = next }
@@ -493,6 +494,7 @@ private final class SceneRulerScrollView: UIScrollView {
     private var previousWidth: CGFloat = 0
     var displayedValue = 0.0
     var applying = false
+    var readyForInput: Bool { previousWidth > 0 && previousWidth == bounds.width }
     init() {
         super.init(frame: .zero)
         showsHorizontalScrollIndicator = false; showsVerticalScrollIndicator = false
