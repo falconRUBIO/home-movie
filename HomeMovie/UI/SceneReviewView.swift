@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import UIKit
 
 @MainActor final class SceneReviewPreviewModel: ObservableObject {
     @Published var player: AVPlayer?
@@ -60,13 +61,50 @@ private enum SceneReviewTool: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 private enum SceneLightControl: String, CaseIterable, Identifiable {
-    case exposure = "Exposure", shadows = "Shadows", highlights = "Highlights"
+    case exposure = "Exposure", brightness = "Brightness", brilliance = "Brilliance", pushPull = "Push/Pull", shadows = "Shadows", highlights = "Highlights", warmth = "Warmth", tint = "Tint"
     var id: String { rawValue }
     var keyPath: WritableKeyPath<SceneAdjustments, Double> {
         switch self {
         case .exposure: \.exposure
         case .shadows: \.shadows
         case .highlights: \.highlights
+        case .brightness: \.brightness
+        case .brilliance: \.brilliance
+        case .pushPull: \.pushPull
+        case .warmth: \.warmth
+        case .tint: \.tint
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .exposure: "sun.max"
+        case .brightness: "sun.min"
+        case .brilliance: "sun.max.circle"
+        case .pushPull: "circle.lefthalf.filled"
+        case .shadows: "moon"
+        case .highlights: "sun.max.fill"
+        case .warmth: "thermometer.medium"
+        case .tint: "circle.lefthalf.filled"
+        }
+    }
+    var endpoints: (String, String)? {
+        switch self {
+        case .warmth: ("Blue", "Yellow")
+        case .tint: ("Green", "Magenta")
+        case .pushPull: ("Pull · Softer", "Push · Denser")
+        default: nil
+        }
+    }
+    var detail: String {
+        switch self {
+        case .exposure: "Adjusts the overall light level."
+        case .brightness: "Brightens or darkens the midtones."
+        case .brilliance: "Balances darker areas and bright highlights."
+        case .pushPull: "Softens contrast or adds density. Does not change recording exposure."
+        case .shadows: "Adjusts detail in darker areas."
+        case .highlights: "Adjusts the brightest areas."
+        case .warmth: "Balances cool blue and warm yellow."
+        case .tint: "Balances green and magenta."
         }
     }
 }
@@ -75,6 +113,7 @@ struct SceneReviewView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let movieID: UUID
     let scene: Scene
     @StateObject private var preview = SceneReviewPreviewModel()
@@ -84,7 +123,6 @@ struct SceneReviewView: View {
     @State private var adjustments: SceneAdjustments
     @State private var comparing = false
     @State private var tool = SceneReviewTool.light
-    @State private var lightControl = SceneLightControl.exposure
     @State private var saving = false
     @State private var savingPhotos = false
     @State private var waitingForExport = false
@@ -117,14 +155,14 @@ struct SceneReviewView: View {
             GeometryReader { geometry in
                 if geometry.size.width > geometry.size.height {
                     HStack(spacing: 0) {
-                        previewPanel.frame(width: geometry.size.width * 0.58, height: geometry.size.height)
+                        previewPanel.frame(width: geometry.size.width * 0.64, height: geometry.size.height)
                             .background(.black)
                         editingPanel.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 } else {
                     VStack(spacing: 0) {
                         previewPanel.frame(maxWidth: .infinity)
-                            .frame(height: min(320, max(140, min(geometry.size.height * 0.48, geometry.size.width / reviewAspect))))
+                            .frame(height: max(120, min(geometry.size.height * (dynamicTypeSize.isAccessibilitySize ? 0.46 : 0.70), geometry.size.width / reviewAspect)))
                             .background(.black)
                         editingPanel.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -206,11 +244,23 @@ struct SceneReviewView: View {
         .interactiveDismissDisabled(busy || hasUnsavedEdits)
         .onDisappear { preview.stop(); export.cancel() }
     }
+    private var reviewToolPicker: some View {
+        Picker("Editing tool", selection: $tool) {
+            ForEach(SceneReviewTool.allCases) { Text($0.rawValue).tag($0) }
+        }.pickerStyle(.segmented).frame(minWidth: 120).disabled(busy)
+    }
     private var editingPanel: some View {
         VStack(spacing: 0) {
-            Picker("Editing tool", selection: $tool) {
-                ForEach(SceneReviewTool.allCases) { Text($0.rawValue).tag($0) }
-            }.pickerStyle(.segmented).padding(.horizontal, 20).padding(.vertical, 12).disabled(busy)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    reviewToolPicker
+                    if tool == .light { lightComparisonControls }
+                }
+                VStack(spacing: 0) {
+                    reviewToolPicker
+                    if tool == .light { lightComparisonControls }
+                }
+            }.padding(.horizontal, 16).padding(.vertical, 4)
             ScrollView {
                 VStack(spacing: 12) {
                     if tool == .light { lightControls } else { trimControls }
@@ -231,7 +281,6 @@ struct SceneReviewView: View {
             if preview.loading { ProgressView().tint(.white) }
         }
         .aspectRatio(reviewAspect, contentMode: .fit)
-        .frame(maxHeight: 360)
         .overlay(alignment: .topLeading) {
             if (scene.profile ?? movie?.captureProfile) == .appleLog {
                 LogLookBadge(lookName: movie?.lookName ?? "Apple Standard").padding(12)
@@ -271,50 +320,57 @@ struct SceneReviewView: View {
                 .frame(minWidth: 44, minHeight: 44).disabled(!adjustments.isActive || busy)
         }
     }
-    private var selectedLightValue: Binding<Double> {
-        let keyPath = lightControl.keyPath
-        return Binding(get: { adjustments[keyPath: keyPath] }, set: { adjustments[keyPath: keyPath] = $0 })
-    }
     private var lightControls: some View {
-        VStack(spacing: 12) {
-            ViewThatFits(in: .horizontal) {
-                HStack { Text("Light").font(.headline); Spacer(); lightComparisonControls }
-                VStack(alignment: .leading, spacing: 4) { Text("Light").font(.headline); lightComparisonControls }
+        LazyVStack(spacing: 4) {
+            ForEach(SceneLightControl.allCases) { control in
+                lightRuler(control)
             }
-            Picker("Light adjustment", selection: $lightControl) {
-                ForEach(SceneLightControl.allCases) { Text($0.rawValue).tag($0) }
-            }.pickerStyle(.segmented).disabled(busy)
-            lightSlider(lightControl.rawValue, value: selectedLightValue)
-            lightSlider("Warmth", value: $adjustments.warmth, endpoints: ("Blue", "Yellow"))
-            lightSlider("Tint", value: $adjustments.tint, endpoints: ("Green", "Magenta"))
-            Text("Adjust this scene while watching the preview. Save remembers its light settings for playback and export.")
-                .font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(.horizontal, 20).disabled(preview.loading || preview.error != nil)
+        }.padding(.horizontal, 16).disabled(preview.loading || preview.error != nil)
     }
-    private func lightSlider(_ title: String, value: Binding<Double>, endpoints: (String, String)? = nil) -> some View {
-        VStack(spacing: 4) {
-            HStack {
-                Text(title); Spacer()
+    private func lightRuler(_ control: SceneLightControl) -> some View {
+        let value = Binding(get: { adjustments[keyPath: control.keyPath] },
+            set: { adjustments[keyPath: control.keyPath] = $0 })
+        return VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: control.symbol).frame(width: 20).accessibilityHidden(true)
+                Text(control.rawValue).fontWeight(.semibold)
+                Spacer(minLength: 8)
                 Text(abs(value.wrappedValue) < 0.005 ? "0" : String(format: "%+.0f", value.wrappedValue * 100))
-                    .monospacedDigit().foregroundStyle(.secondary)
-                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    .monospacedDigit().fontWeight(.semibold)
+                    .frame(minWidth: 44, minHeight: 24).contentShape(Rectangle())
                     .onTapGesture(count: 2) { if !busy && !comparing { value.wrappedValue = 0 } }
-                    .accessibilityLabel("\(title) value")
-                    .accessibilityHint("Use the Reset to Zero action to reset this control")
+                    .accessibilityLabel("\(control.rawValue) value")
                     .accessibilityAction(named: "Reset to Zero") { if !busy && !comparing { value.wrappedValue = 0 } }
-            }.font(.subheadline)
-            Slider(value: value, in: -1...1, step: 0.01)
-                .frame(minHeight: 44).disabled(busy || comparing)
-                .overlay { Rectangle().fill(.secondary).frame(width: 1, height: 8).allowsHitTesting(false).accessibilityHidden(true) }
-                .accessibilityLabel(title)
+            }.font(.subheadline).frame(minHeight: 24).accessibilityHidden(true)
+            SceneAdjustmentRuler(value: value)
+                .frame(height: 44).disabled(busy || comparing)
+                .overlay {
+                    Canvas { context, size in
+                        let center = size.width / 2
+                        let marker = CGRect(x: center - 1.5, y: 1, width: 3, height: 16)
+                        context.fill(Path(roundedRect: marker, cornerRadius: 1.5), with: .color(.orange))
+                        var pointer = Path()
+                        pointer.move(to: CGPoint(x: center, y: 20))
+                        pointer.addLine(to: CGPoint(x: center - 3, y: 25))
+                        pointer.addLine(to: CGPoint(x: center + 3, y: 25))
+                        pointer.closeSubpath()
+                        context.fill(pointer, with: .color(.primary))
+                    }.allowsHitTesting(false).accessibilityHidden(true)
+                }
+                .padding(.vertical, -4)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(control.rawValue)
                 .accessibilityValue(Text(value.wrappedValue * 100, format: .number.precision(.fractionLength(0))))
-            if let endpoints {
-                HStack {
-                    Text(endpoints.0)
-                    Spacer()
-                    Text(endpoints.1)
-                }.font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
-            }
+                .accessibilityHint(control.detail)
+                .accessibilityAdjustableAction { direction in
+                    guard !busy && !comparing else { return }
+                    switch direction {
+                    case .increment: value.wrappedValue = min(1, value.wrappedValue + 0.01)
+                    case .decrement: value.wrappedValue = max(-1, value.wrappedValue - 0.01)
+                    @unknown default: break
+                    }
+                }
+                .accessibilityAction(named: "Reset to Zero") { if !busy && !comparing { value.wrappedValue = 0 } }
         }
     }
     private var photosFooter: some View {
@@ -333,7 +389,7 @@ struct SceneReviewView: View {
                 Text("This scene only · Current look and light adjustments")
                     .font(.caption).foregroundStyle(.secondary)
             }
-        }.padding(.horizontal, 20).padding(.vertical, 10).background(.bar)
+        }.padding(.horizontal, 20).padding(.vertical, 6).background(.bar)
     }
     private func invalidateExport() { export.invalidate(); notice = nil; error = nil }
     private func persistEdits() async throws {
@@ -395,5 +451,106 @@ struct SceneReviewView: View {
             if export.error == nil { notice = "Scene saved to Photos." }
             savingPhotos = false
         }
+    }
+}
+
+// A native horizontal scroll view preserves vertical scrolling between adjustment rows.
+private struct SceneAdjustmentRuler: UIViewRepresentable {
+    @Binding var value: Double
+    @Environment(\.isEnabled) private var enabled
+    func makeCoordinator() -> Coordinator { Coordinator(value: $value) }
+    func makeUIView(context: Context) -> SceneRulerScrollView {
+        let view = SceneRulerScrollView()
+        view.delegate = context.coordinator
+        return view
+    }
+    func updateUIView(_ view: SceneRulerScrollView, context: Context) {
+        context.coordinator.value = $value
+        view.isScrollEnabled = enabled
+        view.apply(value)
+    }
+    static func dismantleUIView(_ view: SceneRulerScrollView, coordinator: Coordinator) {
+        view.delegate = nil; view.isScrollEnabled = false
+    }
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        var value: Binding<Double>
+        init(value: Binding<Double>) { self.value = value }
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            guard let view = scrollView as? SceneRulerScrollView, !view.applying,
+                  view.readyForInput, view.isDragging || view.isDecelerating else { return }
+            let next = view.value(at: scrollView.contentOffset.x)
+            view.displayedValue = next
+            if value.wrappedValue != next { value.wrappedValue = next }
+        }
+        func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint,
+                                      targetContentOffset: UnsafeMutablePointer<CGPoint>) {
+            guard let view = scrollView as? SceneRulerScrollView else { return }
+            targetContentOffset.pointee.x = view.offset(for: view.value(at: targetContentOffset.pointee.x))
+        }
+    }
+}
+private final class SceneRulerScrollView: UIScrollView {
+    private let ticks = SceneRulerTicks()
+    private let tickSpacing: CGFloat = 6
+    private var previousWidth: CGFloat = 0
+    var displayedValue = 0.0
+    var applying = false
+    var readyForInput: Bool { previousWidth > 0 && previousWidth == bounds.width }
+    init() {
+        super.init(frame: .zero)
+        showsHorizontalScrollIndicator = false; showsVerticalScrollIndicator = false
+        bounces = false; isDirectionalLockEnabled = true; decelerationRate = .fast
+        contentInsetAdjustmentBehavior = .never; semanticContentAttribute = .forceLeftToRight
+        backgroundColor = .clear; isAccessibilityElement = false
+        addSubview(ticks)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func value(at offset: CGFloat) -> Double {
+        let raw = Double((offset + bounds.width / 2) / (100 * tickSpacing)) - 1
+        return min(1, max(-1, (raw * 100).rounded() / 100))
+    }
+    func offset(for value: Double) -> CGFloat {
+        CGFloat(min(1, max(-1, value)) + 1) * 100 * tickSpacing - bounds.width / 2
+    }
+    func apply(_ value: Double) {
+        displayedValue = value
+        guard !isDragging, bounds.width > 0 else { return }
+        if isDecelerating, abs(self.value(at: contentOffset.x) - value) < 0.005 { return }
+        applying = true
+        setContentOffset(CGPoint(x: offset(for: value), y: 0), animated: false)
+        applying = false
+    }
+    override func layoutSubviews() {
+        let widthChanged = bounds.width != previousWidth
+        let previouslyApplying = applying
+        super.layoutSubviews()
+        applying = true
+        ticks.frame = CGRect(x: 0, y: 0, width: 200 * tickSpacing, height: bounds.height)
+        if contentSize != ticks.bounds.size { contentSize = ticks.bounds.size }
+        let half = bounds.width / 2
+        if contentInset.left != half || contentInset.right != half {
+            contentInset = UIEdgeInsets(top: 0, left: half, bottom: 0, right: half)
+        }
+        if widthChanged {
+            previousWidth = bounds.width
+            setContentOffset(CGPoint(x: offset(for: displayedValue), y: 0), animated: false)
+        }
+        applying = previouslyApplying
+    }
+}
+private final class SceneRulerTicks: UIView {
+    override init(frame: CGRect) { super.init(frame: frame); backgroundColor = .clear; isOpaque = false; isAccessibilityElement = false }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        context.setStrokeColor(UIColor.secondaryLabel.withAlphaComponent(0.55).cgColor)
+        context.setLineWidth(1.5); context.setLineCap(.round)
+        for index in 0...200 {
+            let height: CGFloat = index == 100 ? 14 : (index % 10 == 0 ? 11 : 6)
+            let x = CGFloat(index) * 6
+            context.move(to: CGPoint(x: x, y: 15 - height))
+            context.addLine(to: CGPoint(x: x, y: 15))
+        }
+        context.strokePath()
     }
 }

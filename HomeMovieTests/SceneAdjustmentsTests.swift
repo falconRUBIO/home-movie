@@ -4,9 +4,10 @@ import CoreImage
 @testable import HomeMovie
 
 final class SceneAdjustmentsTests: XCTestCase {
+    private let sampleContext = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
     private func sample(_ image: CIImage) -> [Float] {
         var pixel = [Float](repeating: 0, count: 4)
-        let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
+        let context = sampleContext
         pixel.withUnsafeMutableBytes {
             context.render(image, toBitmap: $0.baseAddress!, rowBytes: 16,
                 bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
@@ -28,7 +29,7 @@ final class SceneAdjustmentsTests: XCTestCase {
         let input = gray(0.7)
         let values = Array(repeating: [Float(0.2), Float(0.2), Float(0.2), Float(1)], count: 8).flatMap { $0 }
         let cube = ColorCube(name: "Constant", dimension: 2, rgba: values.withUnsafeBytes { Data($0) })
-        let recipe = SceneAdjustments(exposure: 0.5, warmth: 0.4, tint: -0.3)
+        let recipe = SceneAdjustments(exposure: 0.5, warmth: 0.4, tint: -0.3, brightness: 0.2, brilliance: 0.3, pushPull: -0.2)
         let instruction = ColorInstruction(range: CMTimeRange(start: .zero, duration: CMTime(value: 1, timescale: 30)),
             trackID: 1, transform: .identity, cube: cube, adjustments: recipe)
         let expected = sample(try recipe.apply(to: cube.apply(to: input)))
@@ -119,6 +120,51 @@ extension SceneAdjustmentsTests {
                     if level == 0 || level == 1 {
                         for channel in 0..<3 { XCTAssertEqual(pixel[channel], Float(level), accuracy: 0.0001) }
                     }
+                }
+            }
+        }
+    }
+}
+
+
+extension SceneAdjustmentsTests {
+    func testAdditionalLightControlsHaveDistinctResponsesAndNeutralDefaults() throws {
+        let old = Data(#"{"exposure":0.2,"warmth":0.3,"tint":-0.1}"#.utf8)
+        let decoded = try JSONDecoder().decode(SceneAdjustments.self, from: old)
+        XCTAssertEqual(decoded.brightness, 0)
+        XCTAssertEqual(decoded.brilliance, 0)
+        XCTAssertEqual(decoded.pushPull, 0)
+        let recipe = SceneAdjustments(brightness: -0.3, brilliance: 0.4, pushPull: 0.5)
+        XCTAssertEqual(try JSONDecoder().decode(SceneAdjustments.self, from: JSONEncoder().encode(recipe)), recipe)
+        XCTAssertThrowsError(try SceneAdjustments(brightness: .nan).validate())
+        XCTAssertThrowsError(try SceneAdjustments(brilliance: 2).validate())
+        XCTAssertThrowsError(try SceneAdjustments(pushPull: .infinity).validate())
+        let bright = sample(try SceneAdjustments(brightness: 1).apply(to: gray(0.5)))[0]
+        let dark = sample(try SceneAdjustments(brightness: -1).apply(to: gray(0.5)))[0]
+        XCTAssertGreaterThan(bright, 0.5)
+        XCTAssertLessThan(dark, 0.5)
+        let bShadow = sample(try SceneAdjustments(brightness: 1).apply(to: gray(0.1)))[0] - 0.1
+        let bMiddle = bright - 0.5
+        let eShadow = sample(try SceneAdjustments(exposure: 1).apply(to: gray(0.1)))[0] - 0.1
+        let eMiddle = sample(try SceneAdjustments(exposure: 1).apply(to: gray(0.5)))[0] - 0.5
+        XCTAssertLessThan(bShadow / bMiddle, eShadow / eMiddle)
+        XCTAssertGreaterThan(sample(try SceneAdjustments(brilliance: 1).apply(to: gray(0.2)))[0], 0.2)
+        XCTAssertLessThan(sample(try SceneAdjustments(brilliance: 1).apply(to: gray(0.9)))[0], 0.9)
+        XCTAssertLessThan(sample(try SceneAdjustments(pushPull: 1).apply(to: gray(0.2)))[0], 0.2)
+        XCTAssertGreaterThan(sample(try SceneAdjustments(pushPull: 1).apply(to: gray(0.8)))[0], 0.8)
+        XCTAssertGreaterThan(sample(try SceneAdjustments(pushPull: -1).apply(to: gray(0.2)))[0], 0.2)
+    }
+    func testAdditionalLightControlsPreserveMonotonicRampAndEndpointsAtExtremes() throws {
+        let levels: [CGFloat] = [0, 0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99, 1]
+        for brightness in [-1.0, 1.0] {
+            for brilliance in [-1.0, 1.0] {
+                for pushPull in [-1.0, 1.0] {
+                    let recipe = SceneAdjustments(brightness: brightness, brilliance: brilliance, pushPull: pushPull)
+                    let ramp = try levels.map { sample(try recipe.apply(to: gray($0)))[0] }
+                    XCTAssertTrue(ramp.allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 1 })
+                    XCTAssertTrue(zip(ramp, ramp.dropFirst()).allSatisfy { $1 >= $0 })
+                    XCTAssertEqual(ramp.first!, 0, accuracy: 0.0001)
+                    XCTAssertEqual(ramp.last!, 1, accuracy: 0.0001)
                 }
             }
         }
