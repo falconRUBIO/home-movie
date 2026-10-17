@@ -142,6 +142,8 @@ struct FilmEffectsView: View {
     }
     private var controls: some View {
         Form {
+            softnessControls
+            rolloffControls
             grainControls
             halationControls
             bloomControls
@@ -149,6 +151,22 @@ struct FilmEffectsView: View {
                 Button("Reset All") { settings = .off; comparing = false }
             } footer: { Text("These effects appear in this preview and your exported copy. Original recordings and your selected color look are preserved.") }
         }.disabled(saving)
+    }
+    private var softnessControls: some View {
+        Section {
+            Toggle("Optical Softness", isOn: $settings.softnessEnabled)
+            if settings.softnessEnabled {
+                amountSlider("Amount", value: $settings.softnessAmount)
+            }
+        } footer: { Text("Gently softens fine detail for a less digital texture. Faces stay clear.") }
+    }
+    private var rolloffControls: some View {
+        Section {
+            Toggle("Highlight Roll-Off", isOn: $settings.rolloffEnabled)
+            if settings.rolloffEnabled {
+                amountSlider("Amount", value: $settings.rolloffAmount)
+            }
+        } footer: { Text("Smooths bright tones toward white. Lower amounts keep highlights brighter.") }
     }
     private var grainControls: some View {
         Section {

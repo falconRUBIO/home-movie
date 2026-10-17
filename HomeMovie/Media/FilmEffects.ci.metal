@@ -79,18 +79,38 @@ extern "C" { namespace coreimage {
         float3 result = base.rgb + max(1.0 - base.rgb, 0.0) * (1.0 - exp(-energy));
         return float4(encode709(result), base.a);
     }
+    float4 filmSoftness(sample_t base, sample_t soft, float amount) {
+        float l = luminance(base.rgb);
+        // Retain a sharp base and avoid turning dark scenes into a milky wash.
+        float blend = amount * (0.35 + 0.25 * smoothstep(0.08, 0.75, l));
+        return float4(encode709(mix(base.rgb, soft.rgb, blend)), base.a);
+    }
+    float4 filmRolloff(sample_t input, float amount) {
+        float3 rgb = decode709(input.rgb);
+        float peak = max(rgb.r, max(rgb.g, rgb.b));
+        // A smooth shoulder with unit slope at its join. Channel ratios stay intact.
+        // This is rendition shaping; it cannot recover clipped sensor information.
+        const float knee = 0.35;
+        float above = max(peak - knee, 0.0);
+        float shoulder = knee + above / (1.0 + above * 1.8 * amount);
+        float gain = peak > knee ? shoulder / max(peak, 0.00001) : 1.0;
+        return float4(encode709(rgb * gain), input.a);
+    }
     float4 filmGrain(sample_t input, float amount, float size, float seedLow, float seedHigh, float4 bounds, destination dest) {
         float2 p = dest.coord();
         if (p.x < bounds.x || p.y < bounds.y || p.x >= bounds.x + bounds.z || p.y >= bounds.y + bounds.w) return input;
         uint seed = uint(seedLow) | (uint(seedHigh) << 16);
         float fine = particles(p - bounds.xy, size, seed, 17u);
         float cluster = particles(p - bounds.xy + float2(13.7, 29.1), size * 1.8, seed, 103u);
+        float coarse = particles(p - bounds.xy + float2(41.3, 7.9), size * 3.1, seed, 271u);
         float l = clamp(luminance(input.rgb), 0.0, 1.0);
         float response = 0.25 + 0.75 * pow(max(4.0 * l * (1.0 - l), 0.0), 0.65);
-        float g = (fine * 0.85 + cluster * 0.15) * amount * 0.065 * response;
+        float g = (fine * 0.65 + cluster * 0.25 + coarse * 0.10) * amount * 0.18 * response;
         // Mostly luminance grain: preserve hue and underlying detail, limit endpoint bias.
-        float headroom = max(0.0, min(min(input.r, min(input.g, input.b)), 1.0 - max(input.r, max(input.g, input.b))));
-        g = clamp(g, -headroom, headroom);
-        return float4(input.rgb + g, input.a);
+        // Scale toward black or white instead of suppressing all grain whenever
+        // a single channel is saturated. Neutral patches remain neutral.
+        float3 rgb = clamp(input.rgb, 0.0, 1.0);
+        float3 result = g >= 0.0 ? rgb + (1.0 - rgb) * g * 2.0 : rgb + rgb * g * 2.0;
+        return float4(result, input.a);
     }
 }}

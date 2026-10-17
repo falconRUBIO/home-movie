@@ -113,6 +113,81 @@ final class FilmEffectsTests: XCTestCase {
         }
     }
 
+    func testOldEffectsRecipeDefaultsNewControlsOff() throws {
+        let old = Data(#"{"version":1,"grainEnabled":true,"grainAmount":0.4,"seed":42}"#.utf8)
+        let settings = try JSONDecoder().decode(FilmEffectsSettings.self, from: old)
+        XCTAssertTrue(settings.grainEnabled)
+        XCTAssertEqual(settings.grainAmount, 0.4)
+        XCTAssertEqual(settings.seed, 42)
+        XCTAssertFalse(settings.softnessEnabled)
+        XCTAssertFalse(settings.rolloffEnabled)
+        try settings.validate()
+        XCTAssertEqual(try JSONDecoder().decode(FilmEffectsSettings.self, from: JSONEncoder().encode(settings)), settings)
+    }
+    func testNewControlsPersistValidateAndChangeCache() throws {
+        var settings = FilmEffectsSettings.off
+        settings.softnessEnabled = true; settings.softnessAmount = 0.6
+        settings.rolloffEnabled = true; settings.rolloffAmount = 0.7
+        XCTAssertTrue(settings.isActive)
+        XCTAssertNotEqual(settings.cacheIdentity, FilmEffectsSettings.off.cacheIdentity)
+        XCTAssertEqual(try JSONDecoder().decode(FilmEffectsSettings.self, from: JSONEncoder().encode(settings)), settings)
+        settings.softnessAmount = .infinity
+        XCTAssertThrowsError(try settings.validate())
+        settings.softnessAmount = 0.6; settings.rolloffAmount = -0.1
+        XCTAssertThrowsError(try settings.validate())
+    }
+    func testSoftnessReducesEdgeContrastAndKeepsFlatAreasUnchanged() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)
+        let dark = CIImage(color: CIColor(red: 0.2, green: 0.2, blue: 0.2)).cropped(to: bounds)
+        let light = CIImage(color: CIColor(red: 0.8, green: 0.8, blue: 0.8))
+            .cropped(to: CGRect(x: 128, y: 0, width: 128, height: 256))
+        let source = light.composited(over: dark).cropped(to: bounds)
+        var settings = FilmEffectsSettings.off; settings.softnessEnabled = true; settings.softnessAmount = 1
+        let output = try FilmEffectsRenderer().render(source, settings: settings, time: .zero)
+        XCTAssertEqual(output.extent, bounds)
+        let result = pixels(output)
+        XCTAssertGreaterThan(result[(128 * 256 + 127) * 4], 0.2)
+        XCTAssertLessThan(result[(128 * 256 + 128) * 4], 0.8)
+        XCTAssertEqual(result[(128 * 256 + 30) * 4], 0.2, accuracy: 0.001)
+        XCTAssertEqual(result[(128 * 256 + 220) * 4], 0.8, accuracy: 0.001)
+    }
+    func testRolloffHasSmoothMonotonicShoulderAndPreservesShadows() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 8, height: 8)
+        let renderer = FilmEffectsRenderer()
+        var settings = FilmEffectsSettings.off; settings.rolloffEnabled = true; settings.rolloffAmount = 1
+        var previous: Float = -1
+        for step in 0...20 {
+            let level = Float(step) / 20
+            let source = CIImage(color: CIColor(red: CGFloat(level), green: CGFloat(level), blue: CGFloat(level))).cropped(to: bounds)
+            let result = pixels(try renderer.render(source, settings: settings, time: .zero))
+            XCTAssertGreaterThan(result[0], previous)
+            XCTAssertEqual(result[0], result[1], accuracy: 0.000001)
+            XCTAssertEqual(result[3], 1, accuracy: 0.000001)
+            if level <= 0.55 { XCTAssertEqual(result[0], level, accuracy: 0.001) }
+            if level >= 0.85 { XCTAssertLessThan(result[0], level - 0.02) }
+            previous = result[0]
+        }
+        let source = CIImage(color: .white).cropped(to: bounds)
+        settings.rolloffAmount = 0
+        let bypass = try renderer.render(source, settings: settings, time: .zero)
+        XCTAssertTrue(bypass === source)
+    }
+    func testGrainIsVisibleOnSaturatedColorsAndAllEffectsCombine() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)
+        let source = CIImage(color: CIColor(red: 0.9, green: 0.4, blue: 0)).cropped(to: bounds)
+        var settings = FilmEffectsSettings.off; settings.grainEnabled = true; settings.grainAmount = 1
+        settings.grainSize = 2; settings.grainTexture = .coarse16
+        let renderer = FilmEffectsRenderer()
+        let grain = pixels(try renderer.render(source, settings: settings, time: .zero))
+        let green = stride(from: 1, to: grain.count, by: 4).map { grain[$0] }
+        XCTAssertGreaterThan((green.max() ?? 0) - (green.min() ?? 0), 0.01)
+        settings.softnessEnabled = true; settings.rolloffEnabled = true
+        settings.bloomEnabled = true; settings.halationEnabled = true
+        let combined = pixels(try renderer.render(source, settings: settings, time: .zero))
+        XCTAssertTrue(combined.allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 1.001 })
+        XCTAssertNotEqual(grain, combined)
+    }
+
     func testEffectsSettingsPersistAndInvalidateExportRevision() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -120,6 +195,7 @@ final class FilmEffectsTests: XCTestCase {
         _ = try await store.load()
         let movie = try await store.create(name: "Film", format: .landscape)
         var settings = FilmEffectsSettings.off; settings.grainEnabled = true; settings.grainTexture = .coarse16
+        settings.softnessEnabled = true; settings.rolloffEnabled = true
         try await store.setFilmEffects(movieID: movie.id, settings: settings)
         let savedMovies = await store.snapshot()
         let saved = try XCTUnwrap(savedMovies.first)
