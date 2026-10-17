@@ -211,6 +211,7 @@ struct MovieSettingsView: View {
     @State private var checking = true
     @State private var looks: [LUTReference] = []
     @State private var importingLook = false
+    @State private var importingDisplayLook = false
     @State private var loadingLook = false
     @State private var saving = false
     @State private var problem: String?
@@ -248,7 +249,8 @@ struct MovieSettingsView: View {
                                 Text(selectedLook?.displayName ?? "Apple Standard").foregroundStyle(.secondary)
                             }
                         }.foregroundStyle(.primary)
-                        Button("Add Apple Log Look…", systemImage: "plus") { importingLook = true }
+                        Button("Add Apple Log Look…", systemImage: "plus") { importingDisplayLook = false; importingLook = true }
+                        Button("Add Rec.709 Look…", systemImage: "plus") { importingDisplayLook = true; importingLook = true }
                     } header: { Text("Cinema Look") } footer: {
                         Text("Applied to preview, playback and export. Your Apple Log originals stay intact.")
                     }
@@ -289,7 +291,7 @@ struct MovieSettingsView: View {
                     Task {
                         defer { loadingLook = false }
                         do {
-                            selectedLook = try await app.store.importLook(from: url)
+                            selectedLook = try await app.store.importLook(from: url, displayReferred: importingDisplayLook)
                             looks = await app.store.availableLooks()
                         } catch { problem = error.localizedDescription }
                     }
