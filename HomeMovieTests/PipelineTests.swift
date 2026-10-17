@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 30116)
-Total output lines: 1834
-
 import XCTest
 import AVFoundation
 import CoreImage
@@ -738,7 +735,317 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(start, 0); XCTAssertEqual(end, 1)
         XCTAssertEqual(range.duration.seconds, 0.002, accuracy: 0.00001)
         XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(value: 144, timescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
-        XCTAssertEqual(start, 1); XC…5116 tokens truncated…ZoomSpeed.fast.rate) }
+        XCTAssertEqual(start, 1); XCTAssertEqual(end, 0)
+        XCTAssertEqual(range.start.seconds, 0.002, accuracy: 0.00001)
+    }
+    func testAudioMixSurvivesSilentSceneGapsTrimsAndExport() async throws {
+        let store = try await makeStore(), movie = try await store.create(name: "Audio cuts", format: .landscape)
+        _ = try await record(movie, into: store)
+        let ticket = try await store.begin(movieID: movie.id), target = try await store.url(ticket.staging)
+        let video = store.root.appendingPathComponent("tone-video.mov"), wave = store.root.appendingPathComponent("tone.m4a")
+        try await footage(video)
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 96000))
+        buffer.frameLength = 96000
+        let samples = try XCTUnwrap(buffer.floatChannelData)[0]
+        for frame in 0..<96000 { samples[frame] = Float(sin(Double(frame) * 2 * .pi * 440 / 48000) * 0.5) }
+        do {
+            let audioFile = try AVAudioFile(forWriting: wave, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 48000, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 128000],
+                commonFormat: .pcmFormatFloat32, interleaved: false)
+            try audioFile.write(from: buffer)
+        }
+        let composition = AVMutableComposition()
+        let videoAsset = AVURLAsset(url: video), audioAsset = AVURLAsset(url: wave)
+        defer { withExtendedLifetime((videoAsset, audioAsset)) {} }
+        let videoTracks = try await videoAsset.loadTracks(withMediaType: .video)
+        let audioTracks: [AVAssetTrack]
+        do { audioTracks = try await audioAsset.loadTracks(withMediaType: .audio) }
+        catch { XCTFail("AAC fixture load failed: \(error)"); throw error }
+        let sourceVideo = try XCTUnwrap(videoTracks.first), sourceAudio = try XCTUnwrap(audioTracks.first)
+        let videoTrack = try XCTUnwrap(composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
+        let audioTrack = try XCTUnwrap(composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid))
+        let full = CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 48000))
+        let videoRange = try await sourceVideo.load(.timeRange), audioRange = try await sourceAudio.load(.timeRange)
+        do {
+            try videoTrack.insertTimeRange(CMTimeRangeGetIntersection(full, otherRange: videoRange), of: sourceVideo, at: .zero)
+            try audioTrack.insertTimeRange(CMTimeRangeGetIntersection(full, otherRange: audioRange), of: sourceAudio, at: .zero)
+        } catch { XCTFail("Audio fixture track assembly failed: \(error)"); throw error }
+        let fixture = try XCTUnwrap(AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality))
+        do { try await fixture.export(to: target, as: .mov) }
+        catch { XCTFail("Audio fixture mux failed: \(error)"); throw error }
+        try await store.commit(ticket)
+        try await store.trim(movieID: movie.id, sceneID: ticket.sceneID, start: CMTime(seconds: 0.25, preferredTimescale: 48000), end: CMTime(seconds: 1.25, preferredTimescale: 48000))
+        _ = try await record(movie, into: store)
+        let movies = await store.snapshot(); let snapshot = try XCTUnwrap(movies.first)
+        let bundle = try await MediaAssembler().build(movie: snapshot, root: store.root)
+        XCTAssertEqual(bundle.duration.seconds, 5, accuracy: 0.0001)
+        let mix = try XCTUnwrap(bundle.audioMix), parameters = try XCTUnwrap(mix.inputParameters.first)
+        var start: Float = -1, end: Float = -1, range = CMTimeRange.invalid
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.002, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertEqual(start, 0); XCTAssertEqual(end, 1); XCTAssertEqual(range.start.seconds, 2, accuracy: 0.0001)
+        XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.998, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
+        XCTAssertEqual(start, 1); XCTAssertEqual(end, 0)
+        let output = store.root.appendingPathComponent("smoothed.mp4")
+        let exporter = try XCTUnwrap(AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality))
+        exporter.videoComposition = bundle.videoComposition; exporter.audioMix = mix
+        do { try await exporter.export(to: output, as: .mp4) }
+        catch { XCTFail("Scene audio mix export failed: \(error)"); throw error }
+        let info = try await MediaInspector.inspect(output)
+        XCTAssertTrue(info.hasAudio); XCTAssertEqual(info.duration.seconds, 5, accuracy: 0.15)
+    }
+    @MainActor func testLateCameraReadyUpdatesDoNotHideFailureOrInterruption() async throws {
+        let app = AppModel(store: try await makeStore())
+        // Keep the model's weak application owner alive for the complete test.
+        let ownedCamera = CameraModel(app: app)
+        let options = CameraOptions(lenses: [], zoom: 1, minimum: 1, maximum: 8, multiplier: 1,
+            isFront: false, angle: 90, profile: .standard, canMeter: false, canLock: false,
+            focusLocked: false, exposureBias: 0, minimumExposureBias: 0, maximumExposureBias: 0,
+            canFlip: false, hasTorch: false, torchOn: false, canStayOnLens: false,
+            smoothMoving: false, recordingFormat: "Standard · H.264")
+        for state in [CameraState.failed, .interrupted, .denied, .starting, .recording, .finalizing] {
+            ownedCamera.state = state; ownedCamera.message = "Preserved recording error"
+            await ownedCamera.receive(.ready(options))
+            XCTAssertEqual(ownedCamera.state, state)
+            XCTAssertEqual(ownedCamera.message, "Preserved recording error")
+        }
+        ownedCamera.state = .preparing
+        await ownedCamera.receive(.ready(options))
+        XCTAssertEqual(ownedCamera.state, .ready, "An explicit retry can become ready")
+    }
+    func testLiveLogLookRemainsEnabledWhileSaving() {
+        for state in [CameraState.ready, .starting, .recording, .finalizing] { XCTAssertTrue(state.showsLiveLook) }
+        for state in [CameraState.preparing, .failed, .denied, .interrupted] { XCTAssertFalse(state.showsLiveLook) }
+    }
+    @MainActor func testHandsFreeCountdownCancellationRestartAndDuplicateStart() async {
+        let countdown = RecordingCountdown(tick: .milliseconds(1))
+        var cancelledStarts = 0, completedStarts = 0
+        countdown.start(canStart: { true }, onStart: { cancelledStarts += 1 })
+        XCTAssertEqual(countdown.remaining, 3)
+        countdown.cancel(); XCTAssertNil(countdown.remaining)
+        let started = expectation(description: "Only the new countdown starts recording")
+        countdown.start(canStart: { true }, onStart: { completedStarts += 1; started.fulfill() })
+        countdown.start(canStart: { true }, onStart: { XCTFail("A second Record tap must not create another start") })
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertEqual(cancelledStarts, 0)
+        XCTAssertEqual(completedStarts, 1)
+        XCTAssertNil(countdown.remaining)
+    }
+    func testDollyStartDelayDoesNotDelayOrdinaryRecording() {
+        for seconds in [0, 3, 5, 7, -1, 999] {
+            XCTAssertEqual(DollyStartDelay.effective(seconds, dollyOpen: false), 0)
+        }
+        XCTAssertEqual(DollyStartDelay.effective(0, dollyOpen: true), 0)
+        XCTAssertEqual(DollyStartDelay.effective(5, dollyOpen: true), 5)
+        XCTAssertEqual(DollyStartDelay.effective(7, dollyOpen: true), 7)
+        XCTAssertEqual(DollyStartDelay.effective(-1, dollyOpen: true), 3)
+    }
+    @MainActor func testSelectedDollyCountdownStartsOnceAndOffStartsImmediately() async {
+        for seconds in [3, 5, 7] {
+            let countdown = RecordingCountdown(tick: .milliseconds(1))
+            var starts = 0
+            let started = expectation(description: "Selected delay \(seconds) completes")
+            countdown.start(seconds: seconds, canStart: { true }, onStart: { starts += 1; started.fulfill() })
+            XCTAssertEqual(countdown.remaining, seconds)
+            countdown.start(seconds: 3, canStart: { true }, onStart: { XCTFail("Duplicate start") })
+            await fulfillment(of: [started], timeout: 2)
+            XCTAssertEqual(starts, 1); XCTAssertNil(countdown.remaining)
+        }
+        let countdown = RecordingCountdown(tick: .milliseconds(1))
+        var starts = 0
+        countdown.start(seconds: 0, canStart: { true }, onStart: { starts += 1 })
+        XCTAssertEqual(starts, 1); XCTAssertNil(countdown.remaining)
+    }
+    @MainActor func testLongDollyCountdownCanBeCancelledAndReplaced() async {
+        let countdown = RecordingCountdown(tick: .milliseconds(1))
+        countdown.start(seconds: 7, canStart: { true }, onStart: { XCTFail("Cancelled countdown fired") })
+        XCTAssertEqual(countdown.remaining, 7); countdown.cancel()
+        let started = expectation(description: "Replacement delay completes")
+        countdown.start(seconds: 5, canStart: { true }, onStart: { started.fulfill() })
+        XCTAssertEqual(countdown.remaining, 5)
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertNil(countdown.remaining)
+    }
+    @MainActor func testHandsFreeCountdownRechecksCameraAvailability() async {
+        let countdown = RecordingCountdown(tick: .milliseconds(1))
+        var available = true
+        let unexpected = expectation(description: "Unavailable camera must not start")
+        unexpected.isInverted = true
+        countdown.start(canStart: { available }, onStart: { unexpected.fulfill() })
+        available = false
+        await fulfillment(of: [unexpected], timeout: 0.2)
+        XCTAssertNil(countdown.remaining)
+        countdown.start(canStart: { false }, onStart: { XCTFail("Do not schedule an unavailable camera") })
+        XCTAssertNil(countdown.remaining)
+    }
+    func testTimedDollyWaitsForFullDurationEvenNearTarget() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 1, maximum: 16))
+        filter.setTarget(8, duration: 10)
+        _ = filter.advance(seconds: 9.99, rate: 0.75)
+        XCTAssertLessThan(abs(log2(filter.value / filter.target)), 0.0002)
+        XCTAssertFalse(filter.isSettled, "A small zoom error must not cut short the requested duration")
+        XCTAssertEqual(try XCTUnwrap(filter.remainingDuration), 0.01, accuracy: 0.000001)
+        _ = filter.advance(seconds: 0.01, rate: 0.75)
+        XCTAssertTrue(filter.isSettled); XCTAssertEqual(filter.value, 8, accuracy: 0.00001)
+    }
+    func testTimedDollyUsesElapsedTimeAndPreservesRemainingTimeOnRangeChange() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 1, maximum: 16))
+        filter.setTarget(8, duration: 3)
+        _ = filter.advance(seconds: 1.5, rate: 0.75)
+        XCTAssertEqual(filter.value, sqrt(8), accuracy: 0.0001)
+        var changed = try XCTUnwrap(SmoothZoomFilter(current: filter.value, minimum: 1, maximum: 8))
+        changed.setTarget(filter.target, duration: filter.remainingDuration)
+        _ = changed.advance(seconds: 1.5, rate: 0.75)
+        XCTAssertTrue(changed.isSettled); XCTAssertEqual(changed.value, 8, accuracy: 0.0001)
+    }
+    func testOrphanRecoveryKeepsStandardOutOfAnExistingLogRecoveryMovie() async throws {
+        let store = try await makeStore()
+        let logMovie = try await store.create(name: "Recovered Recordings", format: .portrait, profile: .appleLog)
+        let orphan = store.root.appendingPathComponent("Staging/\(UUID().uuidString).mov")
+        try await footage(orphan)
+        let bytes = try Data(contentsOf: orphan)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let movies = await reopened.snapshot()
+        let existing = try XCTUnwrap(movies.first { $0.id == logMovie.id })
+        XCTAssertTrue(existing.scenes.isEmpty); XCTAssertEqual(existing.captureProfile, .appleLog)
+        let recovered = try XCTUnwrap(movies.first { $0.id != logMovie.id && $0.name == "Recovered Recordings" })
+        XCTAssertEqual(recovered.captureProfile, .standard)
+        let scene = try XCTUnwrap(recovered.activeScenes.first)
+        XCTAssertEqual(scene.profile, .standard)
+        XCTAssertEqual(try Data(contentsOf: store.root.appendingPathComponent(scene.source)), bytes)
+    }
+
+    @MainActor func testPhotosExportRetryClearsEarlierError() async {
+        actor Writer {
+            var calls = 0
+            func write(_ url: URL) throws -> String {
+                calls += 1
+                if calls == 1 { throw HomeMovieError.message("Temporary Photos failure") }
+                return "saved-asset"
+            }
+        }
+        let writer = Writer()
+        let model = ExportModel(authorizePhotos: { true }, writePhotosVideo: { try await writer.write($0) })
+        model.exportedURL = URL(fileURLWithPath: "/tmp/fixture-export.mp4")
+        await model.saveToPhotos(); XCTAssertNotNil(model.error); XCTAssertNil(model.notice)
+        XCTAssertEqual(model.saveFeedback?.kind, .failure)
+        await model.saveToPhotos(); XCTAssertNil(model.error); XCTAssertNotNil(model.notice)
+        XCTAssertEqual(model.saveFeedback?.kind, .success)
+        XCTAssertEqual(model.saveFeedback?.message, "Saved to Photos")
+    }
+    @MainActor func testPhotosExportDoesNotClaimSuccessWithoutAReceipt() async {
+        let model = ExportModel(authorizePhotos: { true }, writePhotosVideo: { _ in "" })
+        model.exportedURL = URL(fileURLWithPath: "/tmp/fixture-export.mp4")
+        model.notice = "Old successful save"
+        await model.saveToPhotos()
+        XCTAssertNotNil(model.error); XCTAssertNil(model.notice)
+    }
+    @MainActor func testDeniedPhotosExportNeverRequestsAWrite() async {
+        let model = ExportModel(authorizePhotos: { false }, writePhotosVideo: { _ in
+            XCTFail("Denied permission must not write to Photos"); return "unexpected"
+        })
+        model.exportedURL = URL(fileURLWithPath: "/tmp/fixture-export.mp4")
+        await model.saveToPhotos(); XCTAssertNotNil(model.error); XCTAssertNil(model.notice)
+    }
+    @MainActor func testConcurrentPhotosExportsDoNotCreateDuplicateWrites() async {
+        actor Writer {
+            var calls = 0
+            private var pending: CheckedContinuation<Void, Never>?
+            func write(_ url: URL) async -> String {
+                calls += 1
+                await withCheckedContinuation { pending = $0 }
+                return "saved-asset"
+            }
+            func finish() { pending?.resume(); pending = nil }
+        }
+        let writer = Writer()
+        let model = ExportModel(authorizePhotos: { true }, writePhotosVideo: { await writer.write($0) })
+        model.exportedURL = URL(fileURLWithPath: "/tmp/fixture-export.mp4")
+        let first = Task { await model.saveToPhotos() }
+        for _ in 0..<1000 {
+            let calls = await writer.calls
+            if calls > 0 { break }
+            await Task.yield()
+        }
+        let startedCalls = await writer.calls
+        XCTAssertEqual(model.saveFeedback?.kind, .saving)
+        guard startedCalls == 1 else { first.cancel(); XCTFail("First save did not start"); return }
+        await model.saveToPhotos() // The first write is deliberately still in flight.
+        let calls = await writer.calls
+        await writer.finish(); await first.value
+        XCTAssertEqual(calls, 1); XCTAssertNil(model.error); XCTAssertNotNil(model.notice)
+    }
+
+    func testLogCodecPrefersHEVCAndSupportsNativeProResWithoutSDRFallback() {
+        XCTAssertEqual(LogRecordingCodec.preferred(in: [LogRecordingCodec.proRes422, .hevc, LogRecordingCodec.proResLT]), .hevc)
+        XCTAssertEqual(LogRecordingCodec.preferred(in: [LogRecordingCodec.proRes422, LogRecordingCodec.proResLT]), LogRecordingCodec.proResLT)
+        XCTAssertEqual(LogRecordingCodec.preferred(in: [LogRecordingCodec.proRes422]), LogRecordingCodec.proRes422)
+        XCTAssertNil(LogRecordingCodec.preferred(in: [.h264]))
+        XCTAssertNil(LogRecordingCodec.preferred(in: []))
+    }
+
+    @MainActor func testLiveLookCompletionCannotRevealOriginalOrInactivePreview() throws {
+        guard let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) else {
+            throw XCTSkip("Metal preview is unavailable on this simulator")
+        }
+        let frames = LiveFrames(), cube = try ColorCube.appleStandard.get()
+        renderer.configure(frames: frames, cube: cube, active: true)
+        let graded = renderer.presentationID
+        XCTAssertTrue(renderer.canPresent(graded))
+        renderer.configure(frames: frames, cube: nil, active: true)
+        XCTAssertFalse(renderer.canPresent(graded), "A finishing GPU frame must not reveal a look after Show Original")
+        renderer.configure(frames: frames, cube: cube, active: true)
+        let resumed = renderer.presentationID
+        XCTAssertFalse(renderer.canPresent(graded))
+        XCTAssertTrue(renderer.canPresent(resumed))
+        renderer.configure(frames: frames, cube: cube, active: false)
+        XCTAssertFalse(renderer.canPresent(resumed), "Leaving capture must invalidate in-flight presentation")
+    }
+    @MainActor func testLiveLookSwitchRejectsPreviousFrameWithoutInvalidatingSameLook() throws {
+        guard let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) else {
+            throw XCTSkip("Metal preview is unavailable on this simulator")
+        }
+        let frames = LiveFrames(), cube = try ColorCube.appleStandard.get()
+        renderer.configure(frames: frames, cube: cube, active: true)
+        let initial = renderer.presentationID
+        renderer.configure(frames: frames, cube: cube, active: true)
+        XCTAssertTrue(renderer.canPresent(initial), "Timer and metering updates must not invalidate an unchanged look")
+        var changed = cube; changed.minimum = [-1, -1, -1]
+        renderer.configure(frames: frames, cube: changed, active: true)
+        XCTAssertFalse(renderer.canPresent(initial), "Switching looks must reject an old frame even with identical samples")
+        XCTAssertTrue(renderer.canPresent(renderer.presentationID))
+        let current = renderer.presentationID
+        renderer.configure(frames: LiveFrames(), cube: changed, active: true)
+        XCTAssertFalse(renderer.canPresent(current), "A different capture source must invalidate the previous frame")
+    }
+    func testSmoothZoomOpeningDoesNotMoveAndInvalidTargetsAreIgnored() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 3.2, minimum: 1, maximum: 16))
+        XCTAssertEqual(filter.value, 3.2); XCTAssertEqual(filter.target, 3.2)
+        XCTAssertEqual(filter.advance(seconds: 0.05, rate: 0.75), 3.2, accuracy: 0.0001)
+        filter.setTarget(.nan); filter.setTarget(.infinity); filter.setTarget(-2)
+        XCTAssertEqual(filter.target, 3.2)
+        XCTAssertNil(SmoothZoomFilter(current: .infinity, minimum: 1, maximum: 8))
+        XCTAssertNil(SmoothZoomFilter(current: 1, minimum: 0, maximum: 8))
+        XCTAssertNil(SmoothZoomFilter(current: 1, minimum: 8, maximum: 8))
+    }
+    func testSmoothZoomTargetFollowsRateLimitWithoutOvershootAndSettlesAfterRelease() throws {
+        var filter = try XCTUnwrap(SmoothZoomFilter(current: 1, minimum: 1, maximum: 16))
+        filter.setTarget(8)
+        var previous = filter.value
+        for _ in 0..<240 {
+            let value = filter.advance(seconds: 0.05, rate: 0.75)
+            XCTAssertGreaterThanOrEqual(value, previous)
+            XCTAssertLessThanOrEqual(value, 8)
+            XCTAssertLessThanOrEqual(log2(value / previous), 0.75 * 0.05 + 0.0002)
+            previous = value
+        }
+        XCTAssertEqual(filter.value, 8, accuracy: 0.001)
+        XCTAssertEqual(filter.target, 8, "Releasing input must retain the target while the controller settles")
+    }
+    func testSmoothZoomReversalAndSpeedAreDirectionIndependent() throws {
+        var slow = try XCTUnwrap(SmoothZoomFilter(current: 4, minimum: 1, maximum: 16))
+        var fast = slow; slow.setTarget(16); fast.setTarget(16)
+        for _ in 0..<20 { _ = slow.advance(seconds: 0.05, rate: SmoothZoomSpeed.slow.rate); _ = fast.advance(seconds: 0.05, rate: SmoothZoomSpeed.fast.rate) }
         XCTAssertGreaterThan(fast.value, slow.value)
         let incomingVelocity = fast.velocity
         fast.setTarget(1); XCTAssertEqual(fast.velocity, incomingVelocity)
