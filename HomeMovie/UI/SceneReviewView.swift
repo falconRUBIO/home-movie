@@ -60,13 +60,38 @@ private enum SceneReviewTool: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 private enum SceneLightControl: String, CaseIterable, Identifiable {
-    case exposure = "Exposure", shadows = "Shadows", highlights = "Highlights"
+    case exposure = "Exposure", brightness = "Brightness", brilliance = "Brilliance", pushPull = "Push/Pull", shadows = "Shadows", highlights = "Highlights", warmth = "Warmth", tint = "Tint"
     var id: String { rawValue }
     var keyPath: WritableKeyPath<SceneAdjustments, Double> {
         switch self {
         case .exposure: \.exposure
         case .shadows: \.shadows
         case .highlights: \.highlights
+        case .brightness: \.brightness
+        case .brilliance: \.brilliance
+        case .pushPull: \.pushPull
+        case .warmth: \.warmth
+        case .tint: \.tint
+        }
+    }
+    var endpoints: (String, String)? {
+        switch self {
+        case .warmth: ("Blue", "Yellow")
+        case .tint: ("Green", "Magenta")
+        case .pushPull: ("Pull · Softer", "Push · Denser")
+        default: nil
+        }
+    }
+    var detail: String {
+        switch self {
+        case .exposure: "Adjusts the overall light level."
+        case .brightness: "Brightens or darkens the midtones."
+        case .brilliance: "Balances darker areas and bright highlights."
+        case .pushPull: "Softens contrast or adds density. Does not change recording exposure."
+        case .shadows: "Adjusts detail in darker areas."
+        case .highlights: "Adjusts the brightest areas."
+        case .warmth: "Balances cool blue and warm yellow."
+        case .tint: "Balances green and magenta."
         }
     }
 }
@@ -75,6 +100,7 @@ struct SceneReviewView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let movieID: UUID
     let scene: Scene
     @StateObject private var preview = SceneReviewPreviewModel()
@@ -117,14 +143,14 @@ struct SceneReviewView: View {
             GeometryReader { geometry in
                 if geometry.size.width > geometry.size.height {
                     HStack(spacing: 0) {
-                        previewPanel.frame(width: geometry.size.width * 0.58, height: geometry.size.height)
+                        previewPanel.frame(width: geometry.size.width * 0.64, height: geometry.size.height)
                             .background(.black)
                         editingPanel.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 } else {
                     VStack(spacing: 0) {
                         previewPanel.frame(maxWidth: .infinity)
-                            .frame(height: min(320, max(140, min(geometry.size.height * 0.48, geometry.size.width / reviewAspect))))
+                            .frame(height: max(120, min(geometry.size.height * (dynamicTypeSize.isAccessibilitySize ? 0.46 : 0.60), geometry.size.width / reviewAspect)))
                             .background(.black)
                         editingPanel.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -210,7 +236,7 @@ struct SceneReviewView: View {
         VStack(spacing: 0) {
             Picker("Editing tool", selection: $tool) {
                 ForEach(SceneReviewTool.allCases) { Text($0.rawValue).tag($0) }
-            }.pickerStyle(.segmented).padding(.horizontal, 20).padding(.vertical, 12).disabled(busy)
+            }.pickerStyle(.segmented).padding(.horizontal, 20).padding(.vertical, 6).disabled(busy)
             ScrollView {
                 VStack(spacing: 12) {
                     if tool == .light { lightControls } else { trimControls }
@@ -231,7 +257,6 @@ struct SceneReviewView: View {
             if preview.loading { ProgressView().tint(.white) }
         }
         .aspectRatio(reviewAspect, contentMode: .fit)
-        .frame(maxHeight: 360)
         .overlay(alignment: .topLeading) {
             if (scene.profile ?? movie?.captureProfile) == .appleLog {
                 LogLookBadge(lookName: movie?.lookName ?? "Apple Standard").padding(12)
@@ -275,24 +300,25 @@ struct SceneReviewView: View {
         let keyPath = lightControl.keyPath
         return Binding(get: { adjustments[keyPath: keyPath] }, set: { adjustments[keyPath: keyPath] = $0 })
     }
+    private var lightAdjustmentPicker: some View {
+        Picker("Adjustment", selection: $lightControl) {
+            ForEach(SceneLightControl.allCases) { Text($0.rawValue).tag($0) }
+        }.pickerStyle(.menu).frame(minHeight: 44).disabled(busy)
+            .accessibilityLabel("Light adjustment")
+    }
     private var lightControls: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 4) {
             ViewThatFits(in: .horizontal) {
-                HStack { Text("Light").font(.headline); Spacer(); lightComparisonControls }
-                VStack(alignment: .leading, spacing: 4) { Text("Light").font(.headline); lightComparisonControls }
+                HStack { lightAdjustmentPicker; Spacer(minLength: 4); lightComparisonControls }
+                VStack(alignment: .leading, spacing: 0) { lightAdjustmentPicker; lightComparisonControls }
             }
-            Picker("Light adjustment", selection: $lightControl) {
-                ForEach(SceneLightControl.allCases) { Text($0.rawValue).tag($0) }
-            }.pickerStyle(.segmented).disabled(busy)
-            lightSlider(lightControl.rawValue, value: selectedLightValue)
-            lightSlider("Warmth", value: $adjustments.warmth, endpoints: ("Blue", "Yellow"))
-            lightSlider("Tint", value: $adjustments.tint, endpoints: ("Green", "Magenta"))
-            Text("Adjust this scene while watching the preview. Save remembers its light settings for playback and export.")
-                .font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(.horizontal, 20).disabled(preview.loading || preview.error != nil)
+            lightSlider(lightControl.rawValue, value: selectedLightValue, endpoints: lightControl.endpoints)
+            Text(lightControl.detail)
+                .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+        }.padding(.horizontal, 16).disabled(preview.loading || preview.error != nil)
     }
     private func lightSlider(_ title: String, value: Binding<Double>, endpoints: (String, String)? = nil) -> some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 0) {
             HStack {
                 Text(title); Spacer()
                 Text(abs(value.wrappedValue) < 0.005 ? "0" : String(format: "%+.0f", value.wrappedValue * 100))
@@ -333,7 +359,7 @@ struct SceneReviewView: View {
                 Text("This scene only · Current look and light adjustments")
                     .font(.caption).foregroundStyle(.secondary)
             }
-        }.padding(.horizontal, 20).padding(.vertical, 10).background(.bar)
+        }.padding(.horizontal, 20).padding(.vertical, 6).background(.bar)
     }
     private func invalidateExport() { export.invalidate(); notice = nil; error = nil }
     private func persistEdits() async throws {
