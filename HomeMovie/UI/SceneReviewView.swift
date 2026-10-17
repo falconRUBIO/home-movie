@@ -337,26 +337,27 @@ struct SceneReviewView: View {
                 Spacer(minLength: 8)
                 Text(abs(value.wrappedValue) < 0.005 ? "0" : String(format: "%+.0f", value.wrappedValue * 100))
                     .monospacedDigit().fontWeight(.semibold)
-                    .frame(minWidth: 44, minHeight: 28).contentShape(Rectangle())
+                    .frame(minWidth: 44, minHeight: 24).contentShape(Rectangle())
                     .onTapGesture(count: 2) { if !busy && !comparing { value.wrappedValue = 0 } }
                     .accessibilityLabel("\(control.rawValue) value")
                     .accessibilityAction(named: "Reset to Zero") { if !busy && !comparing { value.wrappedValue = 0 } }
-            }.font(.subheadline).frame(minHeight: 28).accessibilityHidden(true)
+            }.font(.subheadline).frame(minHeight: 24).accessibilityHidden(true)
             SceneAdjustmentRuler(value: value)
-                .frame(height: 40).disabled(busy || comparing)
+                .frame(height: 44).disabled(busy || comparing)
                 .overlay {
                     Canvas { context, size in
                         let center = size.width / 2
-                        let marker = CGRect(x: center - 1.5, y: 7, width: 3, height: 17)
+                        let marker = CGRect(x: center - 1.5, y: 1, width: 3, height: 16)
                         context.fill(Path(roundedRect: marker, cornerRadius: 1.5), with: .color(.orange))
                         var pointer = Path()
-                        pointer.move(to: CGPoint(x: center, y: 28))
-                        pointer.addLine(to: CGPoint(x: center - 3, y: 33))
-                        pointer.addLine(to: CGPoint(x: center + 3, y: 33))
+                        pointer.move(to: CGPoint(x: center, y: 20))
+                        pointer.addLine(to: CGPoint(x: center - 3, y: 25))
+                        pointer.addLine(to: CGPoint(x: center + 3, y: 25))
                         pointer.closeSubpath()
                         context.fill(pointer, with: .color(.primary))
                     }.allowsHitTesting(false).accessibilityHidden(true)
                 }
+                .padding(.vertical, -4)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(control.rawValue)
                 .accessibilityValue(Text(value.wrappedValue * 100, format: .number.precision(.fractionLength(0))))
@@ -545,10 +546,10 @@ private final class SceneRulerTicks: UIView {
         context.setStrokeColor(UIColor.secondaryLabel.withAlphaComponent(0.55).cgColor)
         context.setLineWidth(1.5); context.setLineCap(.round)
         for index in 0...200 {
-            let height: CGFloat = index == 100 ? 18 : (index % 10 == 0 ? 13 : 6)
+            let height: CGFloat = index == 100 ? 14 : (index % 10 == 0 ? 11 : 6)
             let x = CGFloat(index) * 6
-            context.move(to: CGPoint(x: x, y: 23 - height))
-            context.addLine(to: CGPoint(x: x, y: 23))
+            context.move(to: CGPoint(x: x, y: 15 - height))
+            context.addLine(to: CGPoint(x: x, y: 15))
         }
         context.strokePath()
     }
