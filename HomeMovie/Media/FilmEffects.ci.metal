@@ -43,7 +43,7 @@ float particles(float2 p, float size, uint seed, uint salt) {
 }
 
 extern "C" { namespace coreimage {
-    float4 sceneLight(sample_t input, float exposure, float shadows, float highlights, float warmth, float tint) {
+    float4 sceneLight(sample_t input, float exposure, float shadows, float highlights, float warmth, float tint, float brightness, float brilliance, float pushPull) {
         float3 rgb = clamp(input.rgb, 0.0, 1.0);
         float l = luminance(rgb);
         // Gentle luminance-only changes. Smooth tonal masks avoid hard thresholds;
@@ -52,6 +52,20 @@ extern "C" { namespace coreimage {
         float highlightMask = smoothstep(0.45, 0.85, l);
         float delta = l * (1.0 - l) * (exposure * 0.3 + shadows * shadowMask * 0.4 + highlights * highlightMask * 0.4);
         float target = clamp(l + delta, 0.0, 1.0);
+        // Brilliance opens darker tones while holding bright tones; negative reverses it.
+        target += brilliance * 0.9 * target * (1.0 - target) * (0.65 - target);
+        // Brightness favors midtones, unlike the broader exposure adjustment above.
+        float middle = 1.0 - (2.0 * target - 1.0) * (2.0 * target - 1.0);
+        target += brightness * 0.65 * target * (1.0 - target) * middle;
+        if (pushPull != 0.0) {
+            // A rendition-level density/contrast curve, not a sensor exposure change.
+            float power = exp2(pushPull * 0.65);
+            float low = pow(target, power);
+            float high = pow(1.0 - target, power);
+            target = low / max(low + high, 0.00001);
+            target -= pushPull * 0.08 * target * (1.0 - target);
+        }
+        target = clamp(target, 0.0, 1.0);
         float3 result;
         if (target >= l) {
             result = rgb + (1.0 - rgb) * ((target - l) / max(1.0 - l, 0.00001));
