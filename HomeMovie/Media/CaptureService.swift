@@ -171,6 +171,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
     private var previewHandoffAnnounced = true
     private var standardTake: ContinuousTakePipeline?
     private var standardAngle: CGFloat = 90
+    private var standardSourceAngles: [Bool: CGFloat] = [:]
     private var standardStarted = false
     private var standardStorageCheckPending = false
     private var standardLastStorageCheck: Double = 0
@@ -970,6 +971,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
                 do {
                     self.standardTake = try ContinuousTakePipeline(url: url, angle: angle, callbackQueue: self.queue)
                     self.standardAngle = angle; self.standardStarted = false
+                    self.standardSourceAngles = [:]
                     self.standardLastStorageCheck = 0
                     self.ticket = ticket; self.recordingURL = url.standardizedFileURL; self.stopRequested = false
                 } catch { self.onEvent?(.finished(ticket, error)) }
@@ -1042,8 +1044,11 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             }
         }
         guard let take = standardTake, let ticket, !take.finishing else { return }
-        let format = MovieFormat.captureFormat(angle: standardAngle) ?? .portrait
-        let angle = format.recordingAngle(observed: coordinator?.videoRotationAngleForHorizonLevelCapture ?? standardAngle)
+        // Lock each camera's source rotation independently from the writer canvas.
+        let observed = coordinator?.videoRotationAngleForHorizonLevelCapture ?? standardAngle
+        let angle = standardSourceAngles[isFront]
+            ?? (MovieFormat.captureFormat(angle: observed) ?? .portrait).recordingAngle(observed: observed)
+        standardSourceAngles[isFront] = angle
         take.appendVideo(image, presenter: nil, presentation: nil, at: time, angle: angle, presenterAngle: angle) { [weak self, weak take] accepted, error in
             guard let self, let take, self.standardTake === take else { return }
             if accepted, !self.standardStarted {

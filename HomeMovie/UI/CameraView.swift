@@ -71,6 +71,7 @@ struct CameraView: View {
     @State private var activeDolly: DollyZoomRoute?
     @State private var showingDollyHelp = false
     @State private var showingDollySettings = false
+    @State private var showingMovieSettings = false
     @State private var showingPiPLayout = false
     @State private var preparedPiPForSettings = false
     @State private var showingPiPCompatibility = false
@@ -151,7 +152,7 @@ struct CameraView: View {
             await prepareCamera()
             looks = await app.store.availableLooks()
         }
-        .task(id: "\(movieID)-\(movie?.look?.id.uuidString ?? "standard")") {
+        .task(id: "\(movieID)-\(movie?.captureProfile.rawValue ?? "standard")-\(movie?.look?.id.uuidString ?? "standard")") {
             guard movie?.captureProfile == .appleLog else { liveCube = nil; return }
             liveCube = nil; liveLookStatus = .preparing
             let reference = movie?.look, root = app.store.root
@@ -254,6 +255,9 @@ struct CameraView: View {
         }) { RecordingRecoveryView().environmentObject(app) }
         .sheet(isPresented: $showingDollyHelp) { dollyHelp }
         .sheet(isPresented: $showingDollySettings) { dollySettings }
+        .sheet(isPresented: $showingMovieSettings, onDismiss: { Task { await prepareCamera() } }) {
+            if let movie { MovieSettingsView(movie: movie).environmentObject(app) }
+        }
         .sheet(isPresented: $showingPiPLayout, onDismiss: {
             if preparedPiPForSettings {
                 preparedPiPForSettings = false
@@ -305,6 +309,8 @@ struct CameraView: View {
                     }
                     Divider()
                 }
+                Button("Movie Settings", systemImage: "film") { showingMovieSettings = true }
+                    .disabled(camera.busy)
                 Button("Dolly Settings", systemImage: "slider.horizontal.3") { showingDollySettings = true }
                     .disabled(camera.busy)
                 Button("PiP Layout…", systemImage: "rectangle.on.rectangle") { showingPiPLayout = true }

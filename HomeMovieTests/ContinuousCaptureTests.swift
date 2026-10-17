@@ -1,5 +1,6 @@
 import XCTest
 import AVFoundation
+import CoreImage
 @testable import HomeMovie
 
 final class ContinuousCaptureTests: XCTestCase {
@@ -13,11 +14,18 @@ final class ContinuousCaptureTests: XCTestCase {
         let ticket = try await store.begin(movieID: movie.id, format: visibleFormat, profile: .standard)
         let writer = try ContinuousTakeWriter(url: try await store.url(ticket.staging), angle: angle)
         let front = try frame(red: false)
+        CVPixelBufferLockBaseAddress(front, [])
+        let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(front)).assumingMemoryBound(to: UInt8.self)
+        for y in 0..<9 { for x in 0..<32 {
+            let offset = y * CVPixelBufferGetBytesPerRow(front) + x * 4
+            base[offset + 1] = 0; base[offset + 2] = 220
+        }}
+        CVPixelBufferUnlockBaseAddress(front, [])
         XCTAssertEqual(writer.canvas, MovieFormat.portrait.canvas)
         for index in 0..<10 {
             var accepted = false
             for _ in 0..<100 {
-                if writer.appendVideo(front, at: CMTime(value: Int64(index), timescale: 30), sourceAngle: angle) {
+                if writer.appendVideo(front, at: CMTime(value: Int64(index), timescale: 30), sourceAngle: 0) {
                     accepted = true; break
                 }
                 try await Task.sleep(for: .milliseconds(10))
@@ -36,6 +44,21 @@ final class ContinuousCaptureTests: XCTestCase {
         XCTAssertEqual(scene.width, 1080); XCTAssertEqual(scene.height, 1920)
         let asset = try await MediaInspector.inspect(reopened.root.appendingPathComponent(scene.source))
         XCTAssertEqual(asset.size, MovieFormat.portrait.canvas)
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: reopened.root.appendingPathComponent(scene.source)))
+        generator.appliesPreferredTrackTransform = true
+        let (frame, _) = try await generator.image(at: CMTime(value: 1, timescale: 30))
+        let image = CIImage(cgImage: frame)
+        let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
+        func pixel(at fraction: CGFloat) -> [UInt8] {
+            var bytes = [UInt8](repeating: 0, count: 4)
+            context.render(image, toBitmap: &bytes, rowBytes: 4,
+                bounds: CGRect(x: image.extent.midX, y: image.extent.height * fraction, width: 1, height: 1),
+                format: .RGBA8, colorSpace: nil)
+            return bytes
+        }
+        let top = pixel(at: 0.25), bottom = pixel(at: 0.75)
+        XCTAssertGreaterThan(abs(Int(top[0]) - Int(bottom[0])), 100)
+        XCTAssertGreaterThan(abs(Int(top[1]) - Int(bottom[1])), 100)
     }
 
     func testAsynchronousPipelineKeepsAudioAndVideoAcrossPiPToggle() async throws {

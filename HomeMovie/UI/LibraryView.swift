@@ -25,6 +25,18 @@ struct LibraryView: View {
         app.prewarmCamera(movieID: movie.id)
         path.append(movie.id)
     }
+    private func createMovie() {
+        guard !creating, app.loaded else { return }
+        creating = true
+        Task {
+            defer { creating = false }
+            do {
+                let movie = try await app.store.createQuickMovie()
+                await app.refresh()
+                openMovie(movie)
+            } catch { app.error = error.localizedDescription }
+        }
+    }
     private func thumbnailActionIcon(_ symbol: String) -> some View {
         Image(systemName: symbol).font(.system(size: 18, weight: .semibold))
             .foregroundStyle(.white).frame(width: 48, height: 48)
@@ -49,7 +61,7 @@ struct LibraryView: View {
                     ContentUnavailableView {
                         Label("Your home movie starts here", systemImage: "video")
                     } description: { Text("Record a moment. Come back for the next.") } actions: {
-                        Button("Create Your First Movie") { creating = true }.buttonStyle(.borderedProminent)
+                        Button("Create Your First Movie") { createMovie() }.buttonStyle(.borderedProminent).disabled(creating)
                     }
                 } else {
                     ScrollView {
@@ -114,8 +126,8 @@ struct LibraryView: View {
             .navigationTitle("Movies").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { creating = true } label: { MovieControlIcon(systemName: "plus") }
-                        .accessibilityLabel("New Movie").disabled(!app.loaded)
+                    Button { createMovie() } label: { MovieControlIcon(systemName: "plus") }
+                        .accessibilityLabel("New Movie").disabled(!app.loaded || creating)
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { settings = true } label: { MovieControlIcon(systemName: "gearshape") }
@@ -123,9 +135,6 @@ struct LibraryView: View {
                 }
             }
             .navigationDestination(for: UUID.self) { id in CameraView(app: app, movieID: id) }
-            .sheet(isPresented: $creating) {
-                NewMovieView { id in creating = false; lastMovieID = id.uuidString; app.prewarmCamera(movieID: id); path.append(id) }
-            }
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $backups) { BackupView() }
             .sheet(isPresented: $recovery) { RecordingRecoveryView() }
@@ -192,75 +201,102 @@ private struct MovieOverflowMenu: View {
     }
 }
 
-struct NewMovieView: View {
+struct MovieSettingsView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var profile = CaptureProfile.standard
+    let movie: Movie
+    @State private var profile: CaptureProfile
+    @State private var selectedLook: LUTReference?
     @State private var supportsLog = false
-    @State private var checkingCapabilities = true
+    @State private var checking = true
     @State private var looks: [LUTReference] = []
-    @State private var selectedLook: LUTReference? = .filmica
     @State private var importingLook = false
     @State private var loadingLook = false
     @State private var saving = false
     @State private var problem: String?
-    let created: (UUID) -> Void
+    init(movie: Movie) {
+        self.movie = movie
+        _profile = State(initialValue: movie.captureProfile)
+        _selectedLook = State(initialValue: movie.captureProfile == .appleLog ? movie.look : .filmica)
+    }
+    private var hasRecordedScenes: Bool { !movie.scenes.isEmpty || movie.lastRecordedAt != nil }
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Movie name", text: $name).textInputAutocapitalization(.sentences).submitLabel(.done)
-                    if supportsLog {
-                        Picker("Recording", selection: $profile) {
-                            Text("Standard").tag(CaptureProfile.standard)
-                            Text("Apple Log").tag(CaptureProfile.appleLog)
-                        }.pickerStyle(.menu)
-                        if profile == .appleLog {
-                            Menu {
-                                Button("Apple Standard") { selectedLook = nil }
-                                ForEach(looks, id: \.id) { look in Button(look.displayName) { selectedLook = look } }
-                                Divider()
-                                Button("Add Apple Log Look…", systemImage: "plus") { importingLook = true }
-                            } label: {
-                                HStack { Text("Look"); Spacer(); Text(selectedLook?.displayName ?? "Apple Standard").foregroundStyle(.secondary) }
-                            }.foregroundStyle(.primary).disabled(loadingLook)
-                        }
-                    }
-                } footer: { Text(profile == .appleLog ? "\(selectedLook?.displayName ?? "Apple Standard") is applied to preview, playback and export. Your Apple Log original stays intact. ProRes is used when needed and takes more storage." : "Hold your iPhone upright or sideways. Your first recording sets the movie’s orientation. Each recording becomes the next scene.") }
-                if let problem { Section { Text(problem).foregroundStyle(.red) } }
-            }.navigationTitle("New Movie").navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving || loadingLook) }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Create") {
-                            saving = true
-                            Task {
-                                do { let movie = try await app.store.create(name: name, format: .portrait, profile: profile, look: profile == .appleLog ? selectedLook : nil, useDefaultLook: false); await app.refresh(); created(movie.id) }
-                                catch { problem = error.localizedDescription; saving = false }
+                    Picker("Recording", selection: $profile) {
+                        Text("Standard").tag(CaptureProfile.standard)
+                        Text("Apple Log").tag(CaptureProfile.appleLog)
+                    }.pickerStyle(.segmented)
+                        .disabled(hasRecordedScenes || checking || !supportsLog || saving)
+                } header: { Text("Recording") } footer: {
+                    Text(hasRecordedScenes
+                        ? "The recording format is set by your first scene."
+                        : supportsLog ? "Choose Standard or Apple Log before your first recording." : "Apple Log is unavailable on this iPhone.")
+                }
+                if profile == .appleLog {
+                    Section {
+                        Menu {
+                            Button("Apple Standard") { selectedLook = nil }
+                            ForEach(looks, id: \.id) { look in
+                                Button(look.displayName) { selectedLook = look }
                             }
-                        }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).count > 80 || saving || loadingLook || checkingCapabilities)
+                        } label: {
+                            HStack {
+                                Text("Cinema Look")
+                                Spacer()
+                                Text(selectedLook?.displayName ?? "Apple Standard").foregroundStyle(.secondary)
+                            }
+                        }.foregroundStyle(.primary)
+                        Button("Add Apple Log Look…", systemImage: "plus") { importingLook = true }
+                    } header: { Text("Cinema Look") } footer: {
+                        Text("Applied to preview, playback and export. Your Apple Log originals stay intact.")
                     }
                 }
-        }.presentationDetents([.medium, .large]).interactiveDismissDisabled(saving || loadingLook)
-            .fileImporter(isPresented: $importingLook, allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data], allowsMultipleSelection: false) { result in
+                if let problem { Section { Text(problem).foregroundStyle(.red) } }
+            }
+            .disabled(saving || loadingLook)
+            .navigationTitle("Movie Settings").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }.disabled(saving || loadingLook)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        saving = true
+                        Task {
+                            do {
+                                try await app.store.setMovieRecordingSettings(movieID: movie.id,
+                                    profile: profile, look: selectedLook)
+                                await app.refresh(); dismiss()
+                            } catch { problem = error.localizedDescription; saving = false }
+                        }
+                    }.disabled(checking || saving || loadingLook)
+                }
+            }
+            .task {
+                supportsLog = await Task.detached { CaptureService.supportsAppleLog() }.value
+                looks = await app.store.availableLooks()
+                checking = false
+            }
+            .fileImporter(isPresented: $importingLook,
+                allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data],
+                allowsMultipleSelection: false) { result in
                 switch result {
                 case .success(let urls):
-                    guard let url = urls.first else { return }; loadingLook = true
+                    guard let url = urls.first else { return }
+                    loadingLook = true
                     Task {
                         defer { loadingLook = false }
-                        do { selectedLook = try await app.store.importLook(from: url); looks = await app.store.availableLooks() }
-                        catch { problem = error.localizedDescription }
+                        do {
+                            selectedLook = try await app.store.importLook(from: url)
+                            looks = await app.store.availableLooks()
+                        } catch { problem = error.localizedDescription }
                     }
                 case .failure(let error): problem = error.localizedDescription
                 }
             }
-            .task {
-                defer { checkingCapabilities = false }
-                supportsLog = await Task.detached { CaptureService.supportsAppleLog() }.value
-                guard !Task.isCancelled else { return }
-                looks = await app.store.availableLooks()
-            }
+        }.presentationDetents([.medium, .large]).interactiveDismissDisabled(saving || loadingLook)
     }
 }
 

@@ -13,7 +13,7 @@ enum PiPSize: String, Codable, CaseIterable, Identifiable, Sendable {
     case small, medium, large
     var id: Self { self }
     var fraction: CGFloat {
-        switch self { case .small: 0.36; case .medium: 0.46; case .large: 0.56 }
+        switch self { case .small: 0.36; case .medium: 0.44; case .large: 0.52 }
     }
     var title: String { rawValue.capitalized }
 }
