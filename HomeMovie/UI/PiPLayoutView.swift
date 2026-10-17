@@ -37,6 +37,7 @@ struct PiPLayoutView: View {
     var obstacles: [CGRect] = []
     let onPrepare: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
@@ -50,73 +51,12 @@ struct PiPLayoutView: View {
                     }
                     .frame(height: geometry.size.height * (format == .portrait ? 0.49 : 0.38))
                     .background(Color.black)
-                    if layout.composition != .inset {
-                        Button {
-                            layout.splitSwapped.toggle()
-                            UISelectionFeedbackGenerator().selectionChanged()
-                        } label: {
-                            Label("Swap Cameras", systemImage: layout.composition == .topAndBottom
-                                ? "arrow.up.arrow.down" : "arrow.left.arrow.right")
-                                .font(.subheadline.weight(.medium)).frame(minHeight: 44)
-                        }.buttonStyle(.plain)
-                            .accessibilityHint("Exchanges the front and rear views")
-                    }
                     Form {
-                        Section {
-                            Picker("Layout", selection: $layout.composition) {
-                                ForEach(PiPComposition.allCases) { composition in
-                                    Label(composition.title, systemImage: composition.symbol).tag(composition)
-                                }
-                            }.pickerStyle(.inline)
-                        } header: { Text("Layout") } footer: {
-                            if layout.composition != .inset {
-                                Text(splitDescription)
-                            }
-                        }
-                        Section("Front Camera") {
-                            if layout.composition == .inset {
-                                Picker("Orientation", selection: $layout.orientation) {
-                                    ForEach(PiPOrientation.allCases) { orientation in
-                                        Text(orientation.title).tag(orientation)
-                                    }
-                                }.pickerStyle(.segmented)
-                            }
-                            VStack(spacing: 12) {
-                                HStack {
-                                    Text("Zoom")
-                                    Spacer()
-                                    Text(String(format: "%.1f×", Double(layout.framingZoom)))
-                                        .monospacedDigit().foregroundStyle(.secondary)
-                                }
-                                Slider(value: $layout.zoom, in: 1...2, step: 0.05)
-                                    .accessibilityLabel("Presenter zoom")
-                                    .accessibilityValue(String(format: "%.1f times", Double(layout.framingZoom)))
-                                HStack {
-                                    Text("Wider")
-                                    Spacer()
-                                    Text("Closer")
-                                }.font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        if layout.composition == .inset {
-                            Section("Size") {
-                                Picker("Size", selection: $layout.size) {
-                                    ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
-                                }.pickerStyle(.segmented)
-                            }
-                            Section("Position") {
-                                HStack(spacing: 12) {
-                                    ForEach(PiPCorner.allCases) { corner in
-                                        Button { layout.corner = corner; UISelectionFeedbackGenerator().selectionChanged() } label: {
-                                            ZStack(alignment: alignment(for: corner)) {
-                                                RoundedRectangle(cornerRadius: 5).strokeBorder(.secondary.opacity(0.5), lineWidth: 1)
-                                                RoundedRectangle(cornerRadius: 2).fill(layout.corner == corner ? Color.accentColor : Color.secondary)
-                                                    .frame(width: 16, height: 12).padding(5)
-                                            }.frame(width: 48, height: 36).frame(maxWidth: .infinity, minHeight: 44)
-                                                .background(layout.corner == corner ? Color.accentColor.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 8))
-                                        }.buttonStyle(.plain).accessibilityLabel(corner.title)
-                                            .accessibilityAddTraits(layout.corner == corner ? .isSelected : [])
-                                    }
+                        ForEach(PiPComposition.allCases) { composition in
+                            Section {
+                                compositionButton(composition)
+                                if layout.composition == composition {
+                                    compositionSettings
                                 }
                             }
                         }
@@ -138,6 +78,93 @@ struct PiPLayoutView: View {
             .task {
                 if !ready, canPrepare, !logMode { onPrepare() }
             }
+    }
+    private func compositionButton(_ composition: PiPComposition) -> some View {
+        let selected = layout.composition == composition
+        return Button {
+            guard !selected else { return }
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                layout.composition = composition
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: composition.symbol)
+                    .frame(width: 24).foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                Text(composition.title).font(.body.weight(.medium)).foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                if selected {
+                    Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                }
+                Image(systemName: "chevron.down").font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary).rotationEffect(.degrees(selected ? 180 : 0))
+            }.frame(minHeight: 44).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+            .accessibilityLabel(composition.title)
+            .accessibilityValue(selected ? "Selected, expanded" : "Collapsed")
+            .accessibilityHint(selected ? "Settings are below" : "Selects this layout and opens its settings")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+    @ViewBuilder private var compositionSettings: some View {
+        if layout.composition == .inset {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Orientation").font(.subheadline).foregroundStyle(.secondary)
+                Picker("Orientation", selection: $layout.orientation) {
+                    ForEach(PiPOrientation.allCases) { orientation in
+                        Text(orientation.title).tag(orientation)
+                    }
+                }.pickerStyle(.segmented)
+                    .accessibilityLabel("Presenter orientation")
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Size").font(.subheadline).foregroundStyle(.secondary)
+                Picker("Size", selection: $layout.size) {
+                    ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
+                }.pickerStyle(.segmented)
+                    .accessibilityLabel("Presenter size")
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Position").font(.subheadline).foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    ForEach(PiPCorner.allCases) { corner in
+                        Button { layout.corner = corner; UISelectionFeedbackGenerator().selectionChanged() } label: {
+                            ZStack(alignment: alignment(for: corner)) {
+                                RoundedRectangle(cornerRadius: 5).strokeBorder(.secondary.opacity(0.5), lineWidth: 1)
+                                RoundedRectangle(cornerRadius: 2).fill(layout.corner == corner ? Color.accentColor : Color.secondary)
+                                    .frame(width: 16, height: 12).padding(5)
+                            }.frame(width: 48, height: 36).frame(maxWidth: .infinity, minHeight: 44)
+                                .background(layout.corner == corner ? Color.accentColor.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                        }.buttonStyle(.plain).accessibilityLabel(corner.title)
+                            .accessibilityAddTraits(layout.corner == corner ? .isSelected : [])
+                    }
+                }
+            }
+        } else {
+            Button {
+                layout.splitSwapped.toggle()
+                UISelectionFeedbackGenerator().selectionChanged()
+            } label: {
+                Label("Swap Cameras", systemImage: layout.composition == .topAndBottom
+                    ? "arrow.up.arrow.down" : "arrow.left.arrow.right")
+                    .frame(minHeight: 44)
+            }.accessibilityHint("Exchanges the front and rear views")
+            Text(splitDescription).font(.subheadline).foregroundStyle(.secondary)
+        }
+        VStack(spacing: 12) {
+            HStack {
+                Text("Front Camera Zoom")
+                Spacer()
+                Text(String(format: "%.1f×", Double(layout.framingZoom)))
+                    .monospacedDigit().foregroundStyle(.secondary)
+            }
+            Slider(value: $layout.zoom, in: 1...2, step: 0.05)
+                .accessibilityLabel("Presenter zoom")
+                .accessibilityValue(String(format: "%.1f times", Double(layout.framingZoom)))
+            HStack {
+                Text("Wider")
+                Spacer()
+                Text("Closer")
+            }.font(.caption).foregroundStyle(.secondary)
+        }
     }
     private var splitDescription: String {
         if layout.composition == .topAndBottom {
