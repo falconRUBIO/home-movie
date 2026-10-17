@@ -151,7 +151,10 @@ struct CameraView: View {
             liveOriginal = false
             updateZoomSettings()
             await prepareCamera()
-            looks = await app.store.availableLooks()
+            guard !Task.isCancelled, movie?.captureProfile == .appleLog else { return }
+            let available = await app.store.availableLooks()
+            guard !Task.isCancelled else { return }
+            looks = available
         }
         .task(id: "\(movieID)-\(movie?.captureProfile.rawValue ?? "standard")-\(movie?.look?.id.uuidString ?? "standard")") {
             guard movie?.captureProfile == .appleLog else { liveCube = nil; return }

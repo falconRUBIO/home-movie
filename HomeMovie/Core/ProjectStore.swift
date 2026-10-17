@@ -226,11 +226,23 @@ actor ProjectStore {
         next.movies[i].revision += 1
         try write(next)
     }
-    func availableLooks() -> [LUTReference] {
+    // LUT decoding must never occupy the catalog actor: a canceled camera task
+    // may still be finishing a scan when the user taps + on the library.
+    nonisolated func availableLooks() async -> [LUTReference] {
+        guard !Task.isCancelled else { return [] }
+        let root = root
+        let scan = Task.detached(priority: .utility) { Self.readAvailableLooks(root: root) }
+        return await withTaskCancellationHandler {
+            await scan.value
+        } onCancel: {
+            scan.cancel()
+        }
+    }
+    private nonisolated static func readAvailableLooks(root: URL) -> [LUTReference] {
         let directory = root.appendingPathComponent("Looks")
-        let files = (try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         return files.compactMap { file in
-            guard file.pathExtension == "json", let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent) else { return nil }
+            guard !Task.isCancelled, file.pathExtension == "json", let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent) else { return nil }
             let reference = LUTReference(id: id, name: "Look")
             guard !reference.isRetiredBundledLook else { return nil }
             guard let cube = try? ColorCube.load(reference, root: root) else { return nil }
