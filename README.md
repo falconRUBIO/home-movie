@@ -136,3 +136,7 @@ The engine uses original, build-time Metal Core Image kernels and Apple Gaussian
 ### Compare private Rec.709 looks
 
 In an Apple Log movie, open the Look menu and choose **Add Rec.709 Look…** for display-referred Rec.709/sRGB `.cube` files. Import each look once, then select it from the same menu in Camera or Watch Movie. This bakes Apple Log → Apple Standard → creative LUT into one shared preview/playback/export table; imported source comments and titles are retained in the stored look and backups. **Add Apple Log Look…** still imports LUTs that already expect Apple Log without another conversion. Imported assets stay private to the app container; no third-party comparison LUTs are bundled in the repository. Use the same clip, neutral Light adjustments and disabled Film Effects for comparisons. Native build/tests and visual color accuracy require verification.
+
+### Bundled original film looks
+
+Cinema remains unchanged and first in the Look menu. Amber, Ember and Heritage are installed automatically, with Apple Log conversion before their creative transforms. They share the live preview, playback, export and backup path with Cinema. No import is needed for these three original looks. Third-party comparison LUTs remain private imports.

@@ -84,6 +84,14 @@ actor ProjectStore {
         if !fm.fileExists(atPath: filmicaURL.path) {
             try encoder.encode(filmica).write(to: filmicaURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         }
+        if LUTReference.originalFilmLooks.contains(where: { !fm.fileExists(atPath: root.appendingPathComponent($0.path).path) }) {
+            for (reference, cube) in try ColorCube.originalFilmLooks.get() {
+                let destination = root.appendingPathComponent(reference.path)
+                if !fm.fileExists(atPath: destination.path) {
+                    try encoder.encode(cube).write(to: destination, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                }
+            }
+        }
         if !cleanedTransfers {
             // These are app-owned temporary copies, never the source recordings.
             for folder in ["RestoreStaging", "OutgoingBackups"] {

@@ -206,10 +206,17 @@ final class PipelineTests: XCTestCase {
         let original = try await MediaAssembler().build(movie: movie, root: store.root, showOriginalLog: true)
         XCTAssertEqual((original.videoComposition.instructions.first as? ColorInstruction)?.adjustments, .neutral)
     }
-    func testOnlyOriginalCinemaIsInstalledAndRetiredSelectionFallsBack() async throws {
+    func testBundledLooksAreInstalledWithCinemaFirstAndRetiredSelectionFallsBack() async throws {
         let store = try await makeStore()
         let looks = await store.availableLooks()
-        XCTAssertEqual(looks.map(\.id), [LUTReference.filmica.id])
+        XCTAssertEqual(looks.map(\.id), [LUTReference.filmica.id, LUTReference.amber.id, LUTReference.ember.id, LUTReference.heritage.id])
+        for reference in LUTReference.originalFilmLooks {
+            let cube = try ColorCube.load(reference, root: store.root)
+            try cube.validate()
+            XCTAssertEqual(cube.name, reference.name)
+            XCTAssertEqual(cube.dimension, 65)
+            XCTAssertTrue(cube.sourceNotices?.contains("Original independently generated") == true)
+        }
         let movie = try await store.create(name: "Original look", format: .landscape, profile: .appleLog)
         try await store.setLook(movieID: movie.id, look: .cinemaTwo)
         let saved = await store.snapshot()

@@ -7,6 +7,10 @@ struct LUTReference: Codable, Equatable, Sendable {
     static let filmica = LUTReference(id: UUID(uuidString: "BAA6B811-4136-44D8-92ED-56C78AF001CA")!, name: "Cinema")
     static let cinemaTwo = LUTReference(id: UUID(uuidString: "2FAA1534-0DAD-41F0-928C-AC4B9E014422")!, name: "Cinema II")
     static let cinemaThree = LUTReference(id: UUID(uuidString: "3FAA1534-0DAD-41F0-928C-AC4B9E014433")!, name: "Cinema III")
+    static let amber = LUTReference(id: UUID(uuidString: "F19A0001-C031-4A52-9D61-50D0A3000001")!, name: "Amber")
+    static let heritage = LUTReference(id: UUID(uuidString: "F19A0002-C031-4A52-9D61-50D0A3000002")!, name: "Heritage")
+    static let ember = LUTReference(id: UUID(uuidString: "F19A0003-C031-4A52-9D61-50D0A3000003")!, name: "Ember")
+    static let originalFilmLooks: [LUTReference] = [.amber, .heritage, .ember]
     var isRetiredBundledLook: Bool { id == Self.cinemaTwo.id || id == Self.cinemaThree.id }
     var id: UUID
     var name: String
@@ -130,6 +134,17 @@ struct ColorCube: Codable, Sendable {
         let cube = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: url))
         try cube.validate()
         return ColorCube(name: "Cinema", dimension: cube.dimension, rgba: cube.rgba, minimum: cube.minimum, maximum: cube.maximum)
+    }
+    // Cache composed tables once per process, then install durable backup-ready copies.
+    static let originalFilmLooks: Result<[(LUTReference, ColorCube)], Error> = Result {
+        let standard = try appleStandard.get()
+        return try LUTReference.originalFilmLooks.map { reference in
+            guard let file = Bundle.main.url(forResource: reference.name, withExtension: "json") else {
+                throw HomeMovieError.message("The \(reference.name) look is unavailable.")
+            }
+            let creative = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: file))
+            return (reference, try creative.following(standard))
+        }
     }
     static let appleStandard: Result<ColorCube, Error> = Result {
         guard let url = Bundle.main.url(forResource: "AppleLogToRec709", withExtension: "lut") else {
