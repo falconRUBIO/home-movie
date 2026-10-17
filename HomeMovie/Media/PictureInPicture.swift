@@ -28,7 +28,7 @@ enum PiPComposition: String, Codable, CaseIterable, Identifiable, Sendable {
     }
     var symbol: String {
         switch self {
-        case .inset: "rectangle.on.rectangle"
+        case .inset: "pip"
         case .topAndBottom: "rectangle.split.1x2"
         case .sideBySide: "rectangle.split.2x1"
         }
