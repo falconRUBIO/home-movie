@@ -54,6 +54,7 @@ struct CameraView: View {
     @State private var manualZoomTargetShown = false
     @State private var looks: [LUTReference] = []
     @State private var addingLook = false
+    @State private var importingDisplayLook = false
     @State private var changingLook = false
     @State private var addedSceneID: UUID?
     @State private var undoingTake = false
@@ -171,7 +172,7 @@ struct CameraView: View {
                 do {
                     let urls = try result.get()
                     if let url = urls.first {
-                        let look = try await app.store.importLook(from: url)
+                        let look = try await app.store.importLook(from: url, displayReferred: importingDisplayLook)
                         try await app.store.setLook(movieID: movieID, look: look)
                         liveOriginal = false; looks = await app.store.availableLooks(); await app.refresh()
                     }
@@ -294,7 +295,8 @@ struct CameraView: View {
                         Button { changeLiveLook(look) } label: { Label(look.displayName, systemImage: movie.look?.id == look.id ? "checkmark" : "circle") }
                     }
                     Divider()
-                    Button("Add Apple Log Look…", systemImage: "plus") { addingLook = true }.disabled(camera.busy)
+                    Button("Add Apple Log Look…", systemImage: "plus") { importingDisplayLook = false; addingLook = true }.disabled(camera.busy)
+                    Button("Add Rec.709 Look…", systemImage: "plus") { importingDisplayLook = true; addingLook = true }.disabled(camera.busy)
                 } label: { MovieControlIcon(systemName: "slider.horizontal.3").homeGlass() }
                     .accessibilityLabel("Live look: \(liveOriginal ? "Original Log" : movie.lookName)")
                     .disabled(changingLook)
