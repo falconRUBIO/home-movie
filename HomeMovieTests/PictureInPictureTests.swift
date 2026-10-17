@@ -6,6 +6,28 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testPortraitInsetKeepsShapeWhenReturningFromEitherSplitLayout() throws {
+        let canvas = MovieFormat.portrait.canvas
+        var layout = PiPLayout(corner: .bottomRight, orientation: .portrait, zoom: 1.25)
+        let originalRect = try XCTUnwrap(PiPGeometry.rect(layout: layout, canvas: canvas))
+        var timeline = PiPTimeline()
+        timeline.setEnabled(true, at: .zero)
+        for split in [PiPComposition.topAndBottom, .sideBySide] {
+            layout.composition = split
+            timeline.setLayout(layout)
+            XCTAssertEqual(timeline.presentation(at: CMTime(seconds: 1, preferredTimescale: 30), canvas: canvas).rect,
+                           split.presenterRect)
+            layout.composition = .inset
+            layout = try JSONDecoder().decode(PiPLayout.self, from: JSONEncoder().encode(layout))
+            timeline.setLayout(layout)
+            let state = timeline.presentation(at: CMTime(seconds: 1, preferredTimescale: 30), canvas: canvas)
+            XCTAssertEqual(state.rect, originalRect)
+            XCTAssertEqual(layout.orientation, .portrait)
+            XCTAssertEqual(state.zoom, 1.25)
+            XCTAssertEqual(state.rect.width * canvas.width / (state.rect.height * canvas.height), 0.75, accuracy: 0.001)
+        }
+    }
+
     func testSplitLayoutsDecodePersistAndMatchCaptureWithoutInsetPlacement() throws {
         let old = Data(#"{"corner":"bottomRight","size":"small"}"#.utf8)
         XCTAssertEqual(try JSONDecoder().decode(PiPLayout.self, from: old).composition, .inset)

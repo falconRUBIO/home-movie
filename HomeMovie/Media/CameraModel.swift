@@ -125,7 +125,8 @@ struct RecordingFlipHandoff {
         guard state == .ready, !switchingCamera, active, let app else { return }
         guard let observed = options?.angle, let automatic = MovieFormat.captureFormat(angle: observed),
               let movie = app.movie(movieID), options?.profile == movie.captureProfile else { return }
-        let format = movie.recordingFormat ?? automatic
+        let interfaceFormat = OrientationPolicy.shared.currentInterfaceFormat(observed: observed)
+        let format = movie.recordingFormat ?? (options?.dualCameraPrepared == true ? interfaceFormat : automatic)
         let recordingFormat = options?.dualCameraPrepared == true ? format : automatic
         let angle = recordingFormat.recordingAngle(observed: observed)
         // Keep the camera controls oriented to the phone; PiP's movie canvas is independent.
@@ -221,9 +222,11 @@ struct RecordingFlipHandoff {
         guard active, !switchingCamera, state == .ready || state == .recording, options?.piPAvailable == true else { return }
         service.setPiPEnabled(options?.isPiPEnabled != true)
     }
-    func updatePiPLayout(_ layout: PiPLayout, movieID: UUID) {
+    func updatePiPLayout(_ layout: PiPLayout, movieID: UUID, canvasFormat: MovieFormat? = nil) {
         guard !busy, let app else { return }
-        pipLayout = layout; service.setPiPLayout(layout, canvasFormat: app.movie(movieID)?.recordingFormat)
+        let canvas = app.movie(movieID)?.recordingFormat ?? canvasFormat
+            ?? OrientationPolicy.shared.currentInterfaceFormat(observed: options?.angle ?? 90)
+        pipLayout = layout; service.setPiPLayout(layout, canvasFormat: canvas)
         Task {
             do { try await app.store.setPiPLayout(movieID: movieID, layout: layout); await app.refresh() }
             catch { message = error.localizedDescription }

@@ -75,6 +75,7 @@ struct CameraView: View {
     @State private var preparedPiPForSettings = false
     @State private var showingPiPCompatibility = false
     @State private var viewfinderSize = CGSize.zero
+    @State private var interfaceFormat = MovieFormat.portrait
     @State private var pipDragStart: CGPoint?
     @State private var lastPiPDragPoint: CGPoint?
     @State private var pipConfiguring = false
@@ -97,6 +98,7 @@ struct CameraView: View {
     private var startDelay: Int { DollyStartDelay.effective(handsFreeStart ? dollyStartDelaySeconds : 0, dollyOpen: smoothZoomOpen) }
     private var dollyDelayedStart: Bool { startDelay > 0 }
     private var movie: Movie? { app.movie(movieID) }
+    private var pipCanvasFormat: MovieFormat { movie?.recordingFormat ?? activeTakeFormat ?? interfaceFormat }
     private var activeTakeFormat: MovieFormat? { camera.busy ? camera.takeFormat : nil }
     private var cameraSurface: some View {
         GeometryReader { geometry in
@@ -105,7 +107,7 @@ struct CameraView: View {
                 let footerHeight: CGFloat = dynamicTypeSize.isAccessibilitySize ? 100 : 64
                 let railWidth: CGFloat = 112
                 let phoneRatio: CGFloat = landscape ? 16.0 / 9.0 : 9.0 / 16.0
-                let canvasFormat = movie.recordingFormat ?? activeTakeFormat
+                let canvasFormat: MovieFormat? = camera.options?.dualCameraPrepared == true ? pipCanvasFormat : movie.recordingFormat ?? activeTakeFormat
                 let canvasRatio: CGFloat = canvasFormat?.aspect ?? phoneRatio
                 let ratio: CGFloat = camera.options?.dualCameraPrepared == true ? canvasRatio : phoneRatio
                 let availableWidth = max(1, geometry.size.width - (landscape ? railWidth : 0))
@@ -129,6 +131,12 @@ struct CameraView: View {
                 }.frame(width: geometry.size.width, height: geometry.size.height)
 
             } else { ContentUnavailableView("Movie unavailable", systemImage: "film") }
+        }
+        .onGeometryChange(for: MovieFormat.self) { geometry in
+            geometry.size.width > geometry.size.height ? .landscape : .portrait
+        } action: { format in
+            interfaceFormat = format
+            syncPiPCanvas()
         }
         .background(MovieOrientation(format: activeTakeFormat).frame(width: 0, height: 0))
         .background(.black).foregroundStyle(.white)
@@ -231,9 +239,8 @@ struct CameraView: View {
             if enabled == true { enablePiPAfterPreparation = false }
         }
         .onChange(of: camera.pipSetupFailed) { _, failed in if failed { enablePiPAfterPreparation = false } }
-        .onChange(of: movie?.recordingFormat) { _, format in
-            if camera.options?.dualCameraPrepared == true { camera.service.setPiPLayout(camera.pipLayout, canvasFormat: format) }
-        }
+        .onChange(of: movie?.recordingFormat) { _, _ in syncPiPCanvas() }
+        .onChange(of: camera.options?.dualCameraPrepared) { _, _ in syncPiPCanvas() }
         .onDisappear { finishDollyEndpointPreview(); app.cancelCameraWarmup(); cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { finishDollyEndpointPreview(); cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
@@ -253,8 +260,8 @@ struct CameraView: View {
                 Task { await prepareCamera() }
             }
         }) {
-            PiPLayoutView(layout: Binding(get: { camera.pipLayout }, set: { camera.updatePiPLayout($0, movieID: movieID) }),
-                format: movie?.recordingFormat ?? MovieFormat.captureFormat(angle: camera.options?.angle ?? 90) ?? .portrait,
+            PiPLayoutView(layout: Binding(get: { camera.pipLayout }, set: { camera.updatePiPLayout($0, movieID: movieID, canvasFormat: pipCanvasFormat) }),
+                format: pipCanvasFormat,
                 rearFrames: camera.service.pipRearFrames, frontFrames: camera.service.pipPresenterFrames,
                 ready: camera.options?.piPAvailable == true, canPrepare: camera.options?.canPreparePiP == true,
                 logMode: movie?.captureProfile == .appleLog, obstacles: [],
@@ -874,8 +881,7 @@ struct CameraView: View {
             if camera.options?.dualCameraPrepared == true {
                 PiPCompositionPreview(rearFrames: camera.service.pipRearFrames,
                     frontFrames: camera.service.pipPresenterFrames, layout: camera.pipLayout,
-                    format: movie?.recordingFormat ?? activeTakeFormat ??
-                        MovieFormat.captureFormat(angle: camera.options?.angle ?? 90) ?? .portrait,
+                    format: pipCanvasFormat,
                     liveFrames: camera.service.liveFrames, paused: showingPiPLayout,
                     sourceFront: camera.options?.isFront == true)
                     .allowsHitTesting(false)
@@ -1033,7 +1039,11 @@ struct CameraView: View {
             currentlyEnabled: camera.options?.isPiPEnabled == true)
         await camera.prepare(profile: movie?.captureProfile ?? .standard, movieID: movieID,
             dualCamera: usePiP, layout: movie?.preferredPiPLayout ?? PiPLayout(),
-            canvasFormat: movie?.recordingFormat, enablePiP: usePiP)
+            canvasFormat: pipCanvasFormat, enablePiP: usePiP)
+    }
+    private func syncPiPCanvas() {
+        guard !camera.busy, camera.options?.dualCameraPrepared == true else { return }
+        camera.service.setPiPLayout(camera.pipLayout, canvasFormat: pipCanvasFormat)
     }
     private var normalizedPiPObstacles: [CGRect] {
         guard viewfinderSize.width > 0, viewfinderSize.height > 0 else { return [] }
@@ -1086,7 +1096,7 @@ struct CameraView: View {
             }
     }
     private func movePiP(to corner: PiPCorner) {
-        let format = movie?.recordingFormat ?? activeTakeFormat ?? MovieFormat.captureFormat(angle: camera.options?.angle ?? 90) ?? .portrait
+        let format = pipCanvasFormat
         let center = PiPGeometry.desiredCenter(corner: corner, canvas: format.canvas, size: camera.pipLayout.size, orientation: camera.pipLayout.orientation)
         camera.dragPiP(to: center, finished: true)
     }
@@ -1119,7 +1129,7 @@ struct CameraView: View {
             // Do not dismiss the sheet, enable the inset or persist a Dual Camera choice.
             await camera.prepare(profile: .standard, movieID: movieID, dualCamera: true,
                 layout: camera.pipLayout,
-                canvasFormat: movie.recordingFormat ?? MovieFormat.captureFormat(angle: camera.options?.angle ?? 90) ?? .portrait,
+                canvasFormat: pipCanvasFormat,
                 enablePiP: false)
         }
     }
