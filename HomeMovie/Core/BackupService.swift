@@ -84,6 +84,10 @@ actor BackupService {
             let references = Dictionary(snapshot.movies.compactMap { $0.look }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             var lookSizes: [String: Int64] = [:]
             for look in references.values {
+                if look.isRetiredBundledLook {
+                    restoredLooks[look.id] = .filmica
+                    continue
+                }
                 _ = try ColorCube.load(look, root: store.root)
                 lookSizes[look.path] = Int64(try store.root.appendingPathComponent(look.path).resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
             }
