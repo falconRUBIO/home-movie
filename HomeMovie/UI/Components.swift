@@ -362,17 +362,34 @@ struct CameraPreview: UIViewRepresentable {
 
 struct SystemShareSheet: UIViewControllerRepresentable {
     let url: URL
+    var finished: ((UIActivity.ActivityType?, Bool, Error?) -> Void)? = nil
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        controller.completionWithItemsHandler = { activity, completed, _, error in
+            Task { @MainActor in finished?(activity, completed, error) }
+        }
+        return controller
     }
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 struct SystemFilesExporter: UIViewControllerRepresentable {
     let url: URL
+    var finished: ((Bool) -> Void)? = nil
+    func makeCoordinator() -> Coordinator { Coordinator(finished: finished) }
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+        let picker = UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+        picker.delegate = context.coordinator
+        return picker
     }
     func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let finished: ((Bool) -> Void)?
+        init(finished: ((Bool) -> Void)?) { self.finished = finished }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            finished?(!urls.isEmpty)
+        }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finished?(false) }
+    }
 }
 
 struct BackupFilesExporter: UIViewControllerRepresentable {
@@ -393,3 +410,48 @@ struct BackupFilesExporter: UIViewControllerRepresentable {
 }
 
 
+
+
+// Shared by movie exports, scene saves, and export destination completion callbacks.
+struct SaveToast: Identifiable, Equatable {
+    enum Kind: Equatable { case saving, success, failure }
+    let id = UUID()
+    let kind: Kind
+    let message: String
+}
+private struct SaveToastModifier: ViewModifier {
+    @Binding var toast: SaveToast?
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .top) {
+            if let toast {
+                HStack(spacing: 10) {
+                    if toast.kind == .saving { ProgressView() }
+                    else {
+                        Image(systemName: toast.kind == .success ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                            .foregroundStyle(toast.kind == .success ? Color.green : Color.orange)
+                    }
+                    Text(toast.message).font(.subheadline.weight(.medium)).multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 18).padding(.vertical, 13)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+                .padding(.horizontal, 16).padding(.top, 8)
+                .accessibilityElement(children: .combine)
+                .allowsHitTesting(false)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: toast?.id)
+        .task(id: toast?.id) {
+            guard let current = toast else { return }
+            UIAccessibility.post(notification: .announcement, argument: current.message)
+            guard current.kind != .saving else { return }
+            UINotificationFeedbackGenerator().notificationOccurred(current.kind == .success ? .success : .error)
+            do { try await Task.sleep(for: .seconds(current.kind == .success ? 3 : 6)) }
+            catch { return }
+            if toast?.id == current.id { toast = nil }
+        }
+    }
+}
+extension View {
+    func saveStatusToast(_ toast: Binding<SaveToast?>) -> some View { modifier(SaveToastModifier(toast: toast)) }
+}

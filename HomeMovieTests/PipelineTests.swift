@@ -838,7 +838,10 @@ final class PipelineTests: XCTestCase {
         let model = ExportModel(authorizePhotos: { true }, writePhotosVideo: { try await writer.write($0) })
         model.exportedURL = URL(fileURLWithPath: "/tmp/fixture-export.mp4")
         await model.saveToPhotos(); XCTAssertNotNil(model.error); XCTAssertNil(model.notice)
+        XCTAssertEqual(model.saveFeedback?.kind, .failure)
         await model.saveToPhotos(); XCTAssertNil(model.error); XCTAssertNotNil(model.notice)
+        XCTAssertEqual(model.saveFeedback?.kind, .success)
+        XCTAssertEqual(model.saveFeedback?.message, "Saved to Photos")
     }
     @MainActor func testPhotosExportDoesNotClaimSuccessWithoutAReceipt() async {
         let model = ExportModel(authorizePhotos: { true }, writePhotosVideo: { _ in "" })
@@ -875,6 +878,7 @@ final class PipelineTests: XCTestCase {
             await Task.yield()
         }
         let startedCalls = await writer.calls
+        XCTAssertEqual(model.saveFeedback?.kind, .saving)
         guard startedCalls == 1 else { first.cancel(); XCTFail("First save did not start"); return }
         await model.saveToPhotos() // The first write is deliberately still in flight.
         let calls = await writer.calls

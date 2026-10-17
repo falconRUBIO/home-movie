@@ -9,6 +9,7 @@ import UIKit
     @Published var exportedURL: URL?
     @Published var error: String?
     @Published var notice: String?
+    @Published var saveFeedback: SaveToast?
     private var session: AVAssetExportSession?
     private var job: Task<Void, Never>?
     private var backgroundObserver: NSObjectProtocol?
@@ -132,15 +133,28 @@ import UIKit
     }
     func cancel() { if running && notice == nil { notice = "Export canceled. Your original scenes are safe." }; session?.cancelExport(); job?.cancel() }
     func saveToPhotos() async {
-        guard let exportedURL, !savingPhotos else { return }
+        guard !savingPhotos else { return }
+        guard let exportedURL else {
+            saveFeedback = SaveToast(kind: .failure, message: "Prepare the video before saving.")
+            return
+        }
         savingPhotos = true; defer { savingPhotos = false }
         error = nil; notice = nil
-        guard await authorizePhotos() else { error = "Allow Home Movie to add videos to Photos in Settings, or save to Files instead."; return }
+        saveFeedback = SaveToast(kind: .saving, message: "Saving to Photos…")
+        guard await authorizePhotos() else {
+            error = "Allow Home Movie to add videos to Photos in Settings, or save to Files instead."
+            saveFeedback = SaveToast(kind: .failure, message: "Photos access needed. Check Settings.")
+            return
+        }
         do {
             let identifier = try await writePhotosVideo(exportedURL)
             guard !identifier.isEmpty else { throw HomeMovieError.message("Photos did not confirm a saved video. Try again or save to Files.") }
             notice = "Saved to Photos. You can keep adding to your movie."
-        } catch { self.error = error.localizedDescription }
+            saveFeedback = SaveToast(kind: .success, message: "Saved to Photos")
+        } catch {
+            self.error = error.localizedDescription
+            saveFeedback = SaveToast(kind: .failure, message: "Couldn’t save to Photos. Please try again.")
+        }
     }
 }
 

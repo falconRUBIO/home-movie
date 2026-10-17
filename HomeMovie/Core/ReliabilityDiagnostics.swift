@@ -4,14 +4,24 @@ import Foundation
 final class ReliabilityDiagnostics: @unchecked Sendable {
     enum Event: String, Codable {
         case appLaunched, lowMemory, resourcePressure, firstPreviewFrame, cameraRequested, cameraReady, cameraFailed, cameraInterrupted
-        case recordingRequested, recordingStarted, recordingFinished, recordingFailed
+        case recordingRequested, recordingStarted, recordingFinished, recordingFailed, recordingGeometry
         case exportRequested, exportFinished, exportFailed, exportCancelled
+    }
+    struct CaptureContext: Codable, Sendable {
+        enum Camera: String, Codable, Sendable { case front, rear }
+        var camera: Camera? = nil
+        var interface: MovieFormat? = nil
+        var canvas: MovieFormat? = nil
+        var sensorAngle: Double? = nil
+        var savedWidth: Int? = nil
+        var savedHeight: Int? = nil
     }
     private struct Entry: Codable {
         let date: Date
         let event: Event
         let domain: String?
         let code: Int?
+        let capture: CaptureContext?
     }
     static let shared = ReliabilityDiagnostics()
     private let queue = DispatchQueue(label: "HomeMovie.diagnostics", qos: .utility)
@@ -27,14 +37,14 @@ final class ReliabilityDiagnostics: @unchecked Sendable {
               let data = try? Data(contentsOf: file), let decoded = try? JSONDecoder().decode([Entry].self, from: data) else { return [] }
         return Array(decoded.suffix(limit))
     }
-    func record(_ event: Event, error: Error? = nil) {
+    func record(_ event: Event, error: Error? = nil, capture: CaptureContext? = nil) {
         let error = error as NSError?
         let knownDomains = [NSCocoaErrorDomain, NSPOSIXErrorDomain, NSOSStatusErrorDomain, "AVFoundationErrorDomain", "PHPhotosErrorDomain", "HomeMovie.HomeMovieError"]
         let domain = error.map { knownDomains.contains($0.domain) ? $0.domain : "OtherError" }
         let code = error?.code
         queue.async {
             var values = self.load()
-            values.append(Entry(date: Date(), event: event, domain: domain, code: code))
+            values.append(Entry(date: Date(), event: event, domain: domain, code: code, capture: capture))
             self.entries = Array(values.suffix(self.limit))
             self.persist()
         }
@@ -78,7 +88,16 @@ final class ReliabilityDiagnostics: @unchecked Sendable {
                 formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
                 let events = values.map { entry in
                     let failure = entry.domain.map { " [\($0):\(entry.code ?? 0)]" } ?? ""
-                    return "\(formatter.string(from: entry.date)) \(entry.event.rawValue)\(failure)"
+                    var geometry: [String] = []
+                    if let capture = entry.capture {
+                        if let camera = capture.camera { geometry.append("camera=\(camera.rawValue)") }
+                        if let interface = capture.interface { geometry.append("interface=\(interface.rawValue)") }
+                        if let canvas = capture.canvas { geometry.append("canvas=\(canvas.rawValue)") }
+                        if let angle = capture.sensorAngle, angle.isFinite { geometry.append("sensor=\(angle)") }
+                        if let width = capture.savedWidth, let height = capture.savedHeight { geometry.append("saved=\(width)x\(height)") }
+                    }
+                    let details = geometry.isEmpty ? "" : " [" + geometry.joined(separator: " ") + "]"
+                    return "\(formatter.string(from: entry.date)) \(entry.event.rawValue)\(failure)\(details)"
                 }
                 let apple = self.systemFiles().suffix(4).compactMap { try? String(contentsOf: $0, encoding: .utf8) }
                 continuation.resume(returning: (["Home Movie \(version) (\(build))", ProcessInfo.processInfo.operatingSystemVersionString,

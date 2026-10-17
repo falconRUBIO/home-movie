@@ -357,8 +357,9 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             }); self.ticket = ticket; announcedStart = false
         let frontObserved = frontRotation?.videoRotationAngleForHorizonLevelCapture ?? angle
         let rearObserved = backRotation?.videoRotationAngleForHorizonLevelCapture ?? angle
-        recordedPresenterAngle = (MovieFormat.captureFormat(angle: frontObserved) ?? .portrait).recordingAngle(observed: frontObserved)
-        recordedRearAngle = (MovieFormat.captureFormat(angle: rearObserved) ?? .portrait).recordingAngle(observed: rearObserved)
+        let format = MovieFormat.captureFormat(angle: angle) ?? .portrait
+        recordedPresenterAngle = format.recordingAngle(observed: frontObserved)
+        recordedRearAngle = format.recordingAngle(observed: rearObserved)
     }
     func configurePiP(layout: PiPLayout, canvasFormat: MovieFormat?) {
         guard take == nil else { return }

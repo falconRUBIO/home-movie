@@ -26,6 +26,21 @@ final class ReliabilityDiagnosticsTests: XCTestCase {
         XCTAssertFalse(cleared.contains("recordingStarted"))
         XCTAssertFalse(cleared.contains("OtherError:42"))
     }
+    func testCaptureGeometryRoundTripsWithoutPathsOrTitles() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("events.json")
+        let log = ReliabilityDiagnostics(file: file)
+        log.record(.recordingRequested, capture: .init(camera: .front, interface: .portrait,
+            canvas: .portrait, sensorAngle: 0))
+        log.record(.recordingGeometry, capture: .init(canvas: .portrait, savedWidth: 1080, savedHeight: 1920))
+        let report = await log.report()
+        XCTAssertTrue(report.contains("camera=front interface=portrait canvas=portrait sensor=0.0"))
+        XCTAssertTrue(report.contains("saved=1080x1920"))
+        let restored = await ReliabilityDiagnostics(file: file).report()
+        XCTAssertEqual(restored, report)
+    }
+
     func testAppleReportsAreBoundedPersistedAndCleared() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

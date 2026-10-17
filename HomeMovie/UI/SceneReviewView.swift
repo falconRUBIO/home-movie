@@ -131,6 +131,7 @@ struct SceneReviewView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { photosFooter }
+            .saveStatusToast($export.saveFeedback)
             .navigationTitle("Review Scene").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -197,6 +198,8 @@ struct SceneReviewView: View {
                 guard !running, waitingForExport else { return }
                 waitingForExport = false
                 if export.exportedURL != nil { writeClipToPhotos() }
+                else if let error = export.error { export.saveFeedback = SaveToast(kind: .failure, message: error) }
+                else { export.saveFeedback = nil }
             }
             .onChange(of: scenePhase) { _, phase in if phase != .active { preview.player?.pause() } }
         }
@@ -346,6 +349,7 @@ struct SceneReviewView: View {
     private func saveClip() {
         guard !busy else { return }
         saving = true; error = nil; notice = nil; comparing = false; preview.player?.pause()
+        export.saveFeedback = SaveToast(kind: .saving, message: "Preparing scene…")
         Task {
             do {
                 try await persistEdits()
@@ -359,8 +363,13 @@ struct SceneReviewView: View {
                 if !export.running, waitingForExport {
                     waitingForExport = false
                     if export.exportedURL != nil { writeClipToPhotos() }
+                    else if let error = export.error { export.saveFeedback = SaveToast(kind: .failure, message: error) }
+                    else { export.saveFeedback = nil }
                 }
-            } catch { self.error = error.localizedDescription; saving = false }
+            } catch {
+                self.error = error.localizedDescription; saving = false
+                export.saveFeedback = SaveToast(kind: .failure, message: "Couldn’t prepare the scene. Please try again.")
+            }
         }
     }
     private func writeClipToPhotos() {

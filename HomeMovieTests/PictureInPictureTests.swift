@@ -6,6 +6,39 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testSwappingSplitCamerasMovesPixelsAndPersistsWithoutChangingInsetPreferences() throws {
+        let rear = try frame(red: 0, green: 0, blue: 220)
+        let front = try frame(red: 220, green: 0, blue: 0)
+        let canvas = CGSize(width: 180, height: 320)
+        for composition in [PiPComposition.topAndBottom, .sideBySide] {
+            var layout = PiPLayout(corner: .topRight, size: .medium, orientation: .portrait, zoom: 1.5,
+                                  composition: composition)
+            for swapped in [false, true] {
+                layout.splitSwapped = swapped
+                let restored = try JSONDecoder().decode(PiPLayout.self, from: JSONEncoder().encode(layout))
+                XCTAssertEqual(restored, layout)
+                var timeline = PiPTimeline()
+                timeline.setLayout(restored); timeline.setEnabled(true, at: .zero)
+                let state = timeline.presentation(at: CMTime(seconds: 1, preferredTimescale: 30), canvas: canvas)
+                XCTAssertEqual(state.splitSwapped, swapped)
+                XCTAssertEqual(state.rect, composition.presenterRect(swapped: swapped))
+                let image = PiPCompositor.image(background: rear, presenter: front, canvas: canvas,
+                    backgroundAngle: 0, presenterAngle: 0, presentation: state)
+                let first = composition == .topAndBottom
+                    ? CGPoint(x: 90, y: 240) : CGPoint(x: 45, y: 160)
+                let second = composition == .topAndBottom
+                    ? CGPoint(x: 90, y: 80) : CGPoint(x: 135, y: 160)
+                XCTAssertGreaterThan(sample(image, point: first)[swapped ? 0 : 2], 180)
+                XCTAssertGreaterThan(sample(image, point: second)[swapped ? 2 : 0], 180)
+            }
+            layout.composition = .inset
+            XCTAssertEqual(layout.orientation, .portrait)
+            XCTAssertEqual(layout.corner, .topRight)
+        }
+        let legacy = Data(#"{"corner":"bottomRight","size":"small"}"#.utf8)
+        XCTAssertFalse(try JSONDecoder().decode(PiPLayout.self, from: legacy).splitSwapped)
+    }
+
     func testPortraitInsetKeepsShapeWhenReturningFromEitherSplitLayout() throws {
         let canvas = MovieFormat.portrait.canvas
         var layout = PiPLayout(corner: .bottomRight, orientation: .portrait, zoom: 1.25)

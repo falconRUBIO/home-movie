@@ -71,10 +71,10 @@ extern "C" { namespace coreimage {
     }
     float4 filmOptics(sample_t base, sample_t bloom, sample_t red, sample_t orange, float bloomAmount, float halationAmount) {
         float l = luminance(base.rgb);
-        float sourceProtection = 1.0 - smoothstep(0.55, 0.98, l);
-        float localContrast = smoothstep(0.002, 0.06, max(luminance(red.rgb) - l, 0.0));
+        float sourceProtection = 1.0 - smoothstep(0.65, 0.995, l);
+        float localContrast = smoothstep(0.001, 0.035, max(luminance(red.rgb) - l * 0.18, 0.0));
         float3 halo = float3(luminance(red.rgb), luminance(orange.rgb) * 0.32, luminance(orange.rgb) * 0.025);
-        float3 energy = bloom.rgb * bloomAmount * 0.28 + halo * halationAmount * 0.32 * sourceProtection * localContrast;
+        float3 energy = bloom.rgb * bloomAmount * 1.05 + halo * halationAmount * 1.65 * sourceProtection * localContrast;
         // Channel-relative headroom protection, no whole-frame tone or saturation changes.
         float3 result = base.rgb + max(1.0 - base.rgb, 0.0) * (1.0 - exp(-energy));
         return float4(encode709(result), base.a);

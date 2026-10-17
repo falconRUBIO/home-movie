@@ -288,6 +288,8 @@ actor ProjectStore {
         let staging = try url(ticket.staging), source = try url(ticket.source)
         let input = fm.fileExists(atPath: source.path) ? source : staging
         let info = try await MediaInspector.inspect(input)
+        ReliabilityDiagnostics.shared.record(.recordingGeometry, capture: .init(canvas: ticket.format,
+            savedWidth: Int(info.size.width), savedHeight: Int(info.size.height)))
         if ticket.profile == .appleLog && info.profile != .appleLog {
             throw HomeMovieError.message("The recording’s Apple Log metadata could not be verified.")
         }

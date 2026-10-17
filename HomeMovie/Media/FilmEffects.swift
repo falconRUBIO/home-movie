@@ -12,7 +12,7 @@ enum FilmGrainTexture: String, Codable, CaseIterable, Identifiable, Sendable {
 
 // Stored separately from capture profile and LUT selection. Optional on Movie for old catalogs.
 struct FilmEffectsSettings: Codable, Equatable, Sendable {
-    static let engineVersion = 1
+    static let engineVersion = 2
     static let off = FilmEffectsSettings()
     var version = 1
     var grainEnabled = false
@@ -91,15 +91,15 @@ final class FilmEffectsRenderer {
             let black = CIImage(color: .black).cropped(to: bounds)
             var bloom = black, red = black, orange = black
             if settings.bloomEnabled && settings.bloomAmount > 0 {
-                let threshold = 0.95 - 0.35 * settings.bloomSensitivity
+                let threshold = 0.86 - 0.32 * settings.bloomSensitivity
                 let highlight = try apply("filmHighlights", extent: bounds, arguments: [linear, threshold, 0])
-                let radius = (3 + 18 * settings.bloomSpread) * scale
+                let radius = (5 + 35 * settings.bloomSpread) * scale
                 bloom = diffuse(highlight, radius: radius, extent: bounds, weights: [0.6, 0.3, 0.1])
             }
             if settings.halationEnabled && settings.halationAmount > 0 {
-                let threshold = 0.97 - 0.25 * settings.halationSensitivity
+                let threshold = 0.88 - 0.28 * settings.halationSensitivity
                 let highlight = try apply("filmHighlights", extent: bounds, arguments: [linear, threshold, 1])
-                let radius = (1.5 + 8 * settings.halationSpread) * scale
+                let radius = (2 + 14 * settings.halationSpread) * scale
                 red = diffuse(highlight, radius: radius * 1.6, extent: bounds, weights: [0.75, 0.2, 0.05])
                 orange = diffuse(highlight, radius: radius * 0.65, extent: bounds, weights: [0.8, 0.15, 0.05])
             }

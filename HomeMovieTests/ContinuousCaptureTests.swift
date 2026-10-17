@@ -3,6 +3,41 @@ import AVFoundation
 @testable import HomeMovie
 
 final class ContinuousCaptureTests: XCTestCase {
+    @MainActor func testFirstPortraitFrontTakeSavesPortraitDespiteLandscapeSensorAngle() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root); _ = try await store.load()
+        let movie = try await store.create(name: "Portrait first take", format: .landscape)
+        let visibleFormat = OrientationPolicy.interfaceFormat(.portrait, observed: 0)
+        let angle = visibleFormat.recordingAngle(observed: 0)
+        let ticket = try await store.begin(movieID: movie.id, format: visibleFormat, profile: .standard)
+        let writer = try ContinuousTakeWriter(url: try await store.url(ticket.staging), angle: angle)
+        let front = try frame(red: false)
+        XCTAssertEqual(writer.canvas, MovieFormat.portrait.canvas)
+        for index in 0..<10 {
+            var accepted = false
+            for _ in 0..<100 {
+                if writer.appendVideo(front, at: CMTime(value: Int64(index), timescale: 30), sourceAngle: angle) {
+                    accepted = true; break
+                }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(accepted)
+        }
+        let finished = expectation(description: "Portrait take finishes")
+        writer.finish { error in XCTAssertNil(error); finished.fulfill() }
+        await fulfillment(of: [finished], timeout: 30)
+        try await store.commit(ticket)
+        let reopened = ProjectStore(root: root); _ = try await reopened.load()
+        let snapshots = await reopened.snapshot()
+        let saved = try XCTUnwrap(snapshots.first)
+        XCTAssertEqual(saved.recordingFormat, .portrait)
+        let scene = try XCTUnwrap(saved.activeScenes.first)
+        XCTAssertEqual(scene.width, 1080); XCTAssertEqual(scene.height, 1920)
+        let asset = try await MediaInspector.inspect(reopened.root.appendingPathComponent(scene.source))
+        XCTAssertEqual(asset.size, MovieFormat.portrait.canvas)
+    }
+
     func testAsynchronousPipelineKeepsAudioAndVideoAcrossPiPToggle() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
         defer { try? FileManager.default.removeItem(at: url) }
