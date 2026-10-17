@@ -21,6 +21,7 @@ struct WatchMovieView: View {
     @State private var exporting = false
     @State private var looks: [LUTReference] = []
     @State private var importingLook = false
+    @State private var importingDisplayLook = false
     @State private var changingLook = false
     @State private var showOriginalLog = false
     @State private var reordering = false
@@ -78,7 +79,8 @@ struct WatchMovieView: View {
                                     }
                                 }
                                 Divider()
-                                Button("Add Apple Log Look…", systemImage: "plus") { importingLook = true }
+                                Button("Add Apple Log Look…", systemImage: "plus") { importingDisplayLook = false; importingLook = true }
+                                Button("Add Rec.709 Look…", systemImage: "plus") { importingDisplayLook = true; importingLook = true }
                             } label: { MovieControlIcon(systemName: "slider.horizontal.3") }
                                 .accessibilityLabel("Look: \(showOriginalLog ? "Original Log" : movie.lookName)")
                                 .disabled(changingLook)
@@ -98,7 +100,7 @@ struct WatchMovieView: View {
                         Task {
                             defer { changingLook = false }
                             do {
-                                let look = try await app.store.importLook(from: url)
+                                let look = try await app.store.importLook(from: url, displayReferred: importingDisplayLook)
                                 try await app.store.setLook(movieID: movieID, look: look)
                                 looks = await app.store.availableLooks(); showOriginalLog = false; await app.refresh()
                             } catch { app.error = error.localizedDescription }
