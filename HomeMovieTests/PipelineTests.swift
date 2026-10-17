@@ -206,17 +206,10 @@ final class PipelineTests: XCTestCase {
         let original = try await MediaAssembler().build(movie: movie, root: store.root, showOriginalLog: true)
         XCTAssertEqual((original.videoComposition.instructions.first as? ColorInstruction)?.adjustments, .neutral)
     }
-    func testBundledLooksAreInstalledWithCinemaFirstAndRetiredSelectionFallsBack() async throws {
+    func testOnlyCinemaIsInstalledAndRetiredSelectionFallsBack() async throws {
         let store = try await makeStore()
         let looks = await store.availableLooks()
-        XCTAssertEqual(looks.map(\.id), [LUTReference.filmica.id, LUTReference.amber.id, LUTReference.ember.id, LUTReference.heritage.id])
-        for reference in LUTReference.originalFilmLooks {
-            let cube = try ColorCube.load(reference, root: store.root)
-            try cube.validate()
-            XCTAssertEqual(cube.name, reference.name)
-            XCTAssertEqual(cube.dimension, 65)
-            XCTAssertTrue(cube.sourceNotices?.contains("Original independently generated") == true)
-        }
+        XCTAssertEqual(looks.map(\.id), [LUTReference.filmica.id])
         let movie = try await store.create(name: "Original look", format: .landscape, profile: .appleLog)
         try await store.setLook(movieID: movie.id, look: .cinemaTwo)
         let saved = await store.snapshot()
@@ -1747,6 +1740,31 @@ extension PipelineTests {
             XCTAssertEqual(bytes.loadUnaligned(fromByteOffset: 0, as: Float.self), 0.75, accuracy: 0.000001)
             XCTAssertEqual(bytes.loadUnaligned(fromByteOffset: 4, as: Float.self), 0.50, accuracy: 0.000001)
             XCTAssertEqual(bytes.loadUnaligned(fromByteOffset: 8, as: Float.self), 0.25, accuracy: 0.000001)
+        }
+    }
+}
+
+
+extension PipelineTests {
+    func testRemovedMorningLooksMigrateToCinemaWithoutChangingMovieIdentity() async throws {
+        for retired in [LUTReference.amber, .heritage, .ember] {
+            let store = try await makeStore()
+            var movie = try await store.create(name: "Keep movie", format: .landscape, profile: .appleLog)
+            movie.look = retired
+            let originalRevision = movie.revision
+            let catalog = Catalog(movies: [movie])
+            try JSONEncoder().encode(catalog).write(to: store.root.appendingPathComponent("catalog.json"), options: .atomic)
+            let reopened = ProjectStore(root: store.root)
+            _ = try await reopened.load()
+            let movies = await reopened.snapshot()
+            let migrated = try XCTUnwrap(movies.first)
+            XCTAssertEqual(migrated.id, movie.id)
+            XCTAssertEqual(migrated.name, movie.name)
+            XCTAssertEqual(migrated.look, .filmica)
+            XCTAssertEqual(migrated.revision, originalRevision + 1)
+            let available = await reopened.availableLooks()
+            XCTAssertEqual(available.map(\.id), [LUTReference.filmica.id])
+            XCTAssertEqual(try ColorCube.load(retired, root: reopened.root).rgba, try ColorCube.filmica.get().rgba)
         }
     }
 }
