@@ -521,8 +521,9 @@ private final class SceneRulerScrollView: UIScrollView {
     }
     override func layoutSubviews() {
         let widthChanged = bounds.width != previousWidth
-        applying = true
+        let previouslyApplying = applying
         super.layoutSubviews()
+        applying = true
         ticks.frame = CGRect(x: 0, y: 0, width: 200 * tickSpacing, height: bounds.height)
         if contentSize != ticks.bounds.size { contentSize = ticks.bounds.size }
         let half = bounds.width / 2
@@ -533,7 +534,7 @@ private final class SceneRulerScrollView: UIScrollView {
             previousWidth = bounds.width
             setContentOffset(CGPoint(x: offset(for: displayedValue), y: 0), animated: false)
         }
-        applying = false
+        applying = previouslyApplying
     }
 }
 private final class SceneRulerTicks: UIView {
