@@ -316,7 +316,10 @@ struct SettingsView: View {
                     LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                     LabeledContent("Build", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")
                 }
-                Section("Support") { NavigationLink("Diagnostics", destination: DiagnosticsView()) }
+                Section("Support") {
+                    Link("Help & Contact", destination: URL(string: "https://home-movies-support.falcon-craft-4475.chatgpt.site/support/")!)
+                    NavigationLink("Diagnostics", destination: DiagnosticsView())
+                }
                 Section("Launch") { Toggle("Open last movie", isOn: $openLastMovie) }
                 Section { NavigationLink("Privacy", destination: PrivacyView()) }
                 Section("Protection") {
@@ -363,6 +366,9 @@ struct SettingsView: View {
 struct PrivacyView: View {
     var body: some View {
         List {
+            Section {
+                Link("Full Privacy Policy", destination: URL(string: "https://home-movies-support.falcon-craft-4475.chatgpt.site/privacy/")!)
+            }
             Section("Your movies") {
                 Text("Home Movie keeps recordings and edit information on this iPhone. It has no account system, advertising, or analytics service, and does not upload your movies to a developer server.")
             }
