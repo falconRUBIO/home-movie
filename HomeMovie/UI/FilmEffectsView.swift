@@ -71,9 +71,6 @@ struct FilmEffectsView: View {
     @State private var fullscreen = false
     @State private var saving = false
     @State private var saveError: String?
-    @State private var showGrainDetails = false
-    @State private var showHalationDetails = false
-    @State private var showBloomDetails = false
     init(movie: Movie) { self.movie = movie; _settings = State(initialValue: movie.exportEffects) }
     private var shownSettings: FilmEffectsSettings { comparing ? .off : settings }
     var body: some View {
@@ -141,16 +138,39 @@ struct FilmEffectsView: View {
         }.padding(.bottom, 8).background(Color.black.opacity(0.04))
     }
     private var controls: some View {
-        Form {
-            softnessControls
-            rolloffControls
-            grainControls
+        Form { FilmEffectsControlSections(settings: $settings) }.disabled(saving || comparing)
+    }
+    private func saveAndClose() {
+        guard !saving else { return }; saving = true; comparing = false; preview.player?.pause()
+        Task {
+            do {
+                try await app.store.setFilmEffects(movieID: movie.id, settings: settings)
+                await app.refresh(); dismiss()
+            } catch { saveError = error.localizedDescription }
+            saving = false
+        }
+    }
+}
+
+// Shared by scene review and the movie export editor; both edit the same movie recipe.
+struct FilmEffectsControlSections: View {
+    @Binding var settings: FilmEffectsSettings
+    @State private var showGrainDetails = false
+    @State private var showHalationDetails = false
+    @State private var showBloomDetails = false
+    var body: some View {
+        Group {
             halationControls
             bloomControls
+            grainControls
+            softnessControls
+            rolloffControls
             Section {
-                Button("Reset All") { settings = .off; comparing = false }
-            } footer: { Text("These effects appear in this preview and your exported copy. Original recordings and your selected color look are preserved.") }
-        }.disabled(saving)
+                Button("Reset FX") { settings = .off }
+            } footer: {
+                Text("Applies to all scenes in this movie. Original recordings stay unchanged.")
+            }
+        }
     }
     private var softnessControls: some View {
         Section {
@@ -198,13 +218,13 @@ struct FilmEffectsView: View {
     }
     private var bloomControls: some View {
         Section {
-            Toggle("Bloom", isOn: $settings.bloomEnabled)
+            Toggle("Glow", isOn: $settings.bloomEnabled)
             if settings.bloomEnabled {
                 amountSlider("Amount", value: $settings.bloomAmount)
                 DisclosureGroup("Adjustments", isExpanded: $showBloomDetails) {
                     amountSlider("Spread", value: $settings.bloomSpread)
                     amountSlider("Highlight Sensitivity", value: $settings.bloomSensitivity)
-                    Button("Reset Bloom") { settings.bloomAmount = 0.15; settings.bloomSpread = 0.35; settings.bloomSensitivity = 0.25 }
+                    Button("Reset Glow") { settings.bloomAmount = 0.15; settings.bloomSpread = 0.35; settings.bloomSensitivity = 0.25 }
                 }
             }
         } footer: { Text("Softens the glow around bright lights while keeping their color.") }
@@ -219,16 +239,6 @@ struct FilmEffectsView: View {
             }
             Slider(value: value, in: range).accessibilityLabel(label)
         }.padding(.vertical, 4)
-    }
-    private func saveAndClose() {
-        guard !saving else { return }; saving = true; comparing = false; preview.player?.pause()
-        Task {
-            do {
-                try await app.store.setFilmEffects(movieID: movie.id, settings: settings)
-                await app.refresh(); dismiss()
-            } catch { saveError = error.localizedDescription }
-            saving = false
-        }
     }
 }
 
