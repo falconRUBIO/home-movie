@@ -353,8 +353,9 @@ actor ProjectStore {
         try write(next)
         try? fm.removeItem(at: url(ticket.journal))
     }
-    func editScene(movieID: UUID, sceneID: UUID, start: CMTime, end: CMTime, adjustments: SceneAdjustments) throws {
-        try requireIdle(); try adjustments.validate()
+    func editScene(movieID: UUID, sceneID: UUID, start: CMTime, end: CMTime, adjustments: SceneAdjustments,
+                   filmEffects: FilmEffectsSettings? = nil) throws {
+        try requireIdle(); try adjustments.validate(); try filmEffects?.validate()
         let m = try index(movieID)
         guard catalog.movies[m].deletedAt == nil,
               let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID && $0.deletedAt == nil }) else {
@@ -365,7 +366,8 @@ actor ProjectStore {
         next.movies[m].scenes[c].trimEnd = MediaTime(end)
         next.movies[m].scenes[c].adjustments = adjustments.isActive ? adjustments : nil
         guard next.movies[m].scenes[c].validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
-        guard next.movies[m].scenes[c] != catalog.movies[m].scenes[c] else { return }
+        if let filmEffects { next.movies[m].filmEffects = filmEffects }
+        guard next.movies[m] != catalog.movies[m] else { return }
         next.movies[m].revision += 1; try write(next)
     }
     func trim(movieID: UUID, sceneID: UUID, start: CMTime, end: CMTime) throws {
@@ -379,9 +381,9 @@ actor ProjectStore {
     }
     /// Save current edits and insert an independently owned copy directly after this scene.
     func duplicateScene(movieID: UUID, sceneID: UUID, start: CMTime, end: CMTime,
-                        adjustments: SceneAdjustments) throws {
+                        adjustments: SceneAdjustments, filmEffects: FilmEffectsSettings? = nil) throws {
         try requireIdle()
-        try adjustments.validate()
+        try adjustments.validate(); try filmEffects?.validate()
         let m = try index(movieID)
         guard catalog.movies[m].deletedAt == nil,
               let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID && $0.deletedAt == nil }),
@@ -404,6 +406,7 @@ actor ProjectStore {
         do {
             var next = catalog
             next.movies[m].scenes[c] = edited
+            if let filmEffects { next.movies[m].filmEffects = filmEffects }
             for index in next.movies[m].scenes.indices where next.movies[m].scenes[index].sequence >= copy.sequence {
                 next.movies[m].scenes[index].sequence += 1
             }
