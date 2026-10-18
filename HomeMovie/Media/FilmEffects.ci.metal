@@ -61,17 +61,25 @@ extern "C" { namespace coreimage {
         float target = l;
         // Independent, monotonic toe/shoulder curves; the opposite range is untouched.
         if (target < 0.55 && shadows != 0.0) {
-            target = 0.55 * (1.0 - pow(1.0 - target / 0.55, exp2(shadows * 1.6)));
+            float x = target / 0.55;
+            float strength = shadows >= 0.0 ? shadows * 2.4 : shadows * 0.9;
+            target = 0.55 * (x + strength * x * (1.0 - x) * (1.0 - x));
         }
         if (target > 0.45 && highlights != 0.0) {
+            float x = (target - 0.45) / 0.55;
             target = highlights < 0.0 ? target + highlights * 0.30 * smoothstep(0.45, 1.0, target)
-                : 0.45 + 0.55 * pow((target - 0.45) / 0.55, exp2(-highlights * 1.6));
+                : 0.45 + 0.55 * (x + highlights * 0.9 * x * x * (1.0 - x));
         }
         // Color-neutral brilliance opens the lower half and restrains the upper half.
         if (brilliance != 0.0) {
-            float power = exp2(brilliance * 0.9);
-            target = target < 0.5 ? 0.5 * (1.0 - pow(1.0 - target * 2.0, power))
-                : 0.5 + 0.5 * pow(target * 2.0 - 1.0, power);
+            float strength = brilliance >= 0.0 ? brilliance * 1.5 : brilliance * 0.8;
+            if (target < 0.5) {
+                float x = target * 2.0;
+                target = 0.5 * (x + strength * x * (1.0 - x) * (1.0 - x));
+            } else {
+                float x = target * 2.0 - 1.0;
+                target = 0.5 + 0.5 * (x - strength * x * x * (1.0 - x));
+            }
         }
         target = clamp(target + brilliance * 0.25 * (luminance(input.rgb) - luminance(local.rgb)) * 4.0 * target * (1.0 - target), 0.0, 1.0);
         // Midtone brightness protects both endpoints and stays monotonic at ±100.

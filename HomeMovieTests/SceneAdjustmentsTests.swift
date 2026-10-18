@@ -211,3 +211,19 @@ extension SceneAdjustmentsTests {
         XCTAssertEqual(detent.value(-0.03, neutral: 0, step: 0.01), -0.03)
     }
 }
+
+
+extension SceneAdjustmentsTests {
+    func testTonalJoinsDoNotCreateContrastSeams() throws {
+        let controls: [(WritableKeyPath<SceneAdjustments, Double>, Double)] = [(\.shadows, 0.55), (\.highlights, 0.45), (\.brilliance, 0.5)]
+        for (key, join) in controls {
+            for direction in [-1.0, 1.0] {
+                var recipe = SceneAdjustments(); recipe[keyPath: key] = direction
+                let a = sample(try recipe.apply(to: gray(CGFloat(join - 0.001))))[0]
+                let b = sample(try recipe.apply(to: gray(CGFloat(join))))[0]
+                let c = sample(try recipe.apply(to: gray(CGFloat(join + 0.001))))[0]
+                XCTAssertEqual(b - a, c - b, accuracy: 0.00005, "Tonal joins should keep a continuous slope")
+            }
+        }
+    }
+}
