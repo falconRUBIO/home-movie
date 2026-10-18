@@ -227,7 +227,7 @@ struct MovieSettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Recording", selection: $profile) {
+                    Picker("Recording", selection: $profile.withSelectionFeedback()) {
                         Text("Standard").tag(CaptureProfile.standard)
                         Text("Apple Log").tag(CaptureProfile.appleLog)
                     }.pickerStyle(.segmented)
@@ -319,10 +319,10 @@ struct SettingsView: View {
                     LabeledContent("Build", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")
                 }
                 Section("Support") { NavigationLink("Diagnostics", destination: DiagnosticsView()) }
-                Section("Launch") { Toggle("Open last movie", isOn: $openLastMovie) }
+                Section("Launch") { Toggle("Open last movie", isOn: $openLastMovie.withSelectionFeedback()) }
                 Section { NavigationLink("Privacy", destination: PrivacyView()) }
                 Section("Protection") {
-                    Toggle("Copy original scenes to Photos", isOn: $copyScenesToPhotos)
+                    Toggle("Copy original scenes to Photos", isOn: $copyScenesToPhotos.withSelectionFeedback())
                         .onChange(of: copyScenesToPhotos) { _, enabled in if enabled { app.retryPhotosCopies() } else { app.stopPhotosRetries() } }
                     Text("Creates a separate Photos copy after each local save. Copies use extra storage. iCloud Photos syncing follows your Photos settings.").font(.footnote).foregroundStyle(.secondary)
                     if copyScenesToPhotos { Button("Retry Pending Photos Copies") { app.retryPhotosCopies() } }

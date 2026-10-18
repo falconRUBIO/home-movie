@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // Scene review edits the movie recipe used by preview and export.
 struct FilmEffectsControlSections: View {
@@ -13,64 +14,62 @@ struct FilmEffectsControlSections: View {
             grainControls
             softnessControls
             rolloffControls
+            Section {
+                amountSlider("Sharpness", value: $settings.sharpnessAmount)
+            } footer: { Text("Brings out fine detail. High amounts can emphasize noise.") }
+            Section {
+                amountSlider("Vignette", value: $settings.vignetteAmount)
+            } footer: { Text("Gradually darkens the edges, keeping the center clear.") }
         }
     }
     private var softnessControls: some View {
         Section {
-            Toggle("Optical Softness", isOn: $settings.softnessEnabled)
-            if settings.softnessEnabled {
-                amountSlider("Amount", value: $settings.softnessAmount, accessibilityLabel: "Optical Softness amount")
-            }
+            amountSlider("Optical Softness", value: effectAmount(\.softnessAmount, enabled: \.softnessEnabled), accessibilityLabel: "Optical Softness amount")
         } footer: { Text("Gently softens fine detail for a less digital texture. Faces stay clear.") }
     }
     private var rolloffControls: some View {
         Section {
-            Toggle("Highlight Roll-Off", isOn: $settings.rolloffEnabled)
-            if settings.rolloffEnabled {
-                amountSlider("Amount", value: $settings.rolloffAmount, accessibilityLabel: "Highlight Roll-Off amount")
-            }
+            amountSlider("Highlight Roll-Off", value: effectAmount(\.rolloffAmount, enabled: \.rolloffEnabled), accessibilityLabel: "Highlight Roll-Off amount")
         } footer: { Text("Smooths bright tones toward white. Lower amounts keep highlights brighter.") }
     }
     private var grainControls: some View {
         Section {
-            Toggle("Grain", isOn: $settings.grainEnabled)
-            if settings.grainEnabled {
-                amountSlider("Amount", value: $settings.grainAmount, accessibilityLabel: "Grain amount")
+            amountSlider("Grain", value: effectAmount(\.grainAmount, enabled: \.grainEnabled), accessibilityLabel: "Grain amount")
                 DisclosureGroup("Adjustments", isExpanded: $showGrainDetails) {
-                    Picker("Texture", selection: $settings.grainTexture) {
+                    Picker("Texture", selection: $settings.grainTexture.withSelectionFeedback()) {
                         ForEach(FilmGrainTexture.allCases) { texture in Text(texture.label).tag(texture) }
                     }
                     amountSlider("Size", value: $settings.grainSize, range: 0.5...2, percent: false, accessibilityLabel: "Grain size")
-                    Button("Reset Grain") { settings.grainAmount = 0.25; settings.grainSize = 1; settings.grainTexture = .fine35 }
+                    Button("Reset Grain") { settings.grainEnabled = false; settings.grainAmount = 0; UISelectionFeedbackGenerator().selectionChanged(); settings.grainSize = 1; settings.grainTexture = .fine35 }
                 }
-            }
         } footer: { Text("Adds fine, moving film texture. Pause to inspect the detail.") }
     }
     private var halationControls: some View {
         Section {
-            Toggle("Halation", isOn: $settings.halationEnabled)
-            if settings.halationEnabled {
-                amountSlider("Amount", value: $settings.halationAmount, accessibilityLabel: "Halation amount")
+            amountSlider("Halation", value: effectAmount(\.halationAmount, enabled: \.halationEnabled), accessibilityLabel: "Halation amount")
                 DisclosureGroup("Adjustments", isExpanded: $showHalationDetails) {
                     amountSlider("Spread", value: $settings.halationSpread, accessibilityLabel: "Halation spread")
                     amountSlider("Highlight Sensitivity", value: $settings.halationSensitivity, accessibilityLabel: "Halation highlight sensitivity")
-                    Button("Reset Halation") { settings.halationAmount = 0.2; settings.halationSpread = 0.35; settings.halationSensitivity = 0.25 }
+                    Button("Reset Halation") { settings.halationEnabled = false; settings.halationAmount = 0; UISelectionFeedbackGenerator().selectionChanged(); settings.halationSpread = 0.35; settings.halationSensitivity = 0.25 }
                 }
-            }
         } footer: { Text("Adds a warm halo around bright edges. Higher sensitivity includes more highlights.") }
     }
     private var bloomControls: some View {
         Section {
-            Toggle("Glow", isOn: $settings.bloomEnabled)
-            if settings.bloomEnabled {
-                amountSlider("Amount", value: $settings.bloomAmount, accessibilityLabel: "Glow amount")
+            amountSlider("Glow", value: effectAmount(\.bloomAmount, enabled: \.bloomEnabled), accessibilityLabel: "Glow amount")
                 DisclosureGroup("Adjustments", isExpanded: $showBloomDetails) {
                     amountSlider("Spread", value: $settings.bloomSpread, accessibilityLabel: "Glow spread")
                     amountSlider("Highlight Sensitivity", value: $settings.bloomSensitivity, accessibilityLabel: "Glow highlight sensitivity")
-                    Button("Reset Glow") { settings.bloomAmount = 0.15; settings.bloomSpread = 0.35; settings.bloomSensitivity = 0.25 }
+                    Button("Reset Glow") { settings.bloomEnabled = false; settings.bloomAmount = 0; UISelectionFeedbackGenerator().selectionChanged(); settings.bloomSpread = 0.35; settings.bloomSensitivity = 0.25 }
                 }
-            }
         } footer: { Text("Softens the glow around bright lights while keeping their color.") }
+    }
+    // Keep the legacy enable flags readable, but expose one amount: zero is off.
+    private func effectAmount(_ amount: WritableKeyPath<FilmEffectsSettings, Double>, enabled: WritableKeyPath<FilmEffectsSettings, Bool>) -> Binding<Double> {
+        Binding(get: { settings[keyPath: enabled] ? settings[keyPath: amount] : 0 }, set: { value in
+            settings[keyPath: amount] = value
+            settings[keyPath: enabled] = value > 0
+        })
     }
     private func amountSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double> = 0...1, percent: Bool = true, accessibilityLabel: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -80,7 +79,7 @@ struct FilmEffectsControlSections: View {
                 Text(percent ? "\(Int((value.wrappedValue * 100).rounded()))%" : String(format: "%.1f×", value.wrappedValue))
                     .monospacedDigit().foregroundStyle(.secondary)
             }
-            Slider(value: value, in: range).accessibilityLabel(accessibilityLabel ?? label)
+            HapticGlassSlider(value: value, range: range, neutral: percent ? 0 : 1).accessibilityLabel(accessibilityLabel ?? label)
                 .accessibilityValue(percent ? "\(Int((value.wrappedValue * 100).rounded())) percent" : String(format: "%.1f times", value.wrappedValue))
         }.padding(.vertical, 4)
     }

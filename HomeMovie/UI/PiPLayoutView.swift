@@ -150,14 +150,14 @@ struct PiPLayoutView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Orientation").font(.subheadline).foregroundStyle(.secondary)
                 if dynamicTypeSize.isAccessibilitySize {
-                    Picker("Orientation", selection: $layout.orientation) {
+                    Picker("Orientation", selection: $layout.orientation.withSelectionFeedback()) {
                         ForEach(PiPOrientation.allCases) { orientation in
                             Text(orientation.title).tag(orientation)
                         }
                     }.pickerStyle(.menu)
                         .accessibilityLabel("Presenter orientation")
                 } else {
-                    Picker("Orientation", selection: $layout.orientation) {
+                    Picker("Orientation", selection: $layout.orientation.withSelectionFeedback()) {
                         ForEach(PiPOrientation.allCases) { orientation in
                             Text(orientation.title).tag(orientation)
                         }
@@ -168,12 +168,12 @@ struct PiPLayoutView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Size").font(.subheadline).foregroundStyle(.secondary)
                 if dynamicTypeSize.isAccessibilitySize {
-                    Picker("Size", selection: $layout.size) {
+                    Picker("Size", selection: $layout.size.withSelectionFeedback()) {
                         ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
                     }.pickerStyle(.menu)
                         .accessibilityLabel("Presenter size")
                 } else {
-                    Picker("Size", selection: $layout.size) {
+                    Picker("Size", selection: $layout.size.withSelectionFeedback()) {
                         ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
                     }.pickerStyle(.segmented)
                         .accessibilityLabel("Presenter size")
@@ -213,7 +213,7 @@ struct PiPLayoutView: View {
                 Text(String(format: "%.1f×", Double(layout.framingZoom)))
                     .monospacedDigit().foregroundStyle(.secondary)
             }
-            Slider(value: $layout.zoom, in: 1...2, step: 0.05)
+            HapticGlassSlider(value: $layout.zoom, range: 1...2, step: 0.05, neutral: 1)
                 .accessibilityLabel("Presenter zoom")
                 .accessibilityValue(String(format: "%.1f times", Double(layout.framingZoom)))
             HStack {

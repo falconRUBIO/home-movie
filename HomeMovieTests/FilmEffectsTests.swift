@@ -211,3 +211,28 @@ final class FilmEffectsTests: XCTestCase {
         XCTAssertEqual(unchanged.revision, saved.revision)
     }
 }
+
+extension FilmEffectsTests {
+    func testLegacyEffectsDoNotSilentlyEnableNewEffects() throws {
+        let old = try JSONDecoder().decode(FilmEffectsSettings.self, from: Data("{}".utf8))
+        XCTAssertEqual(old.sharpnessAmount, 0); XCTAssertEqual(old.vignetteAmount, 0)
+        XCTAssertFalse(old.isActive)
+        var settings = old; settings.sharpnessAmount = 0.5; settings.vignetteAmount = 0.6
+        XCTAssertEqual(try JSONDecoder().decode(FilmEffectsSettings.self, from: JSONEncoder().encode(settings)), settings)
+        XCTAssertTrue(settings.isActive)
+        settings.sharpnessAmount = 2
+        XCTAssertThrowsError(try settings.validate())
+    }
+    func testVignetteProtectsCenterAndDarkensEdgesProgressively() throws {
+        let source = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+            .cropped(to: CGRect(x: 0, y: 0, width: 128, height: 128))
+        var half = FilmEffectsSettings.off; half.vignetteAmount = 0.5
+        var full = half; full.vignetteAmount = 1
+        let renderer = FilmEffectsRenderer()
+        let a = pixels(try renderer.render(source, settings: half, time: .zero))
+        let b = pixels(try renderer.render(source, settings: full, time: .zero))
+        XCTAssertEqual(b[(64 * 128 + 64) * 4], 0.5, accuracy: 0.001)
+        XCTAssertLessThan(b[0], a[0]); XCTAssertLessThan(a[0], 0.45)
+        XCTAssertEqual(b[0], b[1], accuracy: 0.001)
+    }
+}

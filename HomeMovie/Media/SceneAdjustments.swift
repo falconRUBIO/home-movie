@@ -4,7 +4,7 @@ import CoreImage
 // A separate, reversible recipe on each scene. Applied after its Log conversion/LUT.
 struct SceneAdjustments: Codable, Equatable, Sendable {
     static let neutral = SceneAdjustments()
-    static let engineVersion = 3
+    static let engineVersion = 4
     var exposure = 0.0
     var shadows = 0.0
     var highlights = 0.0
@@ -13,18 +13,26 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
     var brightness = 0.0
     var brilliance = 0.0
     var pushPull = 0.0
-    private enum CodingKeys: String, CodingKey { case exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull }
+    var contrast = 0.0
+    var blackPoint = 0.0
+    var whitePoint = 0.0
+    var saturation = 0.0
+    var vibrance = 0.0
+    private enum CodingKeys: String, CodingKey { case exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance }
     var isActive: Bool { self != .neutral }
     func validate() throws {
-        guard [exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull].allSatisfy({ $0.isFinite && (-1...1).contains($0) }) else {
+        guard [exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance].allSatisfy({ $0.isFinite && (-1...1).contains($0) }) else {
             throw HomeMovieError.message("This scene’s light adjustments are invalid.")
         }
     }
     func apply(to source: CIImage) throws -> CIImage {
         try validate()
         guard isActive else { return source }
+        let radius = max(1, min(source.extent.width, source.extent.height) / 1080 * 12)
+        let local = brilliance == 0 ? source : source.clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: ["inputRadius": radius]).cropped(to: source.extent)
         guard let kernel = try Self.kernel.get(), let output = kernel.apply(extent: source.extent,
-            arguments: [source, exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull]) else {
+            arguments: [source, local, exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance]) else {
             throw HomeMovieError.message("This scene’s light adjustments could not be rendered.")
         }
         return output
@@ -49,6 +57,11 @@ extension SceneAdjustments {
         brightness = try values.decodeIfPresent(Double.self, forKey: .brightness) ?? 0
         brilliance = try values.decodeIfPresent(Double.self, forKey: .brilliance) ?? 0
         pushPull = try values.decodeIfPresent(Double.self, forKey: .pushPull) ?? 0
+        contrast = try values.decodeIfPresent(Double.self, forKey: .contrast) ?? 0
+        blackPoint = try values.decodeIfPresent(Double.self, forKey: .blackPoint) ?? 0
+        whitePoint = try values.decodeIfPresent(Double.self, forKey: .whitePoint) ?? 0
+        saturation = try values.decodeIfPresent(Double.self, forKey: .saturation) ?? 0
+        vibrance = try values.decodeIfPresent(Double.self, forKey: .vibrance) ?? 0
         try validate()
     }
 }

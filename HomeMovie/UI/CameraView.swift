@@ -578,21 +578,21 @@ struct CameraView: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Response", selection: $zoomSpeed) {
+                    Picker("Response", selection: $zoomSpeed.withSelectionFeedback()) {
                         ForEach(SmoothZoomSpeed.allCases) { speed in Text(speed.label).tag(speed.rawValue) }
                     }
                 } header: { Text("Manual Dolly Response") } footer: {
                     Text("\((SmoothZoomSpeed(rawValue: zoomSpeed) ?? .normal).responseDescription) Drag faster or slower to control zoom. This does not change automatic duration.")
                 }
                 Section {
-                    Picker("Duration", selection: $dollySeconds) {
+                    Picker("Duration", selection: $dollySeconds.withSelectionFeedback()) {
                         ForEach(DollyZoomDuration.choices, id: \.self) { seconds in Text("\(seconds) seconds").tag(seconds) }
                     }
                 } header: { Text("Automatic Dolly") } footer: {
                     Text("Time for the next move between lenses, including the gentle start and finish. You can also change this in the Dolly bar.")
                 }
                 Section {
-                    Toggle("Stay on This Lens", isOn: $stayOnLens)
+                    Toggle("Stay on This Lens", isOn: $stayOnLens.withSelectionFeedback())
                         .disabled(camera.options?.canStayOnLens != true)
                 } footer: {
                     Text("Keeps manual zoom on the current physical camera when supported. Tapping another lens can switch cameras for an automatic Dolly.")
@@ -793,7 +793,7 @@ struct CameraView: View {
     private var dollyDurationMenu: some View {
             Menu {
                 Text("Time to move between lenses")
-                Picker("Dolly duration", selection: $dollySeconds) {
+                Picker("Dolly duration", selection: $dollySeconds.withSelectionFeedback()) {
                     ForEach(DollyZoomDuration.choices, id: \.self) { seconds in
                         Text("\(seconds) seconds").tag(seconds)
                     }
