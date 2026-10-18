@@ -8,7 +8,7 @@ New recipes (pipeline version 2) use ordered, non-destructive stages:
 2. Apply Exposure as linear gain (the slider spans -2 to +2 stops) and relative Warmth/Tint balance. Balance gains are normalized with the source gamut's luminance coefficients.
 3. Re-encode to the **same source encoding**. The existing Cinema and Apple Standard LUTs expect Apple Log, not linear RGB. There is no second Log-to-display conversion in front of these LUTs.
 4. Apply the selected Log-input LUT, when the scene is Log. Standard recordings skip this node.
-5. Apply display finishing: Shadows/Highlights, Brilliance, Brightness, Push/Pull, Contrast, Black Point, Vibrance, then Saturation.
+5. Apply display finishing: Shadows/Highlights, Brilliance, Brightness, Push/Pull, Contrast, Black Point, White Point, Vibrance, then Saturation.
 6. Apply the saved film FX and render the output.
 
 Exposure and balance before the look let the LUT respond to corrected source values. This can retain source detail that a bright look would otherwise map out of range. It cannot recover information already clipped during capture. Values stay floating point through source balance; an inactive balance node is an exact bypass. Warmth/Tint are relative color-balance controls, not RAW white-balance reconstruction or calibrated Kelvin values.
@@ -21,6 +21,7 @@ Contrast and Black Point here are **finishing controls** on the visible image. R
 | --- | --- |
 | Contrast | A symmetric perceptual S-curve anchored at middle gray, with smooth shoulders and stable black/white endpoints. Operates on luminance rather than independent RGB curves. |
 | Black Point | Positive values deepen the toe and can set the darkest values to black. Negative values raise the black pedestal for a faded rendition. A cubic toe reduces influence on brighter tones and leaves white fixed. |
+| White Point | Positive values brighten the shoulder toward white; negative values lower the white ceiling. A mirrored cubic shoulder leaves black fixed. |
 | Saturation | Constant-luminance chroma scaling. -100 is monochrome, 0 is neutral, +100 doubles chroma where gamut allows. Runs after Vibrance so -100 remains monochrome at every Vibrance setting. |
 | Vibrance | Adjusts quieter colors more than already saturated colors, with reduced positive adjustment in broad warm hues. It is not face/skin detection. Neutrals remain neutral. |
 
@@ -28,7 +29,9 @@ Chroma expansion compresses along a constant-luminance hue direction into the di
 
 ## Persistence and compatibility
 
-All values and the pipeline version are saved with the scene. Versionless recipes that contain nonzero Exposure/Warmth/Tint retain pipeline 1, the former all-after-LUT rendering, so already-saved edits do not change appearance. Versionless neutral balance adopts version 2 without changing the rendered image. The four new controls default to zero for old catalogs. Resetting a tab affects only that tab's controls. Source recordings and LUT tables are never rewritten.
+New recipes use stronger monotonic Shadows/Highlights, midtone Brightness, and a color-neutral Brilliance curve with modest local detail. Standard positive exposure has a continuous SDR shoulder; Log balance preserves headroom for the LUT.
+
+All values and the pipeline version are saved with the scene. Versionless recipes with any nonzero adjustment retain pipeline 1, the former all-after-LUT rendering, so already-saved edits do not change appearance. Versionless neutral recipes adopt version 2 without changing the rendered image. The five new controls default to zero for old catalogs. Resetting a tab affects only that tab's controls. Source recordings and LUT tables are never rewritten.
 
 The adjustment engine cache version is incremented. Watch Movie, scene preview, thumbnails, single-scene export, and movie export use `ColorInstruction.applyingColor`; Original bypasses the recipe. Tests cover JSON compatibility, saved/reopened scenes, display behavior, gamut, source-before-LUT order, legacy order, matching rendered preview/export frames, and full exports with the combined recipe.
 

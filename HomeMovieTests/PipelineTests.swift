@@ -211,7 +211,7 @@ final class PipelineTests: XCTestCase {
         let lutURL = store.root.appendingPathComponent(LUTReference.filmica.path)
         let lutBytes = try Data(contentsOf: lutURL)
         let recipe = SceneAdjustments(exposure: 0.1, shadows: 0.2, highlights: -0.3,
-            warmth: 0.15, tint: -0.1, contrast: 0.35, blackPoint: -0.2, saturation: -0.4, vibrance: 0.5)
+            warmth: 0.15, tint: -0.1, contrast: 0.35, blackPoint: -0.2, whitePoint: -0.15, saturation: -0.4, vibrance: 0.5)
         try await store.editScene(movieID: project.id, sceneID: first.id,
             start: CMTime(seconds: 0.25, preferredTimescale: 600), end: CMTime(seconds: 1.75, preferredTimescale: 600), adjustments: recipe)
         let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
@@ -394,7 +394,7 @@ final class PipelineTests: XCTestCase {
                 width: 3840, height: 2160, hasAudio: false, bytes: Int64(sourceBytes.count),
                 profile: .appleLog)]
             movie.scenes[0].adjustments = SceneAdjustments(exposure: 0.2, shadows: 0.3, highlights: -0.3,
-                warmth: 0.15, tint: -0.1, contrast: 0.35, blackPoint: -0.2, saturation: -0.3, vibrance: 0.5)
+                warmth: 0.15, tint: -0.1, contrast: 0.35, blackPoint: -0.2, whitePoint: -0.15, saturation: -0.3, vibrance: 0.5)
             var effects = FilmEffectsSettings.off
             effects.grainEnabled = true; effects.grainAmount = 1; effects.grainTexture = .coarse16
             effects.halationEnabled = true; effects.halationAmount = 1; effects.halationSpread = 1

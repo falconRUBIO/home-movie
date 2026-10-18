@@ -15,12 +15,13 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
     var pushPull = 0.0
     var contrast = 0.0
     var blackPoint = 0.0
+    var whitePoint = 0.0
     var saturation = 0.0
     var vibrance = 0.0
     // 1 preserves historical all-after-LUT edits; 2 balances before the look.
     var pipelineVersion = 2
-    private enum CodingKeys: String, CodingKey { case exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, saturation, vibrance, pipelineVersion }
-    private var values: [Double] { [exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, saturation, vibrance] }
+    private enum CodingKeys: String, CodingKey { case exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance, pipelineVersion }
+    private var values: [Double] { [exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance] }
     var isActive: Bool { values.contains { $0 != 0 } }
     func validate() throws {
         guard (1...2).contains(pipelineVersion), values.allSatisfy({ $0.isFinite && (-1...1).contains($0) }) else {
@@ -46,9 +47,12 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
     func apply(to source: CIImage) throws -> CIImage {
         try validate()
         guard isActive else { return source }
+        let radius = max(1, min(source.extent.width, source.extent.height) / 1080 * 12)
+        let local = pipelineVersion == 2 && brilliance != 0 ? source.clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: ["inputRadius": radius]).cropped(to: source.extent) : source
         guard let kernel = try Self.kernel.get(), let output = kernel.apply(extent: source.extent,
-            arguments: [source, exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull,
-                contrast, blackPoint, saturation, vibrance]) else {
+            arguments: [source, local, exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull,
+                contrast, blackPoint, whitePoint, saturation, vibrance, Double(pipelineVersion)]) else {
             throw HomeMovieError.message("This scene’s light adjustments could not be rendered.")
         }
         return output
@@ -81,10 +85,11 @@ extension SceneAdjustments {
         pushPull = try values.decodeIfPresent(Double.self, forKey: .pushPull) ?? 0
         contrast = try values.decodeIfPresent(Double.self, forKey: .contrast) ?? 0
         blackPoint = try values.decodeIfPresent(Double.self, forKey: .blackPoint) ?? 0
+        whitePoint = try values.decodeIfPresent(Double.self, forKey: .whitePoint) ?? 0
         saturation = try values.decodeIfPresent(Double.self, forKey: .saturation) ?? 0
         vibrance = try values.decodeIfPresent(Double.self, forKey: .vibrance) ?? 0
         pipelineVersion = try values.decodeIfPresent(Int.self, forKey: .pipelineVersion)
-            ?? ((exposure != 0 || warmth != 0 || tint != 0) ? 1 : 2)
+            ?? (isActive ? 1 : 2)
         try validate()
     }
 }

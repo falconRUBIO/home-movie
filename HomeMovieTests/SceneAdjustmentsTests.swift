@@ -160,7 +160,7 @@ final class SceneAdjustmentsTests: XCTestCase {
         XCTAssertEqual(sample(try highlights.apply(to: gray(0.1)))[0], 0.1, accuracy: 0.0001)
         let all = SceneAdjustments(exposure: 1, shadows: 1, highlights: -1)
         XCTAssertEqual(sample(try all.apply(to: gray(0)))[0], 0, accuracy: 0.0001)
-        XCTAssertEqual(sample(try all.apply(to: gray(1)))[0], 1, accuracy: 0.0001)
+        XCTAssertEqual(sample(try all.apply(to: gray(1)))[0], 0.7, accuracy: 0.0001)
     }
     func testCombinedExtremeControlsNeverInvertOrClipTheTonalRamp() throws {
         let width = 256
@@ -278,6 +278,68 @@ extension SceneAdjustmentsTests {
                     XCTAssertEqual(ramp.first!, 0, accuracy: 0.0001)
                     XCTAssertEqual(ramp.last!, 1, accuracy: 0.0001)
                 }
+            }
+        }
+    }
+}
+
+extension SceneAdjustmentsTests {
+    func testExposureUsesStopsAndIsContinuousAtZero() throws {
+        let input = gray(0.2)
+        let up = sample(try SceneAdjustments(exposure: 0.5).apply(to: input))[0]
+        let down = sample(try SceneAdjustments(exposure: -0.5).apply(to: input))[0]
+        // Rec.709 decode(.2)≈.0554: +1 stop ≈.308 and −1 stop ≈.120.
+        XCTAssertEqual(up, 0.308, accuracy: 0.005)
+        XCTAssertEqual(down, 0.120, accuracy: 0.005)
+        let nearZero = sample(try SceneAdjustments(exposure: 0.00001).apply(to: gray(1)))[0]
+        XCTAssertEqual(nearZero, 1, accuracy: 0.001)
+    }
+    func testNewBasicsPersistAndHaveVisibleIndependentResponses() throws {
+        let old = try JSONDecoder().decode(SceneAdjustments.self, from: Data("{}".utf8))
+        XCTAssertEqual(old, .neutral)
+        let recipe = SceneAdjustments(contrast: 0.4, blackPoint: 0.3, whitePoint: -0.2, saturation: 0.6, vibrance: 0.5)
+        XCTAssertEqual(try JSONDecoder().decode(SceneAdjustments.self, from: JSONEncoder().encode(recipe)), recipe)
+        XCTAssertLessThan(sample(try SceneAdjustments(contrast: 1).apply(to: gray(0.2)))[0], 0.1)
+        XCTAssertLessThan(sample(try SceneAdjustments(blackPoint: 1).apply(to: gray(0.04)))[0], 0.01)
+        XCTAssertGreaterThan(sample(try SceneAdjustments(blackPoint: -1).apply(to: gray(0)))[0], 0.1)
+        XCTAssertLessThan(sample(try SceneAdjustments(whitePoint: -1).apply(to: gray(1)))[0], 0.8)
+        let color = CIImage(color: CIColor(red: 0.4, green: 0.5, blue: 0.6)).cropped(to: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let mono = sample(try SceneAdjustments(saturation: -1).apply(to: color))
+        XCTAssertEqual(mono[0], mono[1], accuracy: 0.0001)
+        XCTAssertEqual(mono[1], mono[2], accuracy: 0.0001)
+        let vivid = sample(try SceneAdjustments(vibrance: 1).apply(to: color))
+        XCTAssertGreaterThan(vivid[2] - vivid[0], 0.3)
+        for key in [\SceneAdjustments.contrast, \.blackPoint, \.whitePoint, \.saturation, \.vibrance] {
+            var invalid = SceneAdjustments(); invalid[keyPath: key] = .nan
+            XCTAssertThrowsError(try invalid.validate())
+        }
+    }
+    func testNeutralDetentHasHysteresisAndReleasesInBothDirections() {
+        var detent = AdjustmentDetent()
+        XCTAssertEqual(detent.value(0.01, neutral: 0, step: 0.01), 0)
+        XCTAssertEqual(detent.value(0.02, neutral: 0, step: 0.01), 0)
+        XCTAssertEqual(detent.value(0.03, neutral: 0, step: 0.01), 0.03)
+        XCTAssertEqual(detent.value(-0.01, neutral: 0, step: 0.01), 0)
+        XCTAssertEqual(detent.value(-0.03, neutral: 0, step: 0.01), -0.03)
+    }
+}
+
+
+extension SceneAdjustmentsTests {
+    func testTonalJoinsDoNotCreateContrastSeams() throws {
+        let controls: [(WritableKeyPath<SceneAdjustments, Double>, Double)] = [(\.shadows, 0.55), (\.highlights, 0.45), (\.brilliance, 0.5)]
+        for (key, join) in controls {
+            for direction in [-1.0, 1.0] {
+                var recipe = SceneAdjustments(); recipe[keyPath: key] = direction
+                let a = sample(try recipe.apply(to: gray(CGFloat(join - 0.001))))[0]
+                let b = sample(try recipe.apply(to: gray(CGFloat(join))))[0]
+                let c = sample(try recipe.apply(to: gray(CGFloat(join + 0.001))))[0]
+                // The production CI context uses half-float intermediate textures.
+                // Allow one half-float ULP near white (0.0005), below an 8-bit
+                // display step, while rejecting flat joins and root-curve spikes.
+                XCTAssertEqual(b - a, c - b, accuracy: 0.0005, "Tonal joins should keep a continuous slope")
+                XCTAssertEqual(b - a, 0.001, accuracy: 0.0005, "The lower side of a join should retain unit slope")
+                XCTAssertEqual(c - b, 0.001, accuracy: 0.0005, "The upper side of a join should retain unit slope")
             }
         }
     }
