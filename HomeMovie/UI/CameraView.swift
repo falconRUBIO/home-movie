@@ -772,6 +772,7 @@ struct CameraView: View {
             Picker("Start delay", selection: Binding(get: {
                 handsFreeStart ? DollyStartDelay.validated(dollyStartDelaySeconds) : 0
             }, set: { seconds in
+                UISelectionFeedbackGenerator().selectionChanged()
                 handsFreeStart = seconds > 0
                 if seconds > 0 { dollyStartDelaySeconds = DollyStartDelay.validated(seconds) }
             })) {

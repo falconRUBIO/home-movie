@@ -419,7 +419,7 @@ struct SceneReviewView: View {
                 Text(abs(value.wrappedValue) < 0.005 ? "0" : String(format: "%+.0f", value.wrappedValue * 100))
                     .monospacedDigit().fontWeight(.semibold)
                     .frame(minWidth: 44, minHeight: 24).contentShape(Rectangle())
-                    .onTapGesture(count: 2) { if !busy && !comparing { value.wrappedValue = 0 } }
+                    .onTapGesture(count: 2) { if !busy && !comparing { UISelectionFeedbackGenerator().selectionChanged(); value.wrappedValue = 0 } }
                     .accessibilityLabel("\(control.rawValue) value")
                     .accessibilityAction(named: "Reset to Zero") { if !busy && !comparing { value.wrappedValue = 0 } }
             }.font(.subheadline).frame(minHeight: 24).accessibilityHidden(true)
@@ -446,6 +446,7 @@ struct SceneReviewView: View {
                 .accessibilityHint(control.detail)
                 .accessibilityAdjustableAction { direction in
                     guard !busy && !comparing else { return }
+                    UISelectionFeedbackGenerator().selectionChanged()
                     switch direction {
                     case .increment: value.wrappedValue = min(1, value.wrappedValue + 0.01)
                     case .decrement: value.wrappedValue = max(-1, value.wrappedValue - 0.01)

@@ -31,7 +31,7 @@ struct AdjustmentDetent {
 extension View {
     func adjustmentGlass(active: Bool) -> some View {
         background {
-            if active { Color.clear.homeGlass().allowsHitTesting(false) }
+            if active { Color.clear.frame(width: 44, height: 32).homeGlass().allowsHitTesting(false) }
         }
     }
 }
@@ -51,7 +51,6 @@ struct HapticGlassSlider: View {
     var range: ClosedRange<Double> = 0...1
     var step = 0.01
     var neutral = 0.0
-    @State private var dragging = false
     @State private var snap = AdjustmentDetent()
     @State private var feedback = AdjustmentFeedback()
     private var interaction: Binding<Double> {
@@ -63,10 +62,9 @@ struct HapticGlassSlider: View {
         })
     }
     var body: some View {
+        // The native iOS 26 thumb supplies the same pressed Liquid Glass as FX.
         Slider(value: interaction, in: range, onEditingChanged: { active in
-            dragging = active
             if active { snap = AdjustmentDetent(); feedback.begin(value: value, step: step) }
         })
-        .adjustmentGlass(active: dragging)
     }
 }
