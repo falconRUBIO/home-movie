@@ -39,6 +39,9 @@ struct PiPLayoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var expandedComposition: PiPComposition?
+    @State private var checkingLogSupport = false
+    @State private var logSupportReport: String?
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
@@ -58,21 +61,42 @@ struct PiPLayoutView: View {
                                 Section {
                                     compositionButton(composition)
                                         .id(composition)
-                                    if layout.composition == composition {
+                                    if expandedComposition == composition {
                                         compositionSettings
                                     }
                                 }
                             }
                             if !ready {
                                 Section {
-                                    if logMode { Text(CameraCompatibility.logPiPExplanation) }
+                                    if logMode {
+                                        Text(CameraCompatibility.logPiPExplanation)
+                                        Button {
+                                            guard !checkingLogSupport else { return }
+                                            checkingLogSupport = true
+                                            Task {
+                                                let report = await Task.detached(priority: .userInitiated) {
+                                                    CaptureService.logPiPCompatibilityReport()
+                                                }.value
+                                                checkingLogSupport = false
+                                                logSupportReport = report
+                                            }
+                                        } label: {
+                                            HStack {
+                                                Text("Check Log + PiP Support")
+                                                if checkingLogSupport { ProgressView() }
+                                            }
+                                        }.disabled(checkingLogSupport)
+                                    }
                                     else { Button("Retry Live Preview", action: onPrepare).disabled(!canPrepare) }
                                 } footer: {
                                     Text(logMode ? "PiP is available in Standard movies." : canPrepare ? "Turn on both cameras for a live preview. PiP records at 1080p, 30 fps." : "Dual Camera is unavailable on this iPhone.")
                                 }
                             }
                         }
-                        .onChange(of: layout.composition) { _, composition in
+                        .listSectionSpacing(8)
+                        .scrollIndicators(.visible)
+                        .onChange(of: expandedComposition) { _, composition in
+                            guard let composition else { return }
                             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                                 scroll.scrollTo(composition, anchor: .top)
                             }
@@ -87,30 +111,38 @@ struct PiPLayoutView: View {
             .task {
                 if !ready, canPrepare, !logMode { onPrepare() }
             }
+            .alert("Log + PiP Compatibility", isPresented: Binding(
+                get: { logSupportReport != nil }, set: { if !$0 { logSupportReport = nil } })) {
+                Button("OK") { logSupportReport = nil }
+            } message: { Text(logSupportReport ?? "") }
     }
     private func compositionButton(_ composition: PiPComposition) -> some View {
         let selected = layout.composition == composition
+        let expanded = expandedComposition == composition
         return Button {
-            guard !selected else { return }
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                 layout.composition = composition
+                expandedComposition = expanded ? nil : composition
             }
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: composition.symbol)
                     .frame(width: 24).foregroundStyle(selected ? Color.accentColor : Color.secondary)
-                Text(composition.title).font(.body.weight(.medium)).foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(composition.title).font(.body.weight(.medium)).foregroundStyle(.primary)
+                    if !expanded { Text("Tap to adjust").font(.caption).foregroundStyle(.secondary) }
+                }
                 Spacer(minLength: 8)
                 if selected {
                     Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
                 }
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary).rotationEffect(.degrees(selected ? 90 : 0))
+                    .foregroundStyle(.secondary).rotationEffect(.degrees(expanded ? 90 : 0))
             }.frame(minHeight: 44).contentShape(Rectangle())
         }.buttonStyle(.plain)
             .accessibilityLabel(composition.title)
-            .accessibilityValue(selected ? "Selected, expanded" : "Collapsed")
-            .accessibilityHint(selected ? "Settings are below" : "Selects this layout and opens its settings")
+            .accessibilityValue("\(selected ? "Selected, " : "")\(expanded ? "expanded" : "collapsed")")
+            .accessibilityHint(expanded ? "Tap to collapse settings" : "Tap to select this layout and show settings beneath it")
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
     @ViewBuilder private var compositionSettings: some View {
@@ -330,5 +362,3 @@ final class PiPMetalView: MTKView {
         catch { }
     }
 }
-
-
