@@ -285,7 +285,7 @@ final class PipelineTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.root.appendingPathComponent(LUTReference.cinemaThree.path).path))
     }
 
-    func testFilmEffectsStandardPreviewAndExportShareRenderingWhileWatchStaysClean() async throws {
+    func testFilmEffectsWatchPreviewAndExportShareSavedRecipeAndOriginalBypassesFX() async throws {
         let store = try await makeStore()
         let original = try await store.create(name: "Effects integration", format: .landscape)
         _ = try await record(original, into: store)
@@ -299,7 +299,12 @@ final class PipelineTests: XCTestCase {
         let movie = try XCTUnwrap(movies.first)
         let assembler = MediaAssembler()
         let watch = try await assembler.build(movie: movie, root: store.root)
-        XCTAssertNil(watch.videoComposition.customVideoCompositorClass)
+        let watchInstruction = try XCTUnwrap(watch.videoComposition.instructions.first as? ColorInstruction)
+        XCTAssertEqual(watchInstruction.filmEffects, settings)
+        let originalPlayback = try await assembler.build(movie: movie, root: store.root, showOriginalLog: true)
+        XCTAssertNil(originalPlayback.videoComposition.customVideoCompositorClass)
+        let explicitBypass = try await assembler.build(movie: movie, root: store.root, filmEffects: .off)
+        XCTAssertNil(explicitBypass.videoComposition.customVideoCompositorClass)
         let preview = try await assembler.build(movie: movie, root: store.root, filmEffects: settings, forFilmEffectsPreview: true)
         let export = try await assembler.build(movie: movie, root: store.root, filmEffects: movie.exportEffects)
         let a = try XCTUnwrap(preview.videoComposition.instructions.first as? ColorInstruction)
@@ -314,12 +319,17 @@ final class PipelineTests: XCTestCase {
         let exportGenerator = AVAssetImageGenerator(asset: export.asset)
         exportGenerator.videoComposition = export.videoComposition
         exportGenerator.requestedTimeToleranceBefore = .zero; exportGenerator.requestedTimeToleranceAfter = .zero
+        let watchGenerator = AVAssetImageGenerator(asset: watch.asset)
+        watchGenerator.videoComposition = watch.videoComposition
+        watchGenerator.requestedTimeToleranceBefore = .zero; watchGenerator.requestedTimeToleranceAfter = .zero
+        let watchImage = try await watchGenerator.image(at: time).image
         let previewImage = try await previewGenerator.image(at: time).image
         let exportImage = try await exportGenerator.image(at: time).image
         XCTAssertEqual(previewImage.width, 1920); XCTAssertEqual(previewImage.height, 1080)
         let previewBytes = try XCTUnwrap(previewImage.dataProvider?.data)
         let exportBytes = try XCTUnwrap(exportImage.dataProvider?.data)
         XCTAssertEqual(previewBytes as Data, exportBytes as Data)
+        XCTAssertEqual(try XCTUnwrap(watchImage.dataProvider?.data) as Data, exportBytes as Data)
         let destination = store.root.appendingPathComponent("effects-export.mp4")
         let session = try XCTUnwrap(AVAssetExportSession(asset: export.asset, presetName: AVAssetExportPresetHighestQuality))
         session.videoComposition = export.videoComposition; session.audioMix = export.audioMix
