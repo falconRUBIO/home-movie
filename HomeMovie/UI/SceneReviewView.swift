@@ -194,6 +194,7 @@ struct SceneReviewView: View {
     private func resetTool() {
         if tool == .fx { effects = .off }
         else { for control in visibleLightControls { adjustments[keyPath: control.keyPath] = 0 } }
+        if !adjustments.isActive { adjustments = .neutral }
         comparing = false
     }
     private var editedScene: Scene {
@@ -287,7 +288,7 @@ struct SceneReviewView: View {
             }
             .onChange(of: adjustments) { _, _ in invalidateExport() }
             .onChange(of: effects) { _, _ in invalidateExport() }
-            .onChange(of: tool) { _, _ in comparing = false }
+            .onChange(of: tool) { _, _ in comparing = false; interactingControl = nil }
             .onChange(of: export.running) { _, running in
                 guard !running, waitingForExport else { return }
                 waitingForExport = false
@@ -296,9 +297,9 @@ struct SceneReviewView: View {
                 else { export.saveFeedback = nil }
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase != .active { comparing = false; preview.player?.pause() }
+                if phase != .active { comparing = false; interactingControl = nil; preview.player?.pause() }
             }
-            .onChange(of: busy) { _, value in if value { comparing = false } }
+            .onChange(of: busy) { _, value in if value { comparing = false; interactingControl = nil } }
         }
         .interactiveDismissDisabled(busy || hasUnsavedEdits)
         .onDisappear { preview.stop(); export.cancel() }
@@ -412,7 +413,10 @@ struct SceneReviewView: View {
     }
     private func lightRuler(_ control: SceneLightControl) -> some View {
         let value = Binding(get: { adjustments[keyPath: control.keyPath] },
-            set: { adjustments[keyPath: control.keyPath] = $0 })
+            set: {
+                adjustments[keyPath: control.keyPath] = $0
+                if !adjustments.isActive { adjustments = .neutral }
+            })
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: control.symbol).frame(width: 20).accessibilityHidden(true)
