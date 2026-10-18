@@ -48,7 +48,7 @@ final class SceneAdjustmentsTests: XCTestCase {
         XCTAssertEqual(sample(try highlights.apply(to: gray(0.1)))[0], 0.1, accuracy: 0.0001)
         let all = SceneAdjustments(exposure: 1, shadows: 1, highlights: -1)
         XCTAssertEqual(sample(try all.apply(to: gray(0)))[0], 0, accuracy: 0.0001)
-        XCTAssertEqual(sample(try all.apply(to: gray(1)))[0], 1, accuracy: 0.0001)
+        XCTAssertEqual(sample(try all.apply(to: gray(1)))[0], 0.7, accuracy: 0.0001)
     }
     func testCombinedExtremeControlsNeverInvertOrClipTheTonalRamp() throws {
         let width = 256

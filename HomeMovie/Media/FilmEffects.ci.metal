@@ -64,7 +64,8 @@ extern "C" { namespace coreimage {
             target = 0.55 * (1.0 - pow(1.0 - target / 0.55, exp2(shadows * 1.6)));
         }
         if (target > 0.45 && highlights != 0.0) {
-            target = 0.45 + 0.55 * pow((target - 0.45) / 0.55, exp2(-highlights * 1.6));
+            target = highlights < 0.0 ? target + highlights * 0.30 * smoothstep(0.45, 1.0, target)
+                : 0.45 + 0.55 * pow((target - 0.45) / 0.55, exp2(-highlights * 1.6));
         }
         // Color-neutral brilliance opens the lower half and restrains the upper half.
         if (brilliance != 0.0) {
@@ -72,7 +73,7 @@ extern "C" { namespace coreimage {
             target = target < 0.5 ? 0.5 * (1.0 - pow(1.0 - target * 2.0, power))
                 : 0.5 + 0.5 * pow(target * 2.0 - 1.0, power);
         }
-        target = clamp(target + brilliance * 0.25 * (l - luminance(local.rgb)) * 4.0 * target * (1.0 - target), 0.0, 1.0);
+        target = clamp(target + brilliance * 0.25 * (luminance(input.rgb) - luminance(local.rgb)) * 4.0 * target * (1.0 - target), 0.0, 1.0);
         // Midtone brightness protects both endpoints and stays monotonic at ±100.
         target += brightness * 0.28 * pow(sin(target * 3.14159265), 2.0);
         if (pushPull != 0.0 || contrast != 0.0) {
