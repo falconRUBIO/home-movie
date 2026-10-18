@@ -44,7 +44,7 @@ actor ThumbnailService {
         if let image = cache.object(forKey: key) { return image }
         let generator: AVAssetImageGenerator
         let time: CMTime
-        if (scene.profile ?? movie?.captureProfile ?? .standard) == .appleLog || scene.lightAdjustments.isActive {
+        if (scene.profile ?? movie?.captureProfile ?? .standard) == .appleLog || scene.lightAdjustments.isActive || movie?.exportEffects.isActive == true {
             var preview = movie ?? Movie(name: "Preview", format: scene.width > scene.height ? .landscape : .portrait)
             preview.scenes = [scene]
             preview.profile = scene.profile ?? movie?.captureProfile ?? .standard
