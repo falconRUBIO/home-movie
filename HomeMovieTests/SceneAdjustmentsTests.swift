@@ -222,7 +222,12 @@ extension SceneAdjustmentsTests {
                 let a = sample(try recipe.apply(to: gray(CGFloat(join - 0.001))))[0]
                 let b = sample(try recipe.apply(to: gray(CGFloat(join))))[0]
                 let c = sample(try recipe.apply(to: gray(CGFloat(join + 0.001))))[0]
-                XCTAssertEqual(b - a, c - b, accuracy: 0.00005, "Tonal joins should keep a continuous slope")
+                // The production CI context uses half-float intermediate textures.
+                // Allow one half-float ULP near white (0.0005), below an 8-bit
+                // display step, while rejecting flat joins and root-curve spikes.
+                XCTAssertEqual(b - a, c - b, accuracy: 0.0005, "Tonal joins should keep a continuous slope")
+                XCTAssertEqual(b - a, 0.001, accuracy: 0.0005, "The lower side of a join should retain unit slope")
+                XCTAssertEqual(c - b, 0.001, accuracy: 0.0005, "The upper side of a join should retain unit slope")
             }
         }
     }
