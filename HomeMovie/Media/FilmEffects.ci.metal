@@ -96,8 +96,8 @@ extern "C" { namespace coreimage {
         target = whitePoint >= 0.0 ? min(1.0, target / (1.0 - whitePoint * 0.22))
             : target * (1.0 + whitePoint * 0.22);
         target = clamp(target, 0.0, 1.0);
-        float3 result = target >= l ? rgb + (1.0 - rgb) * ((target - l) / max(1.0 - l, 0.00001))
-            : rgb * (target / max(l, 0.00001));
+        float3 result = target >= l ? rgb + (1.0 - rgb) * ((target - l) / max(1.0 - l, 0.000000000001))
+            : rgb * (target / max(l, 0.000000000001));
         if (warmth != 0.0 || tint != 0.0) {
             float3 cast = warmth * float3(0.24, 0.04, -0.28) + tint * float3(0.16, -0.20, 0.16);
             result *= exp2(cast * 2.0);
