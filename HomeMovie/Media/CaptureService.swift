@@ -178,6 +178,9 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
     private let standardCopies = CaptureFrameCopy()
     private var previewHandoff: CameraPreviewHandoff?
     private var previewHandoffAnnounced = true
+    private var validatedLogFormats: [String: AVCaptureDevice.Format] = [:]
+    private var knownDevices: [String: AVCaptureDevice] = [:]
+    private var knownVideoInputs: [String: AVCaptureDeviceInput] = [:]
     private var standardTake: ContinuousTakePipeline?
     private var standardAngle: CGFloat = 90
     private var standardSourceAngles: [Bool: CGFloat] = [:]
@@ -355,11 +358,21 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         }
     }
     private func device(front: Bool) -> AVCaptureDevice? {
+        let key = "\(configuredProfile.rawValue)-\(front ? "front" : "rear")"
+        if let cached = knownDevices[key] { return cached }
         let types: [AVCaptureDevice.DeviceType] = front ? [.builtInTrueDepthCamera, .builtInWideAngleCamera] : [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
         let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video, position: front ? .front : .back)
-        return types.compactMap { type in discovery.devices.first {
+        let found = types.compactMap { type in discovery.devices.first {
             $0.deviceType == type && (configuredProfile == .standard || $0.formats.contains(where: CameraCompatibility.supportsLog))
         } }.first
+        if let found { knownDevices[key] = found }
+        return found
+    }
+    private func videoInput(for camera: AVCaptureDevice) throws -> AVCaptureDeviceInput {
+        if let cached = knownVideoInputs[camera.uniqueID] { return cached }
+        let input = try AVCaptureDeviceInput(device: camera)
+        knownVideoInputs[camera.uniqueID] = input
+        return input
     }
     private func configure(front: Bool, preparedForPiP: Bool = false, pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) throws {
         stopSmoothZoomOnQueue()
@@ -415,7 +428,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         session.automaticallyConfiguresCaptureDeviceForWideColor = false
         session.automaticallyConfiguresApplicationAudioSession = false
         guard let camera = device(front: front) else { throw HomeMovieError.message("No supported camera found.") }
-        let input = try AVCaptureDeviceInput(device: camera)
+        let input = try videoInput(for: camera)
         guard session.canAddInput(input) else { throw HomeMovieError.message("The camera input could not be added.") }
         session.addInput(input); videoInput = input; isFront = front
         guard let mic = AVCaptureDevice.default(for: .audio) else { throw HomeMovieError.message("No microphone is available.") }
@@ -468,13 +481,17 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             liveOutput.videoSettings = [:]
             var selected: AVCaptureDevice.Format?
             var proRes: AVCaptureDevice.Format?
-            for format in formats {
+            let cached = validatedLogFormats[camera.uniqueID]
+            let candidates = cached.flatMap { remembered in
+                formats.contains(where: { $0 == remembered }) ? [remembered] + formats.filter { $0 != remembered } : nil
+            } ?? formats
+            for format in candidates {
                 camera.activeFormat = format
                 camera.automaticallyAdjustsVideoHDREnabled = false
                 if format.isVideoHDRSupported { camera.isVideoHDREnabled = false }
                 camera.activeColorSpace = .appleLog
                 let codec = LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)
-                if codec == .hevc { selected = format; break }
+                if codec == .hevc || (format == cached && codec != nil) { selected = format; break }
                 if codec != nil && proRes == nil { proRes = format }
             }
             // The fully committed/running graph is checked again before enabling Record.
@@ -518,7 +535,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             try camera.lockForConfiguration()
             camera.activeColorSpace = .appleLog
             camera.unlockForConfiguration()
-            liveFrames.clear()
+            if previewHandoff == nil { liveFrames.clear() }
         }
         guard camera.activeColorSpace == .appleLog else {
             throw HomeMovieError.message("Apple Log could not stay enabled on this camera. Tap Resume Camera to reconnect.")
@@ -527,9 +544,10 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         if LogRecordingCodec.preferred(in: output.availableVideoCodecTypes) == nil {
             // Retry format negotiation after startRunning has completed, never during a take.
             guard ticket == nil else { throw HomeMovieError.message("The Log recording format is unavailable.") }
+            validatedLogFormats[camera.uniqueID] = nil
             try configureFormat(camera)
             configureVideoConnection()
-            liveFrames.clear()
+            if previewHandoff == nil { liveFrames.clear() }
         }
         guard let connection = output.connection(with: .video),
               let codec = LogRecordingCodec.preferred(in: output.availableVideoCodecTypes) else {
@@ -541,6 +559,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         guard camera.activeColorSpace == .appleLog else {
             throw HomeMovieError.message("The recording output changed the camera’s Apple Log mode. Tap Resume Camera to reconnect.")
         }
+        validatedLogFormats[camera.uniqueID] = camera.activeFormat
     }
     private func setCoordinator(_ camera: AVCaptureDevice) {
         zoomObservation = camera.observe(\.videoZoomFactor, options: [.new]) { [weak self] _, _ in
@@ -946,14 +965,13 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             guard self.previewHandoff == nil, self.ticket == nil || (self.standardTake != nil && !self.stopRequested), let old = self.videoInput else { return }
             self.stopSmoothZoomOnQueue()
             // Preserve the outgoing frame while the new input warms up.
-            if self.configuredProfile == .standard {
-                self.previewHandoffAnnounced = false
-                self.previewHandoff = CameraPreviewHandoff(after: CMClockGetTime(self.session.synchronizationClock ?? CMClockGetHostTimeClock()))
-            } else { self.liveFrames.clear() }
+            self.previewHandoffAnnounced = false
+            self.previewHandoff = CameraPreviewHandoff(after: CMClockGetTime(self.session.synchronizationClock ?? CMClockGetHostTimeClock()))
+            if self.configuredProfile == .appleLog { self.liveFrames.holdRawPreview() }
             let oldFront = self.isFront
             do {
                 guard let camera = self.device(front: !oldFront) else { throw HomeMovieError.message("No other camera is available.") }
-                let next = try AVCaptureDeviceInput(device: camera)
+                let next = try self.videoInput(for: camera)
                 self.turnOffTorch()
                 // Commit input, format and stabilization together. Nested input
                 // replacement transactions do not restart an intermediate graph.
@@ -979,15 +997,26 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
                     self.previewHandoff = CameraPreviewHandoff(after: CMClockGetTime(self.session.synchronizationClock ?? CMClockGetHostTimeClock()))
                 }
                 if let pending = self.previewHandoff {
+                    if self.configuredProfile == .appleLog {
+                        self.liveFrames.resumeRawPreview(after: pending.after) { [weak self] in
+                            self?.queue.async { [weak self] in
+                                guard let self, self.previewHandoff?.id == pending.id else { return }
+                                self.previewHandoff = nil; self.previewHandoffAnnounced = true
+                                if let options = try? self.options() { self.onEvent?(.cameraChanged(options)) }
+                            }
+                        }
+                    }
                     self.queue.asyncAfter(deadline: .now() + 4) { [weak self] in
                         guard let self, self.previewHandoff?.id == pending.id else { return }
                         self.previewHandoff = nil; self.previewHandoffAnnounced = true
+                        self.liveFrames.cancelRawPreviewHandoff()
                         self.onEvent?(.notice("The camera is taking longer to prepare. The last preview stays visible until fresh frames arrive."))
                         if let options = try? self.options() { self.onEvent?(.cameraChanged(options)) }
                     }
                 } else { self.onEvent?(.cameraChanged(try self.options())) }
             } catch {
                 self.previewHandoff = nil; self.previewHandoffAnnounced = true
+                self.liveFrames.cancelRawPreviewHandoff()
                 if self.videoInput?.device.uniqueID == old.device.uniqueID,
                    self.session.inputs.contains(where: { $0 === old }), let options = try? self.options() {
                     self.setCoordinator(old.device); self.configureVideoConnection()
