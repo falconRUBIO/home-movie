@@ -8,8 +8,6 @@ struct ExportView: View {
     @State private var sharing = false
     @State private var savingFiles = false
     @State private var savingPhotos = false
-    @State private var showingEffects = false
-    @State private var detent: PresentationDetent = .medium
     private var currentMovie: Movie { app.movie(movie.id) ?? movie }
     var body: some View {
         NavigationStack {
@@ -45,21 +43,10 @@ struct ExportView: View {
                     LabeledContent("Quality", value: "1080p SDR · MP4")
                     if currentMovie.captureProfile == .appleLog { LabeledContent("Look", value: currentMovie.lookName) }
                 } footer: { Text("Export creates a copy. You can keep recording into your original movie.") }
-                Section {
-                    Button { detent = .large; showingEffects = true } label: {
-                        HStack {
-                            Text("Film Effects").foregroundStyle(.primary)
-                            Spacer()
-                            Text(currentMovie.exportEffects.summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
-                        }.padding(.vertical, 2)
-                    }.disabled(export.running || savingPhotos || currentMovie.activeScenes.isEmpty)
-                }
                 if let notice = export.notice { Section { Text(notice).foregroundStyle(.secondary) } }
                 if let error = export.error { Section { Text(error).foregroundStyle(.red) } }
             }
             .saveStatusToast($export.saveFeedback)
-            .navigationDestination(isPresented: $showingEffects) { FilmEffectsView(movie: currentMovie).environmentObject(app) }
             .onChange(of: currentMovie.revision) { _, _ in export.invalidate() }
             .navigationTitle("Export Movie").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(export.running || savingPhotos) } }
@@ -73,9 +60,8 @@ struct ExportView: View {
                 if completed { export.saveFeedback = SaveToast(kind: .success, message: "Saved to Files") }
             } } }
         }
-        .presentationDetents([.medium, .large], selection: $detent)
-        .interactiveDismissDisabled(export.running || savingPhotos || showingEffects)
+        .presentationDetents([.medium, .large])
+        .interactiveDismissDisabled(export.running || savingPhotos)
         .onDisappear { export.cancel() }
     }
 }
-

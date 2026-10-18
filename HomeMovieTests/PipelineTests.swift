@@ -52,14 +52,16 @@ final class PipelineTests: XCTestCase {
         let original = movie.activeScenes[0]
         let latest = movie.latestTake?.id
         let light = SceneAdjustments(exposure: 0.1, shadows: 0.2, highlights: -0.2)
+        var effects = FilmEffectsSettings.off; effects.grainEnabled = true
         try await store.duplicateScene(movieID: project.id, sceneID: original.id,
             start: CMTime(seconds: 0.25, preferredTimescale: 600),
-            end: CMTime(seconds: 1.5, preferredTimescale: 600), adjustments: light)
+            end: CMTime(seconds: 1.5, preferredTimescale: 600), adjustments: light, filmEffects: effects)
         let reopened = ProjectStore(root: store.root)
         _ = try await reopened.load()
         let saved = await reopened.snapshot()
         let result = try XCTUnwrap(saved.first)
         XCTAssertEqual(result.activeScenes.count, 3)
+        XCTAssertEqual(result.exportEffects, effects)
         XCTAssertEqual(result.activeScenes[0].id, original.id)
         XCTAssertEqual(result.activeScenes[2].id, movie.activeScenes[1].id)
         let duplicate = result.activeScenes[1]
@@ -206,6 +208,68 @@ final class PipelineTests: XCTestCase {
         let original = try await MediaAssembler().build(movie: movie, root: store.root, showOriginalLog: true)
         XCTAssertEqual((original.videoComposition.instructions.first as? ColorInstruction)?.adjustments, .neutral)
     }
+    @MainActor func testSceneAndMovieFXSaveAtomicallyAndReachClipExport() async throws {
+        let store = try await makeStore()
+        let project = try await store.create(name: "Combined recipe", format: .landscape)
+        _ = try await record(project, into: store)
+        let snapshots = await store.snapshot()
+        let before = try XCTUnwrap(snapshots.first)
+        let scene = try XCTUnwrap(before.activeScenes.first)
+        var fx = FilmEffectsSettings.off
+        fx.halationEnabled = true; fx.bloomEnabled = true; fx.grainEnabled = true
+        let light = SceneAdjustments(exposure: 0.2, warmth: 0.1, tint: -0.1)
+        try await store.editScene(movieID: project.id, sceneID: scene.id,
+            start: scene.trimStart.cmTime, end: scene.trimEnd.cmTime, adjustments: light, filmEffects: fx)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let saved = await reopened.snapshot()
+        let movie = try XCTUnwrap(saved.first)
+        XCTAssertEqual(movie.revision, before.revision + 1)
+        XCTAssertEqual(movie.exportEffects, fx)
+        XCTAssertEqual(movie.activeScenes.first?.lightAdjustments, light)
+        let clip = try ExportModel.singleSceneMovie(movie: movie, scene: movie.activeScenes[0])
+        let bundle = try await MediaAssembler().build(movie: clip, root: store.root, filmEffects: clip.exportEffects)
+        let instruction = try XCTUnwrap(bundle.videoComposition.instructions.first as? ColorInstruction)
+        XCTAssertEqual(instruction.filmEffects, fx)
+        XCTAssertEqual(instruction.adjustments, light)
+        // A later Light-only save must preserve the movie's FX.
+        try await reopened.editScene(movieID: movie.id, sceneID: scene.id,
+            start: scene.trimStart.cmTime, end: scene.trimEnd.cmTime, adjustments: .neutral)
+        let afterLight = await reopened.snapshot()
+        XCTAssertEqual(afterLight.first?.exportEffects, fx)
+        // FX-only edits still invalidate the export revision.
+        try await reopened.editScene(movieID: movie.id, sceneID: scene.id,
+            start: scene.trimStart.cmTime, end: scene.trimEnd.cmTime, adjustments: .neutral, filmEffects: .off)
+        let afterReset = await reopened.snapshot()
+        XCTAssertEqual(afterReset.first?.exportEffects, .off)
+        XCTAssertEqual(afterReset.first?.revision, movie.revision + 2)
+    }
+
+    @MainActor func testInvalidCombinedSceneEditDoesNotPartiallySaveFX() async throws {
+        let store = try await makeStore()
+        let project = try await store.create(name: "Atomic recipe", format: .landscape)
+        _ = try await record(project, into: store)
+        let snapshots = await store.snapshot()
+        let before = try XCTUnwrap(snapshots.first)
+        let scene = try XCTUnwrap(before.activeScenes.first)
+        var fx = FilmEffectsSettings.off; fx.grainEnabled = true
+        do {
+            try await store.editScene(movieID: project.id, sceneID: scene.id,
+                start: .zero, end: CMTime(seconds: 100, preferredTimescale: 600), adjustments: .neutral, filmEffects: fx)
+            XCTFail("Invalid trim should reject the complete recipe")
+        } catch {}
+        let after = await store.snapshot()
+        XCTAssertEqual(after.first, before)
+        fx.grainAmount = .nan
+        do {
+            try await store.editScene(movieID: project.id, sceneID: scene.id,
+                start: scene.trimStart.cmTime, end: scene.trimEnd.cmTime,
+                adjustments: SceneAdjustments(exposure: 0.2), filmEffects: fx)
+            XCTFail("Invalid FX should reject the scene edit too")
+        } catch {}
+        let afterInvalidFX = await store.snapshot()
+        XCTAssertEqual(afterInvalidFX.first, before)
+    }
+
     func testOnlyCinemaIsInstalledAndRetiredSelectionFallsBack() async throws {
         let store = try await makeStore()
         let looks = await store.availableLooks()

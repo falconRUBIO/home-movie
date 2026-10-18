@@ -18,7 +18,7 @@ import UIKit
             var fullScene = scene
             fullScene.trimStart = MediaTime(.zero); fullScene.trimEnd = scene.sourceDuration
             var snapshot = movie; snapshot.scenes = [fullScene]
-            let bundle = try await app.assembler.build(movie: snapshot, root: app.store.root, forFilmEffectsPreview: true)
+            let bundle = try await app.assembler.build(movie: snapshot, root: app.store.root, filmEffects: movie.exportEffects, forFilmEffectsPreview: true)
             try Task.checkCancellation()
             guard requestID == request else { return }
             template = bundle.videoComposition
@@ -37,13 +37,13 @@ import UIKit
             _ = await player?.seek(to: scene.trimStart.cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
         } catch { if !Task.isCancelled, requestID == request { self.error = error.localizedDescription } }
     }
-    func update(adjustments: SceneAdjustments) async {
+    func update(adjustments: SceneAdjustments, filmEffects: FilmEffectsSettings) async {
         guard !Task.isCancelled, let template, let player, let item = player.currentItem,
               let composition = template.mutableCopy() as? AVMutableVideoComposition else { return }
         composition.instructions = template.instructions.map { instruction in
             guard let source = instruction as? ColorInstruction else { return instruction }
             return ColorInstruction(range: source.timeRange, trackID: source.trackID, transform: source.transform,
-                cube: source.cube, filmEffects: source.filmEffects, adjustments: adjustments)
+                cube: source.cube, filmEffects: filmEffects, adjustments: adjustments)
         }
         item.videoComposition = composition
         if player.timeControlStatus == .paused, player.currentTime().isNumeric {
@@ -57,7 +57,15 @@ import UIKit
 }
 
 private enum SceneReviewTool: String, CaseIterable, Identifiable {
-    case light = "Light", trim = "Trim"
+    case light = "Light", color = "Color", fx = "FX", trim = "Trim"
+    var symbol: String {
+        switch self {
+        case .light: "sun.max"
+        case .color: "circle.lefthalf.filled"
+        case .fx: "sparkles"
+        case .trim: "crop.rotate"
+        }
+    }
     var id: String { rawValue }
 }
 private enum SceneLightControl: String, CaseIterable, Identifiable {
@@ -109,6 +117,11 @@ private enum SceneLightControl: String, CaseIterable, Identifiable {
     }
 }
 
+private struct SceneReviewRecipe: Equatable {
+    let adjustments: SceneAdjustments
+    let effects: FilmEffectsSettings
+}
+
 struct SceneReviewView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -121,6 +134,9 @@ struct SceneReviewView: View {
     @State private var start: Double
     @State private var end: Double
     @State private var adjustments: SceneAdjustments
+    @State private var effects = FilmEffectsSettings.off
+    @State private var originalEffects = FilmEffectsSettings.off
+    @State private var loadedEffects = false
     @State private var comparing = false
     @State private var tool = SceneReviewTool.light
     @State private var saving = false
@@ -141,9 +157,23 @@ struct SceneReviewView: View {
     private var busy: Bool { saving || export.running || savingPhotos || waitingForExport }
     private var hasUnsavedEdits: Bool {
         editedScene.trimStart != scene.trimStart || editedScene.trimEnd != scene.trimEnd
-            || adjustments != scene.lightAdjustments
+            || adjustments != scene.lightAdjustments || effects != originalEffects
     }
-    private var shownAdjustments: SceneAdjustments { comparing ? .neutral : adjustments }
+    private var shownRecipe: SceneReviewRecipe {
+        SceneReviewRecipe(adjustments: comparing ? .neutral : adjustments, effects: comparing ? .off : effects)
+    }
+    private var pendingEffects: FilmEffectsSettings? { effects != originalEffects ? effects : nil }
+    private var visibleLightControls: [SceneLightControl] {
+        SceneLightControl.allCases.filter { tool == .color ? ($0 == .warmth || $0 == .tint) : ($0 != .warmth && $0 != .tint) }
+    }
+    private var canReset: Bool {
+        tool == .fx ? effects != .off : visibleLightControls.contains { adjustments[keyPath: $0.keyPath] != 0 }
+    }
+    private func resetTool() {
+        if tool == .fx { effects = .off }
+        else { for control in visibleLightControls { adjustments[keyPath: control.keyPath] = 0 } }
+        comparing = false
+    }
     private var editedScene: Scene {
         var edited = scene
         edited.trimStart = MediaTime(seconds: start); edited.trimEnd = MediaTime(seconds: end)
@@ -210,16 +240,19 @@ struct SceneReviewView: View {
             } message: { Text("Restore it later from Settings. Its original file will be kept.") }
             .task {
                 guard let movie else { error = "This movie is unavailable."; return }
+                if !loadedEffects {
+                    effects = movie.exportEffects; originalEffects = effects; loadedEffects = true
+                }
                 await preview.prepare(movie: movie, scene: scene, app: app)
                 if !Task.isCancelled {
-                    await preview.update(adjustments: shownAdjustments)
+                    await preview.update(adjustments: shownRecipe.adjustments, filmEffects: shownRecipe.effects)
                     if scenePhase == .active, preview.error == nil { preview.player?.play() }
                 }
             }
-            .task(id: shownAdjustments) {
+            .task(id: shownRecipe) {
                 // Coalesce slider changes and abandon obsolete paused-frame seeks.
                 do { try await Task.sleep(for: .milliseconds(40)) } catch { return }
-                await preview.update(adjustments: shownAdjustments)
+                await preview.update(adjustments: shownRecipe.adjustments, filmEffects: shownRecipe.effects)
             }
             .onChange(of: start) { _, value in
                 invalidateExport(); preview.player?.pause()
@@ -231,6 +264,7 @@ struct SceneReviewView: View {
                 preview.player?.seek(to: CMTime(seconds: max(start, value - 1 / 30), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
             }
             .onChange(of: adjustments) { _, _ in invalidateExport() }
+            .onChange(of: effects) { _, _ in invalidateExport() }
             .onChange(of: tool) { _, _ in comparing = false }
             .onChange(of: export.running) { _, running in
                 guard !running, waitingForExport else { return }
@@ -245,34 +279,57 @@ struct SceneReviewView: View {
         .onDisappear { preview.stop(); export.cancel() }
     }
     private var reviewToolPicker: some View {
-        Picker("Editing tool", selection: $tool) {
-            ForEach(SceneReviewTool.allCases) { Text($0.rawValue).tag($0) }
-        }.pickerStyle(.segmented).frame(minWidth: 120).disabled(busy)
+        HStack(spacing: 0) {
+            ForEach(SceneReviewTool.allCases) { item in
+                Button { tool = item } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: item.symbol).font(.title3)
+                        Text(item.rawValue).font(.caption.weight(.semibold))
+                    }.frame(maxWidth: .infinity, minHeight: 52)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(tool == item ? Color.orange : Color.secondary)
+                .background(tool == item ? Color.orange.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                .accessibilityLabel(item.rawValue)
+                .accessibilityAddTraits(tool == item ? [.isSelected] : [])
+            }
+        }.padding(.horizontal, 12).padding(.vertical, 4).disabled(busy)
     }
     private var editingPanel: some View {
         VStack(spacing: 0) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    reviewToolPicker
-                    if tool == .light { lightComparisonControls }
-                }
-                VStack(spacing: 0) {
-                    reviewToolPicker
-                    if tool == .light { lightComparisonControls }
-                }
-            }.padding(.horizontal, 16).padding(.vertical, 4)
-            ScrollView {
-                VStack(spacing: 12) {
-                    if tool == .light { lightControls } else { trimControls }
-                    if let message = error ?? preview.error ?? export.error {
-                        Text(message).font(.footnote).foregroundStyle(.red).padding(.horizontal)
+            if tool != .trim {
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        toolScopeLabel
+                        Spacer(minLength: 8)
+                        lightComparisonControls
                     }
-                    if let message = notice ?? export.notice {
-                        Text(message).font(.footnote).foregroundStyle(.secondary).padding(.horizontal)
-                    }
-                }.padding(.bottom, 16)
+                    VStack(spacing: 0) { toolScopeLabel; lightComparisonControls }
+                }.padding(.horizontal, 16)
+            }
+            if tool == .fx {
+                Form { FilmEffectsControlSections(settings: $effects) }
+                    .listStyle(.plain).listSectionSpacing(.compact)
+                    .disabled(busy || comparing || preview.loading || preview.error != nil)
+            } else {
+                ScrollView {
+                    VStack(spacing: 12) {
+                        if tool == .trim { trimControls } else { lightControls }
+                    }.padding(.bottom, 8)
+                }.id(tool)
+            }
+            if let message = error ?? preview.error ?? export.error {
+                Text(message).font(.footnote).foregroundStyle(.red).padding(.horizontal)
+            }
+            if let message = notice ?? export.notice {
+                Text(message).font(.footnote).foregroundStyle(.secondary).padding(.horizontal)
             }
         }
+    }
+    private var toolScopeLabel: some View {
+        Text(tool == .fx ? "All scenes · FX" : "This scene · \(tool.rawValue)")
+            .font(.caption).foregroundStyle(.secondary)
     }
     private var previewPanel: some View {
         ZStack {
@@ -313,16 +370,17 @@ struct SceneReviewView: View {
                     if !busy { comparing = pressing }
                 }, perform: {})
                 .accessibilityElement().accessibilityAddTraits(.isButton)
-                .accessibilityLabel(comparing ? "Show adjusted" : "Compare original light")
-                .accessibilityAction { comparing.toggle() }
-                .accessibilityHint("Hold to compare before light adjustments; the selected look stays applied")
-            Button("Reset") { adjustments = .neutral; comparing = false }
-                .frame(minWidth: 44, minHeight: 44).disabled(!adjustments.isActive || busy)
+                .accessibilityLabel(comparing ? "Show adjusted" : "Compare original scene")
+                .accessibilityAction { if !busy { comparing.toggle() } }
+                .accessibilityHint("Hold to compare without Light, Color, or FX edits; the selected look stays applied")
+            Button("Reset") { resetTool() }
+                .frame(minWidth: 44, minHeight: 44).disabled(!canReset || busy)
+                .accessibilityLabel("Reset \(tool.rawValue)")
         }
     }
     private var lightControls: some View {
         LazyVStack(spacing: 4) {
-            ForEach(SceneLightControl.allCases) { control in
+            ForEach(visibleLightControls) { control in
                 lightRuler(control)
             }
         }.padding(.horizontal, 16).disabled(preview.loading || preview.error != nil)
@@ -375,6 +433,7 @@ struct SceneReviewView: View {
     }
     private var photosFooter: some View {
         VStack(spacing: 6) {
+            reviewToolPicker
             if export.running {
                 ProgressView(value: export.progress) { Text("Preparing Scene…") }
                 Button("Cancel") { export.cancel() }.frame(minHeight: 44)
@@ -386,7 +445,7 @@ struct SceneReviewView: View {
                     }.frame(maxWidth: .infinity, minHeight: 44)
                 }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
                     .disabled(busy || preview.loading || preview.error != nil || movie == nil)
-                Text("This scene only · Current look and light adjustments")
+                Text("This scene only · Current look, Light, Color, and FX")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }.padding(.horizontal, 20).padding(.vertical, 6).background(.bar)
@@ -394,8 +453,9 @@ struct SceneReviewView: View {
     private func invalidateExport() { export.invalidate(); notice = nil; error = nil }
     private func persistEdits() async throws {
         try await app.store.editScene(movieID: movieID, sceneID: scene.id,
-            start: editedScene.trimStart.cmTime, end: editedScene.trimEnd.cmTime, adjustments: adjustments)
+            start: editedScene.trimStart.cmTime, end: editedScene.trimEnd.cmTime, adjustments: adjustments, filmEffects: pendingEffects)
         await app.refresh()
+        originalEffects = effects
     }
     private func duplicateScene() {
         guard !busy else { return }
@@ -404,7 +464,7 @@ struct SceneReviewView: View {
         Task {
             do {
                 try await app.store.duplicateScene(movieID: movieID, sceneID: scene.id,
-                    start: editedScene.trimStart.cmTime, end: editedScene.trimEnd.cmTime, adjustments: adjustments)
+                    start: editedScene.trimStart.cmTime, end: editedScene.trimEnd.cmTime, adjustments: adjustments, filmEffects: pendingEffects)
                 await app.refresh()
                 preview.stop(); dismiss()
             } catch { self.error = error.localizedDescription; saving = false }
