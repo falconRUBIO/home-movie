@@ -134,6 +134,7 @@ struct SceneReviewView: View {
     @State private var start: Double
     @State private var end: Double
     @State private var adjustments: SceneAdjustments
+    @State private var savedScene: Scene
     @State private var effects = FilmEffectsSettings.off
     @State private var originalEffects = FilmEffectsSettings.off
     @State private var loadedEffects = false
@@ -151,13 +152,14 @@ struct SceneReviewView: View {
         _start = State(initialValue: scene.trimStart.seconds)
         _end = State(initialValue: scene.trimEnd.seconds)
         _adjustments = State(initialValue: scene.lightAdjustments)
+        _savedScene = State(initialValue: scene)
     }
     private var movie: Movie? { app.movie(movieID) }
     private var reviewAspect: CGFloat { movie?.format.aspect ?? (scene.width > scene.height ? 16 / 9 : 9 / 16) }
     private var busy: Bool { saving || export.running || savingPhotos || waitingForExport }
     private var hasUnsavedEdits: Bool {
-        editedScene.trimStart != scene.trimStart || editedScene.trimEnd != scene.trimEnd
-            || adjustments != scene.lightAdjustments || effects != originalEffects
+        editedScene.trimStart != savedScene.trimStart || editedScene.trimEnd != savedScene.trimEnd
+            || adjustments != savedScene.lightAdjustments || effects != originalEffects
     }
     private var shownRecipe: SceneReviewRecipe {
         SceneReviewRecipe(adjustments: comparing ? .neutral : adjustments, effects: comparing ? .off : effects)
@@ -458,7 +460,7 @@ struct SceneReviewView: View {
         try await app.store.editScene(movieID: movieID, sceneID: scene.id,
             start: editedScene.trimStart.cmTime, end: editedScene.trimEnd.cmTime, adjustments: adjustments, filmEffects: pendingEffects)
         await app.refresh()
-        originalEffects = effects
+        savedScene = editedScene; originalEffects = effects
     }
     private func duplicateScene() {
         guard !busy else { return }
