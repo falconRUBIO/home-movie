@@ -69,8 +69,11 @@ private enum SceneReviewTool: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 private enum SceneLightControl: String, CaseIterable, Identifiable {
-    case exposure = "Exposure", brightness = "Brightness", brilliance = "Brilliance", pushPull = "Push/Pull", shadows = "Shadows", highlights = "Highlights", warmth = "Warmth", tint = "Tint"
+    case exposure = "Exposure", brilliance = "Brilliance", highlights = "Highlights", shadows = "Shadows"
+    case contrast = "Contrast", brightness = "Brightness", blackPoint = "Black Point", pushPull = "Push/Pull"
+    case saturation = "Saturation", vibrance = "Vibrance", warmth = "Warmth", tint = "Tint"
     var id: String { rawValue }
+    var isColor: Bool { self == .saturation || self == .vibrance || self == .warmth || self == .tint }
     var keyPath: WritableKeyPath<SceneAdjustments, Double> {
         switch self {
         case .exposure: \.exposure
@@ -79,6 +82,10 @@ private enum SceneLightControl: String, CaseIterable, Identifiable {
         case .brightness: \.brightness
         case .brilliance: \.brilliance
         case .pushPull: \.pushPull
+        case .contrast: \.contrast
+        case .blackPoint: \.blackPoint
+        case .saturation: \.saturation
+        case .vibrance: \.vibrance
         case .warmth: \.warmth
         case .tint: \.tint
         }
@@ -89,6 +96,10 @@ private enum SceneLightControl: String, CaseIterable, Identifiable {
         case .brightness: "sun.min"
         case .brilliance: "sun.max.circle"
         case .pushPull: "circle.lefthalf.filled"
+        case .contrast: "circle.lefthalf.filled"
+        case .blackPoint: "circle.bottomhalf.filled"
+        case .saturation: "drop.fill"
+        case .vibrance: "rainbow"
         case .shadows: "moon"
         case .highlights: "sun.max.fill"
         case .warmth: "thermometer.medium"
@@ -100,6 +111,10 @@ private enum SceneLightControl: String, CaseIterable, Identifiable {
         case .warmth: ("Blue", "Yellow")
         case .tint: ("Green", "Magenta")
         case .pushPull: ("Pull · Softer", "Push · Denser")
+        case .contrast: ("Softer", "Stronger")
+        case .blackPoint: ("Lifted", "Deeper")
+        case .saturation: ("Muted", "Rich")
+        case .vibrance: ("Muted", "Vibrant")
         default: nil
         }
     }
@@ -109,6 +124,10 @@ private enum SceneLightControl: String, CaseIterable, Identifiable {
         case .brightness: "Brightens or darkens the midtones."
         case .brilliance: "Balances darker areas and bright highlights."
         case .pushPull: "Softens contrast or adds density. Does not change recording exposure."
+        case .contrast: "Softens or strengthens separation between light and dark tones."
+        case .blackPoint: "Lifts the darkest tones or deepens them to black."
+        case .saturation: "Adjusts all color intensity. Minus 100 is black and white."
+        case .vibrance: "Adjusts quieter colors more, with less boost to strong colors and warm tones."
         case .shadows: "Adjusts detail in darker areas."
         case .highlights: "Adjusts the brightest areas."
         case .warmth: "Balances cool blue and warm yellow."
@@ -134,6 +153,7 @@ struct SceneReviewView: View {
     @State private var start: Double
     @State private var end: Double
     @State private var adjustments: SceneAdjustments
+    @State private var interactingControl: SceneLightControl?
     @State private var savedScene: Scene
     @State private var effects = FilmEffectsSettings.off
     @State private var originalEffects = FilmEffectsSettings.off
@@ -166,7 +186,7 @@ struct SceneReviewView: View {
     }
     private var pendingEffects: FilmEffectsSettings? { effects != originalEffects ? effects : nil }
     private var visibleLightControls: [SceneLightControl] {
-        SceneLightControl.allCases.filter { tool == .color ? ($0 == .warmth || $0 == .tint) : ($0 != .warmth && $0 != .tint) }
+        SceneLightControl.allCases.filter { tool == .color ? $0.isColor : !$0.isColor }
     }
     private var canReset: Bool {
         tool == .fx ? effects != .off : visibleLightControls.contains { adjustments[keyPath: $0.keyPath] != 0 }
@@ -405,7 +425,9 @@ struct SceneReviewView: View {
                     .accessibilityLabel("\(control.rawValue) value")
                     .accessibilityAction(named: "Reset to Zero") { if !busy && !comparing { value.wrappedValue = 0 } }
             }.font(.subheadline).frame(minHeight: 24).accessibilityHidden(true)
-            SceneAdjustmentRuler(value: value)
+            SceneAdjustmentRuler(value: value, editingChanged: { interacting in
+                interactingControl = interacting ? control : nil
+            })
                 .frame(height: 44).disabled(busy || comparing)
                 .overlay {
                     Canvas { context, size in
@@ -434,6 +456,11 @@ struct SceneReviewView: View {
                     }
                 }
                 .accessibilityAction(named: "Reset to Zero") { if !busy && !comparing { value.wrappedValue = 0 } }
+        }
+        .background {
+            if interactingControl == control {
+                Color.clear.homeGlass().allowsHitTesting(false)
+            }
         }
     }
     private var photosFooter: some View {
@@ -522,8 +549,9 @@ struct SceneReviewView: View {
 // A native horizontal scroll view preserves vertical scrolling between adjustment rows.
 private struct SceneAdjustmentRuler: UIViewRepresentable {
     @Binding var value: Double
+    var editingChanged: (Bool) -> Void
     @Environment(\.isEnabled) private var enabled
-    func makeCoordinator() -> Coordinator { Coordinator(value: $value) }
+    func makeCoordinator() -> Coordinator { Coordinator(value: $value, editingChanged: editingChanged) }
     func makeUIView(context: Context) -> SceneRulerScrollView {
         let view = SceneRulerScrollView()
         view.delegate = context.coordinator
@@ -531,6 +559,7 @@ private struct SceneAdjustmentRuler: UIViewRepresentable {
     }
     func updateUIView(_ view: SceneRulerScrollView, context: Context) {
         context.coordinator.value = $value
+        context.coordinator.editingChanged = editingChanged
         view.isScrollEnabled = enabled
         view.apply(value)
     }
@@ -539,19 +568,35 @@ private struct SceneAdjustmentRuler: UIViewRepresentable {
     }
     final class Coordinator: NSObject, UIScrollViewDelegate {
         var value: Binding<Double>
-        init(value: Binding<Double>) { self.value = value }
+        var editingChanged: (Bool) -> Void
+        private let tickFeedback = UISelectionFeedbackGenerator()
+        private let zeroFeedback = UIImpactFeedbackGenerator(style: .soft)
+        init(value: Binding<Double>, editingChanged: @escaping (Bool) -> Void) {
+            self.value = value; self.editingChanged = editingChanged
+        }
+        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            tickFeedback.prepare(); zeroFeedback.prepare(); editingChanged(true)
+        }
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             guard let view = scrollView as? SceneRulerScrollView, !view.applying,
                   view.readyForInput, view.isDragging || view.isDecelerating else { return }
             let next = view.value(at: scrollView.contentOffset.x)
             view.displayedValue = next
-            if value.wrappedValue != next { value.wrappedValue = next }
+            if value.wrappedValue != next {
+                if next == 0 { zeroFeedback.impactOccurred(intensity: 0.7); zeroFeedback.prepare() }
+                else { tickFeedback.selectionChanged(); tickFeedback.prepare() }
+                value.wrappedValue = next
+            }
         }
         func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint,
                                       targetContentOffset: UnsafeMutablePointer<CGPoint>) {
             guard let view = scrollView as? SceneRulerScrollView else { return }
             targetContentOffset.pointee.x = view.offset(for: view.value(at: targetContentOffset.pointee.x))
         }
+        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+            if !decelerate { editingChanged(false) }
+        }
+        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { editingChanged(false) }
     }
 }
 private final class SceneRulerScrollView: UIScrollView {
@@ -572,6 +617,7 @@ private final class SceneRulerScrollView: UIScrollView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func value(at offset: CGFloat) -> Double {
         let raw = Double((offset + bounds.width / 2) / (100 * tickSpacing)) - 1
+        if abs(raw) < 0.015 { return 0 }
         return min(1, max(-1, (raw * 100).rounded() / 100))
     }
     func offset(for value: Double) -> CGFloat {

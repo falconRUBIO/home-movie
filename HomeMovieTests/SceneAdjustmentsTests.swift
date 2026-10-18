@@ -18,6 +18,118 @@ final class SceneAdjustmentsTests: XCTestCase {
         CIImage(color: CIColor(red: value, green: value, blue: value))
             .cropped(to: CGRect(x: 0, y: 0, width: 1, height: 1))
     }
+    private func color(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> CIImage {
+        CIImage(color: CIColor(red: r, green: g, blue: b)).cropped(to: CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
+    private func colorfulness(_ pixel: [Float]) -> Float {
+        let rgb = Array(pixel.prefix(3))
+        return (rgb.max()! - rgb.min()!) / max(rgb.max()!, 0.00001)
+    }
+    func testNewControlsRoundTripAndOldEditsRetainTheirPipeline() throws {
+        let recipe = SceneAdjustments(exposure: 0.3, contrast: 0.4, blackPoint: -0.2, saturation: 0.5, vibrance: -0.6)
+        XCTAssertEqual(try JSONDecoder().decode(SceneAdjustments.self, from: JSONEncoder().encode(recipe)), recipe)
+        let old = try JSONDecoder().decode(SceneAdjustments.self, from: Data(#"{"exposure":0.3,"warmth":0.2}"#.utf8))
+        XCTAssertEqual(old.pipelineVersion, 1)
+        XCTAssertEqual(old.contrast, 0); XCTAssertEqual(old.blackPoint, 0)
+        XCTAssertEqual(old.saturation, 0); XCTAssertEqual(old.vibrance, 0)
+        XCTAssertEqual(try JSONDecoder().decode(SceneAdjustments.self, from: JSONEncoder().encode(old)), old)
+        XCTAssertEqual(try JSONDecoder().decode(SceneAdjustments.self, from: Data("{}".utf8)), .neutral)
+        for path in [\SceneAdjustments.contrast, \.blackPoint, \.saturation, \.vibrance] {
+            for invalid in [Double.nan, .infinity, -1.01, 1.01] {
+                var bad = SceneAdjustments.neutral; bad[keyPath: path] = invalid
+                XCTAssertThrowsError(try bad.validate())
+            }
+        }
+        var badVersion = recipe; badVersion.pipelineVersion = 3
+        XCTAssertThrowsError(try badVersion.validate())
+    }
+    func testContrastIsSymmetricAndBlackPointIsAnIndependentToe() throws {
+        let strong = SceneAdjustments(contrast: 1), soft = SceneAdjustments(contrast: -1)
+        XCTAssertLessThan(sample(try strong.apply(to: gray(0.25)))[0], 0.1)
+        XCTAssertGreaterThan(sample(try strong.apply(to: gray(0.75)))[0], 0.9)
+        XCTAssertEqual(sample(try strong.apply(to: gray(0.5)))[0], 0.5, accuracy: 0.0001)
+        XCTAssertGreaterThan(sample(try soft.apply(to: gray(0.25)))[0], 0.35)
+        XCTAssertLessThan(sample(try soft.apply(to: gray(0.75)))[0], 0.65)
+        XCTAssertEqual(sample(try SceneAdjustments(blackPoint: 1).apply(to: gray(0.04)))[0], 0, accuracy: 0.0001)
+        XCTAssertEqual(sample(try SceneAdjustments(blackPoint: -1).apply(to: gray(0)))[0], 0.12, accuracy: 0.0001)
+        XCTAssertEqual(sample(try SceneAdjustments(blackPoint: 1).apply(to: gray(1)))[0], 1, accuracy: 0.0001)
+        XCTAssertLessThan(abs(sample(try SceneAdjustments(blackPoint: -1).apply(to: gray(0.8)))[0] - 0.8), 0.002)
+    }
+    func testSaturationAndVibrancePreserveLuminanceNeutralsAndGamut() throws {
+        let input = color(0.6, 0.35, 0.2)
+        let monochrome = sample(try SceneAdjustments(saturation: -1, vibrance: 1).apply(to: input))
+        XCTAssertEqual(monochrome[0], monochrome[1], accuracy: 0.0001)
+        XCTAssertEqual(monochrome[1], monochrome[2], accuracy: 0.0001)
+        let expected: Float = 0.6 * 0.2126 + 0.35 * 0.7152 + 0.2 * 0.0722
+        for recipe in [SceneAdjustments(saturation: 1), SceneAdjustments(vibrance: 1), SceneAdjustments(saturation: -1)] {
+            let pixel = sample(try recipe.apply(to: input))
+            XCTAssertEqual(pixel[0] * 0.2126 + pixel[1] * 0.7152 + pixel[2] * 0.0722, expected, accuracy: 0.0001)
+            XCTAssertTrue(pixel.allSatisfy { $0.isFinite && (0...1).contains($0) })
+            let neutral = sample(try recipe.apply(to: gray(0.4)))
+            for channel in 0..<3 { XCTAssertEqual(neutral[channel], 0.4, accuracy: 0.0001) }
+            let saturated = sample(try recipe.apply(to: color(1, 0, 0)))
+            XCTAssertTrue(saturated.allSatisfy { $0.isFinite && (0...1).contains($0) })
+        }
+        let muted = color(0.35, 0.4, 0.5), vivid = color(0.1, 0.2, 0.9)
+        let mutedGain = colorfulness(sample(try SceneAdjustments(vibrance: 1).apply(to: muted))) - colorfulness(sample(muted))
+        let vividGain = colorfulness(sample(try SceneAdjustments(vibrance: 1).apply(to: vivid))) - colorfulness(sample(vivid))
+        XCTAssertGreaterThan(mutedGain, 0.1)
+        XCTAssertGreaterThan(mutedGain, vividGain)
+        let warm = color(0.5, 0.425, 0.35), cool = color(0.35, 0.425, 0.5)
+        let warmGain = colorfulness(sample(try SceneAdjustments(vibrance: 1).apply(to: warm))) - colorfulness(sample(warm))
+        let coolGain = colorfulness(sample(try SceneAdjustments(vibrance: 1).apply(to: cool))) - colorfulness(sample(cool))
+        XCTAssertGreaterThan(coolGain, warmGain)
+    }
+    func testContrastAndBlackPointCombinedRampIsMonotonicAtExtremes() throws {
+        let width = 257
+        let rgba: [Float] = (0..<width).flatMap { i in
+            let x = Float(i) / Float(width - 1); return [x, x, x, 1]
+        }
+        let image = CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
+            size: CGSize(width: width, height: 1), format: .RGBAf, colorSpace: nil)
+        for contrast in [-1.0, 1.0] {
+            for blackPoint in [-1.0, 1.0] {
+                let output = try SceneAdjustments(contrast: contrast, blackPoint: blackPoint, saturation: 1, vibrance: 1).apply(to: image)
+                var pixels = [Float](repeating: 0, count: width * 4)
+                pixels.withUnsafeMutableBytes { sampleContext.render(output, toBitmap: $0.baseAddress!, rowBytes: width * 16,
+                    bounds: image.extent, format: .RGBAf, colorSpace: nil) }
+                let ramp = stride(from: 0, to: pixels.count, by: 4).map { pixels[$0] }
+                XCTAssertTrue(ramp.allSatisfy { $0.isFinite && (0...1).contains($0) })
+                XCTAssertTrue(zip(ramp, ramp.dropFirst()).allSatisfy { $1 >= $0 })
+                XCTAssertEqual(ramp.last!, 1, accuracy: 0.0001)
+            }
+        }
+    }
+    func testSourceBalanceUsesLinearStopsAndKeepsLUTInputEncoding() throws {
+        let original = gray(0.48827245852686763) // Apple Log encoding of 18% gray.
+        XCTAssertTrue(try SceneAdjustments.neutral.applyingBalance(to: original, logEncoded: true) === original)
+        let bright = sample(try SceneAdjustments(exposure: 0.5).applyingBalance(to: original, logEncoded: true))[0]
+        let expected = 0.08550479 * log2(0.36 + 0.00964052) + 0.69336945
+        XCTAssertEqual(bright, Float(expected), accuracy: 0.0001)
+        let whiteBalance = sample(try SceneAdjustments(warmth: 1).applyingBalance(to: original, logEncoded: true))
+        XCTAssertGreaterThan(whiteBalance[0], whiteBalance[2])
+        let white = sample(try SceneAdjustments(exposure: 0.5).applyingBalance(to: gray(1), logEncoded: true))[0]
+        XCTAssertGreaterThan(white, 1, "Do not clamp before a correcting exposure or the LUT")
+        let standard = sample(try SceneAdjustments(exposure: 0.5).applyingBalance(to: gray(0.5), logEncoded: false))[0]
+        let linear = pow((0.5 + 0.099) / 1.099, 1 / 0.45)
+        XCTAssertEqual(standard, Float(1.099 * pow(linear * 2, 0.45) - 0.099), accuracy: 0.0001)
+    }
+    func testBalancePrecedesLUTAndFinishingFollowsItWithoutChangingSources() throws {
+        var values: [Float] = []
+        for b in 0...1 { for g in 0...1 { for r in 0...1 { values += [Float(r) * 2, Float(g) * 2, Float(b) * 2, 1] } } }
+        let cube = ColorCube(name: "Bright look", dimension: 2, rgba: values.withUnsafeBytes { Data($0) })
+        let input = gray(0.6), recipe = SceneAdjustments(exposure: -1, contrast: 0.2, blackPoint: -0.1, saturation: 0.3, vibrance: 0.4)
+        let instruction = ColorInstruction(range: CMTimeRange(start: .zero, duration: CMTime(value: 1, timescale: 30)),
+            trackID: 1, transform: .identity, cube: cube, adjustments: recipe)
+        let expected = try recipe.applyingFinishing(to: cube.apply(to: recipe.applyingBalance(to: input, logEncoded: true)))
+        XCTAssertEqual(sample(try instruction.applyingColor(to: input)), sample(expected))
+        var legacy = recipe; legacy.pipelineVersion = 1
+        let oldInstruction = ColorInstruction(range: instruction.timeRange, trackID: 1, transform: .identity, cube: cube, adjustments: legacy)
+        XCTAssertEqual(sample(try oldInstruction.applyingColor(to: input)), sample(try legacy.apply(to: cube.apply(to: input))))
+        XCTAssertLessThan(sample(try instruction.applyingColor(to: input))[0], sample(try oldInstruction.applyingColor(to: input))[0])
+        XCTAssertEqual(sample(input)[0], 0.6, accuracy: 0.0001)
+        XCTAssertEqual(cube.rgba, values.withUnsafeBytes { Data($0) })
+    }
     func testNeutralIsExactBypassAndInvalidValuesAreRejected() throws {
         let image = gray(0.5)
         XCTAssertTrue(try SceneAdjustments.neutral.apply(to: image) === image)
@@ -29,7 +141,7 @@ final class SceneAdjustmentsTests: XCTestCase {
         let input = gray(0.7)
         let values = Array(repeating: [Float(0.2), Float(0.2), Float(0.2), Float(1)], count: 8).flatMap { $0 }
         let cube = ColorCube(name: "Constant", dimension: 2, rgba: values.withUnsafeBytes { Data($0) })
-        let recipe = SceneAdjustments(exposure: 0.5, warmth: 0.4, tint: -0.3, brightness: 0.2, brilliance: 0.3, pushPull: -0.2)
+        let recipe = SceneAdjustments(exposure: 0.5, warmth: 0.4, tint: -0.3, brightness: 0.2, brilliance: 0.3, pushPull: -0.2, pipelineVersion: 1)
         let instruction = ColorInstruction(range: CMTimeRange(start: .zero, duration: CMTime(value: 1, timescale: 30)),
             trackID: 1, transform: .identity, cube: cube, adjustments: recipe)
         let expected = sample(try recipe.apply(to: cube.apply(to: input)))

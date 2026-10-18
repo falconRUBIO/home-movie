@@ -11,6 +11,30 @@ float3 encode709(float3 c) {
     return select(1.099 * pow(c, float3(0.45)) - 0.099, c * 4.5, c < 0.018);
 }
 float luminance(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
+// Apple Log transfer function, from Apple's vendor-supplied ACES input transform.
+// Keep negative toe values and highlight headroom until the look is evaluated.
+float decodeAppleLog(float x) {
+    const float r0 = -0.05641088, rt = 0.01, c = 47.28711236;
+    const float beta = 0.00964052, gamma = 0.08550479, delta = 0.69336945;
+    const float join = c * (rt - r0) * (rt - r0);
+    if (x >= join) { return exp2((x - delta) / gamma) - beta; }
+    return x >= 0.0 ? sqrt(x / c) + r0 : r0;
+}
+float encodeAppleLog(float x) {
+    const float r0 = -0.05641088, rt = 0.01, c = 47.28711236;
+    if (x >= rt) { return 0.08550479 * log2(x + 0.00964052) + 0.69336945; }
+    return x >= r0 ? c * (x - r0) * (x - r0) : 0.0;
+}
+// Compress along a constant-luminance hue ray, rather than clipping channels.
+float3 fitChroma(float3 rgb, float level, float gain) {
+    float3 direction = (rgb - float3(level)) * gain;
+    float scale = 1.0;
+    for (int c = 0; c < 3; ++c) {
+        if (direction[c] > 0.000001) { scale = min(scale, (1.0 - level) / direction[c]); }
+        else if (direction[c] < -0.000001) { scale = min(scale, -level / direction[c]); }
+    }
+    return clamp(float3(level) + direction * clamp(scale, 0.0, 1.0), 0.0, 1.0);
+}
 uint mixBits(uint x) {
     x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; return x ^ (x >> 16);
 }
@@ -43,7 +67,25 @@ float particles(float2 p, float size, uint seed, uint salt) {
 }
 
 extern "C" { namespace coreimage {
-    float4 sceneLight(sample_t input, float exposure, float shadows, float highlights, float warmth, float tint, float brightness, float brilliance, float pushPull) {
+    float4 sceneBalance(sample_t input, float exposure, float warmth, float tint, float logEncoded) {
+        float3 rgb;
+        if (logEncoded > 0.5) {
+            rgb = float3(decodeAppleLog(input.r), decodeAppleLog(input.g), decodeAppleLog(input.b));
+        } else { rgb = decode709(input.rgb); }
+        // ±2 stops of actual linear gain. Warmth/tint are relative RGB balance,
+        // not a claim to reconstruct the camera's measured white balance.
+        float3 cast = warmth * float3(0.22, 0.025, -0.245) + tint * float3(0.13, -0.16, 0.13);
+        float3 gains = exp2(cast * 2.0);
+        float3 weights = logEncoded > 0.5 ? float3(0.2627, 0.6780, 0.0593) : float3(0.2126, 0.7152, 0.0722);
+        gains /= dot(gains, weights); // Neutral brightness remains stable as color is balanced.
+        rgb *= gains * exp2(exposure * 2.0);
+        if (logEncoded > 0.5) {
+            rgb = float3(encodeAppleLog(rgb.r), encodeAppleLog(rgb.g), encodeAppleLog(rgb.b));
+        } else { rgb = encode709(rgb); }
+        return float4(rgb, input.a);
+    }
+    float4 sceneLight(sample_t input, float exposure, float shadows, float highlights, float warmth, float tint, float brightness, float brilliance, float pushPull,
+                      float contrast, float blackPoint, float saturation, float vibrance) {
         float3 rgb = clamp(input.rgb, 0.0, 1.0);
         float l = luminance(rgb);
         // Gentle luminance-only changes. Smooth tonal masks avoid hard thresholds;
@@ -65,6 +107,18 @@ extern "C" { namespace coreimage {
             target = low / max(low + high, 0.00001);
             target -= pushPull * 0.08 * target * (1.0 - target);
         }
+        if (contrast != 0.0) {
+            // Symmetric perceptual S-curve around middle gray. Smooth shoulders,
+            // exact endpoints, and no RGB-channel contrast that would shift hues.
+            float power = exp2(contrast * 1.5);
+            float low = pow(target, power), high = pow(1.0 - target, power);
+            target = low / max(low + high, 0.00001);
+        }
+        if (blackPoint != 0.0) {
+            // Positive sets a deeper black threshold; negative lifts the pedestal.
+            // The cubic toe falls away rapidly, leaving white unchanged.
+            target = max(0.0, target - blackPoint * 0.12 * pow(1.0 - target, 3.0));
+        }
         target = clamp(target, 0.0, 1.0);
         float3 result;
         if (target >= l) {
@@ -85,6 +139,26 @@ extern "C" { namespace coreimage {
                 else if (direction[c] < -0.000001) { scale = min(scale, -target / direction[c]); }
             }
             result = clamp(float3(target) + direction * clamp(scale, 0.0, 1.0), 0.0, 1.0);
+        }
+        if (vibrance != 0.0) {
+            float peak = max(result.r, max(result.g, result.b));
+            float floor = min(result.r, min(result.g, result.b));
+            float chroma = peak - floor;
+            float colorfulness = chroma / max(peak, 0.00001);
+            float muted = 1.0 - smoothstep(0.05, 0.9, colorfulness);
+            // Broad warm-hue protection, not face detection. Saturated colors
+            // receive less boost; neutrals have no chroma to amplify.
+            float warmRatio = (result.r - result.g) / max(chroma, 0.00001);
+            float warm = smoothstep(0.1, 0.35, warmRatio) * (1.0 - smoothstep(0.65, 0.9, warmRatio));
+            warm *= (result.r >= result.g && result.g >= result.b) ? 1.0 : 0.0;
+            float strength = vibrance > 0.0 ? 1.5 : 0.8;
+            float gain = 1.0 + vibrance * strength * muted * (1.0 - 0.65 * warm);
+            result = fitChroma(result, target, max(gain, 0.0));
+        }
+        if (saturation != 0.0) {
+            // -100 is genuinely monochrome even when Vibrance is also active.
+            float gain = saturation < 0.0 ? 1.0 + saturation : exp2(saturation);
+            result = fitChroma(result, target, gain);
         }
         return float4(result, input.a);
     }
