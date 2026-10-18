@@ -12,7 +12,7 @@ enum FilmGrainTexture: String, Codable, CaseIterable, Identifiable, Sendable {
 
 // Stored separately from capture profile and LUT selection. Optional on Movie for old catalogs.
 struct FilmEffectsSettings: Codable, Equatable, Sendable {
-    static let engineVersion = 3
+    static let engineVersion = 4
     static let off = FilmEffectsSettings()
     var version = 1
     var grainEnabled = false
@@ -31,10 +31,12 @@ struct FilmEffectsSettings: Codable, Equatable, Sendable {
     var softnessAmount = 0.35
     var rolloffEnabled = false
     var rolloffAmount = 0.35
+    var sharpnessAmount = 0.0
+    var vignetteAmount = 0.0
     var seed: UInt32 = 104729
     init() {}
     private enum CodingKeys: String, CodingKey {
-        case version, grainEnabled, grainAmount, grainSize, grainTexture, halationEnabled, halationAmount, halationSpread, halationSensitivity, bloomEnabled, bloomAmount, bloomSpread, bloomSensitivity, softnessEnabled, softnessAmount, rolloffEnabled, rolloffAmount, seed
+        case version, grainEnabled, grainAmount, grainSize, grainTexture, halationEnabled, halationAmount, halationSpread, halationSensitivity, bloomEnabled, bloomAmount, bloomSpread, bloomSensitivity, softnessEnabled, softnessAmount, rolloffEnabled, rolloffAmount, sharpnessAmount, vignetteAmount, seed
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -55,13 +57,17 @@ struct FilmEffectsSettings: Codable, Equatable, Sendable {
         softnessAmount = try values.decodeIfPresent(Double.self, forKey: .softnessAmount) ?? 0.35
         rolloffEnabled = try values.decodeIfPresent(Bool.self, forKey: .rolloffEnabled) ?? false
         rolloffAmount = try values.decodeIfPresent(Double.self, forKey: .rolloffAmount) ?? 0.35
+        sharpnessAmount = try values.decodeIfPresent(Double.self, forKey: .sharpnessAmount) ?? 0
+        vignetteAmount = try values.decodeIfPresent(Double.self, forKey: .vignetteAmount) ?? 0
         seed = try values.decodeIfPresent(UInt32.self, forKey: .seed) ?? 104729
     }
     var isActive: Bool {
-        softnessEnabled && softnessAmount > 0 || rolloffEnabled && rolloffAmount > 0 || grainEnabled && grainAmount > 0 || halationEnabled && halationAmount > 0 || bloomEnabled && bloomAmount > 0
+        sharpnessAmount > 0 || vignetteAmount > 0 || softnessEnabled && softnessAmount > 0 || rolloffEnabled && rolloffAmount > 0 || grainEnabled && grainAmount > 0 || halationEnabled && halationAmount > 0 || bloomEnabled && bloomAmount > 0
     }
     var summary: String {
         var values: [String] = []
+        if sharpnessAmount > 0 { values.append("Sharpness") }
+        if vignetteAmount > 0 { values.append("Vignette") }
         if softnessEnabled && softnessAmount > 0 { values.append("Softness") }
         if rolloffEnabled && rolloffAmount > 0 { values.append("Highlight Roll-Off") }
         if grainEnabled && grainAmount > 0 { values.append(grainTexture == .fine35 ? "Fine Grain" : "Coarse Grain") }
@@ -70,7 +76,7 @@ struct FilmEffectsSettings: Codable, Equatable, Sendable {
         return values.isEmpty ? "Off" : values.joined(separator: " · ")
     }
     func validate() throws {
-        let unit = [softnessAmount, rolloffAmount, grainAmount, halationAmount, halationSpread, halationSensitivity, bloomAmount, bloomSpread, bloomSensitivity]
+        let unit = [sharpnessAmount, vignetteAmount, softnessAmount, rolloffAmount, grainAmount, halationAmount, halationSpread, halationSensitivity, bloomAmount, bloomSpread, bloomSensitivity]
         guard version == 1, unit.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
               grainSize.isFinite, (0.5...2).contains(grainSize) else {
             throw HomeMovieError.message("The movie’s Film Effects settings are invalid.")
@@ -99,7 +105,7 @@ final class FilmEffectsRenderer {
         }
         let data = try Data(contentsOf: url)
         var result: [String: CIColorKernel] = [:]
-        for name in ["filmLinear", "filmHighlights", "filmOptics", "filmSoftness", "filmRolloff", "filmGrain"] {
+        for name in ["filmLinear", "filmHighlights", "filmOptics", "filmSoftness", "filmRolloff", "filmGrain", "filmVignette"] {
             result[name] = try CIColorKernel(functionName: name, fromMetalLibraryData: data)
         }
         return result
@@ -148,6 +154,13 @@ final class FilmEffectsRenderer {
         }
         if settings.rolloffEnabled && settings.rolloffAmount > 0 {
             image = try apply("filmRolloff", extent: bounds, arguments: [image, settings.rolloffAmount])
+        }
+        if settings.sharpnessAmount > 0 {
+            image = image.clampedToExtent().applyingFilter("CISharpenLuminance", parameters: [
+                "inputSharpness": settings.sharpnessAmount * 1.2]).cropped(to: bounds)
+        }
+        if settings.vignetteAmount > 0 {
+            image = try apply("filmVignette", extent: bounds, arguments: [image, settings.vignetteAmount, CIVector(cgRect: content)])
         }
         if settings.grainEnabled && settings.grainAmount > 0 {
             let seed = FilmEffectsSettings.frameSeed(time: time, seed: settings.seed)

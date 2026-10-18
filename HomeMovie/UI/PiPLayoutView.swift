@@ -16,12 +16,13 @@ struct PiPControl: View {
             .opacity(disabled || unavailableReason != nil ? 0.4 : 1).contentShape(Rectangle())
             .gesture(LongPressGesture(minimumDuration: 0.45).exclusively(before: TapGesture()).onEnded { value in
                 guard !disabled else { return }
+                UISelectionFeedbackGenerator().selectionChanged()
                 switch value { case .first: onLayout(); case .second: onToggle() }
             })
             .accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton)
             .accessibilityLabel("Picture-in-Picture").accessibilityValue(enabled ? "On" : "Off")
             .accessibilityHint(unavailableReason ?? (disabled ? "Prepare a compatible Dual Camera configuration before the next take." : "Tap to toggle. Hold for PiP Layout while idle."))
-            .accessibilityAction { if !disabled { onToggle() } }
+            .accessibilityAction { if !disabled { UISelectionFeedbackGenerator().selectionChanged(); onToggle() } }
             .accessibilityAction(named: "PiP Layout") { if !disabled { onLayout() } }
     }
 }
@@ -150,14 +151,14 @@ struct PiPLayoutView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Orientation").font(.subheadline).foregroundStyle(.secondary)
                 if dynamicTypeSize.isAccessibilitySize {
-                    Picker("Orientation", selection: $layout.orientation) {
+                    Picker("Orientation", selection: $layout.orientation.withSelectionFeedback()) {
                         ForEach(PiPOrientation.allCases) { orientation in
                             Text(orientation.title).tag(orientation)
                         }
                     }.pickerStyle(.menu)
                         .accessibilityLabel("Presenter orientation")
                 } else {
-                    Picker("Orientation", selection: $layout.orientation) {
+                    Picker("Orientation", selection: $layout.orientation.withSelectionFeedback()) {
                         ForEach(PiPOrientation.allCases) { orientation in
                             Text(orientation.title).tag(orientation)
                         }
@@ -168,12 +169,12 @@ struct PiPLayoutView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Size").font(.subheadline).foregroundStyle(.secondary)
                 if dynamicTypeSize.isAccessibilitySize {
-                    Picker("Size", selection: $layout.size) {
+                    Picker("Size", selection: $layout.size.withSelectionFeedback()) {
                         ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
                     }.pickerStyle(.menu)
                         .accessibilityLabel("Presenter size")
                 } else {
-                    Picker("Size", selection: $layout.size) {
+                    Picker("Size", selection: $layout.size.withSelectionFeedback()) {
                         ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
                     }.pickerStyle(.segmented)
                         .accessibilityLabel("Presenter size")
@@ -213,7 +214,7 @@ struct PiPLayoutView: View {
                 Text(String(format: "%.1f×", Double(layout.framingZoom)))
                     .monospacedDigit().foregroundStyle(.secondary)
             }
-            Slider(value: $layout.zoom, in: 1...2, step: 0.05)
+            HapticGlassSlider(value: Binding(get: { Double(layout.zoom) }, set: { layout.zoom = CGFloat($0) }), range: 1...2, step: 0.05, neutral: 1)
                 .accessibilityLabel("Presenter zoom")
                 .accessibilityValue(String(format: "%.1f times", Double(layout.framingZoom)))
             HStack {
