@@ -4,6 +4,50 @@ import CoreImage
 @testable import HomeMovie
 
 final class ContinuousCaptureTests: XCTestCase {
+    func testLogFlipKeepsOutgoingFrameUntilFreshNewCameraFramesArrive() async throws {
+        let frames = LiveFrames(), front = try frame(red: false), rear = try frame(red: true)
+        frames.configureRawPreview(angle: 90, front: true)
+        frames.pushRawPreview(front, connectionAngle: 0)
+        frames.holdRawPreview()
+        frames.configureRawPreview(angle: 0, front: false)
+        frames.pushRawPreview(rear, connectionAngle: 0, at: CMTime(seconds: 0.5, preferredTimescale: 600))
+        XCTAssertTrue(frames.latest() === front)
+        XCTAssertEqual(frames.snapshot()?.front, true)
+        XCTAssertEqual(frames.snapshot()?.angle, 90)
+        let ready = expectation(description: "New camera published")
+        ready.expectedFulfillmentCount = 1; ready.assertForOverFulfill = true
+        frames.resumeRawPreview(after: CMTime(seconds: 1, preferredTimescale: 600)) { ready.fulfill() }
+        // Reject outgoing samples queued before the committed input change.
+        frames.pushRawPreview(front, connectionAngle: 0, at: CMTime(seconds: 0.9, preferredTimescale: 600))
+        for tick: Int64 in [31, 32] {
+            frames.pushRawPreview(rear, connectionAngle: 0, at: CMTime(value: tick, timescale: 30))
+            XCTAssertTrue(frames.latest() === front)
+        }
+        frames.pushRawPreview(rear, connectionAngle: 0, at: CMTime(value: 33, timescale: 30))
+        XCTAssertTrue(frames.latest() === rear)
+        XCTAssertEqual(frames.snapshot()?.front, false)
+        XCTAssertEqual(frames.snapshot()?.angle, 0)
+        frames.pushRawPreview(rear, connectionAngle: 0, at: CMTime(value: 34, timescale: 30))
+        await fulfillment(of: [ready], timeout: 1)
+    }
+
+    func testCancelledLogFlipReleasesHoldWithoutSendingObsoleteReadyCallback() throws {
+        let frames = LiveFrames(), image = try frame(red: true)
+        frames.holdRawPreview()
+        frames.resumeRawPreview(after: CMTime(seconds: 1, preferredTimescale: 600)) {
+            XCTFail("A cancelled handoff must not announce the old camera switch")
+        }
+        frames.cancelRawPreviewHandoff()
+        frames.configureRawPreview(angle: 90, front: true)
+        for tick: Int64 in [31, 32, 33, 34] {
+            frames.pushRawPreview(image, connectionAngle: 0, at: CMTime(value: tick, timescale: 30))
+        }
+        XCTAssertTrue(frames.latest() === image)
+        frames.holdRawPreview(); frames.clear()
+        frames.pushRawPreview(image, connectionAngle: 0)
+        XCTAssertTrue(frames.latest() === image, "Repreparing must release any earlier hold")
+    }
+
     func testRawLogPreviewKeepsPortraitAndMirroringWhenOutputBuffersRotate() throws {
         let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
         let sourceSize = CGSize(width: 32, height: 18)

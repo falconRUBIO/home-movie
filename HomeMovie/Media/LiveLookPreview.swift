@@ -62,19 +62,40 @@ final class LiveFrames: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
     private var notificationPending = false
     private var rawPreviewAngle: CGFloat?
     private var rawPreviewFront: Bool?
+    private var rawPreviewHeld = false
+    private var rawPreviewHandoff: CameraPreviewHandoff?
+    private var rawPreviewReady: (@Sendable () -> Void)?
+    func holdRawPreview() {
+        lock.lock(); rawPreviewHeld = true; rawPreviewHandoff = nil; rawPreviewReady = nil; lock.unlock()
+    }
+    func resumeRawPreview(after time: CMTime, onReady: @escaping @Sendable () -> Void) {
+        lock.lock(); rawPreviewHandoff = CameraPreviewHandoff(after: time)
+        rawPreviewReady = onReady; rawPreviewHeld = false; lock.unlock()
+    }
+    func cancelRawPreviewHandoff() {
+        lock.lock(); rawPreviewHeld = false; rawPreviewHandoff = nil; rawPreviewReady = nil; lock.unlock()
+    }
     func configureRawPreview(angle: CGFloat, front: Bool) {
         lock.lock(); rawPreviewAngle = angle; rawPreviewFront = front; lock.unlock()
     }
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        pushRawPreview(image, connectionAngle: connection.videoRotationAngle)
+        pushRawPreview(image, connectionAngle: connection.videoRotationAngle, at: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
     }
-    func pushRawPreview(_ image: CVPixelBuffer, connectionAngle: CGFloat) {
-        lock.lock(); let angle = rawPreviewAngle; let front = rawPreviewFront; lock.unlock()
+    func pushRawPreview(_ image: CVPixelBuffer, connectionAngle: CGFloat, at time: CMTime = .invalid) {
+        lock.lock()
+        guard !rawPreviewHeld else { lock.unlock(); return }
+        var ready: (@Sendable () -> Void)?
+        if var handoff = rawPreviewHandoff {
+            guard handoff.accept(time) else { rawPreviewHandoff = handoff; lock.unlock(); return }
+            rawPreviewHandoff = nil; ready = rawPreviewReady; rawPreviewReady = nil
+        }
+        let angle = rawPreviewAngle; let front = rawPreviewFront; lock.unlock()
         // Data outputs may physically rotate their buffers. Apply only the remaining
         // sensor correction, independently of the native preview layer and movie output.
         push(image, angle: angle.map { LiveLookGeometry.remainingRotation(captureAngle: $0,
             connectionAngle: connectionAngle) }, front: front)
+        ready?()
     }
     func push(_ image: CVPixelBuffer, composed: Bool = false, angle: CGFloat? = nil, pip: LivePiPFrame? = nil, front: Bool? = nil) {
         lock.lock(); frame = image; self.composed = composed; rotationAngle = angle; self.pip = pip; sourceFront = front
@@ -91,7 +112,10 @@ final class LiveFrames: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
         lock.lock(); defer { lock.unlock() }
         return frame.map { ($0, composed, rotationAngle, pip, sourceFront) }
     }
-    func clear() { lock.lock(); frame = nil; pip = nil; composed = false; rotationAngle = nil; sourceFront = nil; lock.unlock() }
+    func clear() {
+        lock.lock(); frame = nil; pip = nil; composed = false; rotationAngle = nil; sourceFront = nil
+        rawPreviewHeld = false; rawPreviewHandoff = nil; rawPreviewReady = nil; lock.unlock()
+    }
 }
 enum LiveLookGeometry {
     static func remainingRotation(captureAngle: CGFloat, connectionAngle: CGFloat) -> CGFloat {
