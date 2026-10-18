@@ -54,7 +54,9 @@ struct CompositionBundle: @unchecked Sendable {
 actor MediaAssembler {
     // Every build uses an immutable movie snapshot. Trims never modify source files.
     func build(movie: Movie, root: URL, showOriginalLog: Bool = false, filmEffects: FilmEffectsSettings? = nil, forFilmEffectsPreview: Bool = false) async throws -> CompositionBundle {
-        let effects = filmEffects ?? .off
+        // Saved FX are movie edits, shared by Watch, scene review, thumbnails, and export.
+        // Original bypasses the complete editing recipe, including optical effects.
+        let effects: FilmEffectsSettings = showOriginalLog ? .off : (filmEffects ?? movie.exportEffects)
         try effects.validate()
         let scenes = movie.activeScenes
         guard !scenes.isEmpty else { throw HomeMovieError.message("Record a scene first.") }
@@ -162,4 +164,3 @@ actor MediaAssembler {
             .concatenating(CGAffineTransform(translationX: x, y: y))
     }
 }
-
