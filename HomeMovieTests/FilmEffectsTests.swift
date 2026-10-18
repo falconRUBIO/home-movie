@@ -236,3 +236,20 @@ extension FilmEffectsTests {
         XCTAssertEqual(b[0], b[1], accuracy: 0.001)
     }
 }
+
+
+extension FilmEffectsTests {
+    func testGlowIncludesSaturatedNeonInsteadOfIgnoringLowLumaHighlights() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)
+        let dark = CIImage(color: CIColor(red: 0.04, green: 0.04, blue: 0.04)).cropped(to: bounds)
+        let neon = CIImage(color: CIColor(red: 0, green: 0, blue: 1))
+            .cropped(to: CGRect(x: 100, y: 100, width: 56, height: 56))
+        var settings = FilmEffectsSettings.off
+        settings.bloomEnabled = true; settings.bloomAmount = 1; settings.bloomSensitivity = 0.6
+        let result = pixels(try FilmEffectsRenderer().render(neon.composited(over: dark).cropped(to: bounds), settings: settings, time: .zero))
+        let index = (128 * 256 + 98) * 4
+        XCTAssertGreaterThan(result[index + 2], 0.08)
+        XCTAssertEqual(result[index], 0.04, accuracy: 0.002)
+        XCTAssertEqual(result[index + 1], 0.04, accuracy: 0.002)
+    }
+}

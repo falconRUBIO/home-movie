@@ -115,7 +115,10 @@ extern "C" { namespace coreimage {
     float4 filmHighlights(sample_t input, float threshold, float warm) {
         float t = decode709(float3(threshold)).x;
         float l = luminance(input.rgb);
-        float gate = smoothstep(t, min(1.0, t + 0.18), l);
+        // A saturated neon source can be bright in one channel but have low luma.
+        float peak = max(input.r, max(input.g, input.b));
+        float sourceEnergy = max(l, peak * 0.8);
+        float gate = smoothstep(t, min(1.0, t + 0.18), sourceEnergy);
         // Warm-rich sources scatter more red than equally bright saturated blue sources.
         float spectral = mix(1.0, clamp(input.r / max(l, 0.001), 0.15, 1.0), warm);
         return float4(input.rgb * gate * spectral, 1.0);
