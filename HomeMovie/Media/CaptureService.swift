@@ -85,7 +85,7 @@ enum LogRecordingCodec {
     }
 }
 enum CameraCompatibility {
-    static let logPiPExplanation = "Switch to Standard to use PiP. Your Log movie stays unchanged."
+    static let logPiPExplanation = "PiP currently records Standard. Check this iPhone’s Log compatibility below. Your Log movie stays unchanged."
     static let logRecordingFlipExplanation = "Camera flip is unavailable while recording in Log. Stop recording to change cameras, or use Standard."
     static let logCameraExplanation = "The other camera cannot record this Log format. Switch to Standard to use it."
 
@@ -98,6 +98,15 @@ enum CameraCompatibility {
     }
     static func allowsPiP(profile: CaptureProfile, deviceSupported: Bool) -> Bool {
         profile == .standard && deviceSupported
+    }
+    static func logPiPFormatSummary(frontLog: Bool, rearLog: Bool, compatiblePair: Bool) -> String {
+        if compatiblePair {
+            return "Compatible front and rear Log capture formats are advertised. The app still needs a 10-bit Log PiP recording pipeline."
+        }
+        if frontLog && rearLog {
+            return "Both cameras advertise Log individually, but no supported front/rear pair advertises MultiCam Log at 1080p / 30 fps."
+        }
+        return "No supported front/rear pair advertises MultiCam Log at 1080p / 30 fps. Front-camera Log: \(frontLog ? "available" : "not advertised"). Rear-camera Log: \(rearLog ? "available" : "not advertised")."
     }
     static func supportsLog(_ format: AVCaptureDevice.Format) -> Bool {
         let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
@@ -263,6 +272,39 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             mediaType: .video, position: .back).devices.contains { camera in
                 camera.formats.contains { $0.supportedColorSpaces.contains(.appleLog) && $0.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 } }
             }
+    }
+    /// Reads advertised capabilities without changing the active session or camera formats.
+    static func logPiPCompatibilityReport() -> String {
+        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
+            return "Allow camera access first, then check again."
+        }
+        guard AVCaptureMultiCamSession.isMultiCamSupported else {
+            return "This iPhone does not support simultaneous front and rear capture."
+        }
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInUltraWideCamera, .builtInWideAngleCamera, .builtInTrueDepthCamera],
+            mediaType: .video, position: .unspecified)
+        let candidates = discovery.devices.map { camera in
+            (camera: camera, log: camera.formats.filter(CameraCompatibility.supportsLog))
+        }
+        let front = candidates.filter { $0.camera.position == .front }
+        let rear = candidates.filter { $0.camera.position == .back }
+        let compatiblePair = discovery.supportedMultiCamDeviceSets.contains { devices in
+            let eligible = candidates.filter { candidate in
+                devices.contains(candidate.camera) && candidate.log.contains { $0.isMultiCamSupported }
+            }
+            return eligible.contains { $0.camera.position == .front } && eligible.contains { $0.camera.position == .back }
+        }
+        let summary = CameraCompatibility.logPiPFormatSummary(
+            frontLog: front.contains { !$0.log.isEmpty }, rearLog: rear.contains { !$0.log.isEmpty },
+            compatiblePair: compatiblePair)
+        let details = candidates.map { candidate in
+            let camera = candidate.camera
+            let side = camera.position == .front ? "Front" : "Rear"
+            let multiCamLog = candidate.log.filter { $0.isMultiCamSupported }.count
+            return "\(side) · \(camera.localizedName): \(candidate.log.count) Log formats, \(multiCamLog) MultiCam Log formats at 1080p or higher / 30 fps."
+        }.joined(separator: "\n")
+        return summary + "\n\n" + details + "\n\nThis checks advertised formats only. Simultaneous streaming, 10-bit encoding, preview color, and thermal stability still require validation. PiP currently records Standard; this check does not enable Log."
     }
     func prepare(front: Bool, profile: CaptureProfile = .standard, dualCamera: Bool = false,
                  pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) {
@@ -1086,4 +1128,3 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         }
     }
 }
-
