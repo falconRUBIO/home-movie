@@ -85,7 +85,7 @@ enum LogRecordingCodec {
     }
 }
 enum CameraCompatibility {
-    static let logPiPExplanation = "PiP currently records Standard. Check this iPhone’s Log compatibility below. Your Log movie stays unchanged."
+    static let logPiPExplanation = "PiP currently records Standard. Your Log movie stays unchanged."
     static let logRecordingFlipExplanation = "Camera flip is unavailable while recording in Log. Stop recording to change cameras, or use Standard."
     static let logCameraExplanation = "The other camera cannot record this Log format. Switch to Standard to use it."
 
