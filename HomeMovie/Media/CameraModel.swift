@@ -136,7 +136,7 @@ struct RecordingFlipHandoff {
         let interfaceFormat = OrientationPolicy.shared.currentInterfaceFormat(observed: observed)
         let format = movie.recordingFormat ?? interfaceFormat
         let recordingFormat = options?.dualCameraPrepared == true ? format : interfaceFormat
-        let angle = recordingFormat.recordingAngle(observed: observed)
+        let angle = recordingFormat.recordingAngle(observed: observed, profile: movie.captureProfile)
         // Keep the camera controls oriented to the phone; PiP's movie canvas is independent.
         takeFormat = OrientationPolicy.shared.currentInterfaceFormat(observed: observed)
         activeMovieID = movieID; elapsedBeforeSegment = elapsed ?? .zero
