@@ -53,7 +53,7 @@ extern "C" { namespace coreimage {
             float knee = 1.0 - 0.2 * (1.0 - exp2(-max(exposure, 0.0) * 2.0));
             if (peak > knee && exposure > 0.0) {
                 float shoulder = knee + (1.0 - knee) * (1.0 - exp(-(peak - knee) / (1.0 - knee)));
-                linear *= shoulder / peak;
+                linear = (linear / peak) * shoulder;
             }
             rgb = encode709(linear);
         }
