@@ -109,7 +109,7 @@ extern "C" { namespace coreimage {
             }
             rgb = encode709(linear);
         }
-        float l = luminance(rgb);
+        float l = clamp(luminance(rgb), 0.0, 1.0);
         float target = l;
         if (pipelineVersion >= 2.0) {
             // Monotonic tonal curves with continuous slopes at their joins.
@@ -174,9 +174,9 @@ extern "C" { namespace coreimage {
         target = clamp(target, 0.0, 1.0);
         float3 result;
         if (target >= l) {
-            result = rgb + (1.0 - rgb) * ((target - l) / max(1.0 - l, 0.00001));
+            result = rgb + (1.0 - rgb) * ((target - l) / max(1.0 - l, 0.000000000001));
         } else {
-            result = rgb * (target / max(l, 0.00001));
+            result = rgb * (target / max(l, 0.000000000001));
         }
         if (warmth != 0.0 || tint != 0.0) {
             // Independent rendition-level color balance: +warmth yellow, +tint magenta.
