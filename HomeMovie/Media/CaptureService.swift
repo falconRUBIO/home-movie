@@ -248,6 +248,9 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             let text = (notification.userInfo?[AVCaptureSessionErrorKey] as? Error)?.localizedDescription ?? "Camera unavailable. Try resuming the camera."
             self.queue.async {
                 self.stopSmoothZoomOnQueue(); self.requestStop(); self.turnOffTorch(); self.configured = false
+                self.knownDevices.removeAll(); self.knownVideoInputs.removeAll(); self.validatedLogFormats.removeAll()
+                self.previewHandoff = nil; self.previewHandoffAnnounced = true
+                self.liveFrames.cancelRawPreviewHandoff()
                 self.onEvent?(.failed(text))
             }
         })
