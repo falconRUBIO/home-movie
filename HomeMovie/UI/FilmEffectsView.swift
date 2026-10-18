@@ -13,18 +13,13 @@ struct FilmEffectsControlSections: View {
             grainControls
             softnessControls
             rolloffControls
-            Section {
-                Button("Reset FX") { settings = .off }
-            } footer: {
-                Text("Applies to all scenes in this movie. Original recordings stay unchanged.")
-            }
         }
     }
     private var softnessControls: some View {
         Section {
             Toggle("Optical Softness", isOn: $settings.softnessEnabled)
             if settings.softnessEnabled {
-                amountSlider("Amount", value: $settings.softnessAmount)
+                amountSlider("Amount", value: $settings.softnessAmount, accessibilityLabel: "Optical Softness amount")
             }
         } footer: { Text("Gently softens fine detail for a less digital texture. Faces stay clear.") }
     }
@@ -32,7 +27,7 @@ struct FilmEffectsControlSections: View {
         Section {
             Toggle("Highlight Roll-Off", isOn: $settings.rolloffEnabled)
             if settings.rolloffEnabled {
-                amountSlider("Amount", value: $settings.rolloffAmount)
+                amountSlider("Amount", value: $settings.rolloffAmount, accessibilityLabel: "Highlight Roll-Off amount")
             }
         } footer: { Text("Smooths bright tones toward white. Lower amounts keep highlights brighter.") }
     }
@@ -40,12 +35,12 @@ struct FilmEffectsControlSections: View {
         Section {
             Toggle("Grain", isOn: $settings.grainEnabled)
             if settings.grainEnabled {
-                amountSlider("Amount", value: $settings.grainAmount)
+                amountSlider("Amount", value: $settings.grainAmount, accessibilityLabel: "Grain amount")
                 DisclosureGroup("Adjustments", isExpanded: $showGrainDetails) {
                     Picker("Texture", selection: $settings.grainTexture) {
                         ForEach(FilmGrainTexture.allCases) { texture in Text(texture.label).tag(texture) }
                     }
-                    amountSlider("Size", value: $settings.grainSize, range: 0.5...2, percent: false)
+                    amountSlider("Size", value: $settings.grainSize, range: 0.5...2, percent: false, accessibilityLabel: "Grain size")
                     Button("Reset Grain") { settings.grainAmount = 0.25; settings.grainSize = 1; settings.grainTexture = .fine35 }
                 }
             }
@@ -55,10 +50,10 @@ struct FilmEffectsControlSections: View {
         Section {
             Toggle("Halation", isOn: $settings.halationEnabled)
             if settings.halationEnabled {
-                amountSlider("Amount", value: $settings.halationAmount)
+                amountSlider("Amount", value: $settings.halationAmount, accessibilityLabel: "Halation amount")
                 DisclosureGroup("Adjustments", isExpanded: $showHalationDetails) {
-                    amountSlider("Spread", value: $settings.halationSpread)
-                    amountSlider("Highlight Sensitivity", value: $settings.halationSensitivity)
+                    amountSlider("Spread", value: $settings.halationSpread, accessibilityLabel: "Halation spread")
+                    amountSlider("Highlight Sensitivity", value: $settings.halationSensitivity, accessibilityLabel: "Halation highlight sensitivity")
                     Button("Reset Halation") { settings.halationAmount = 0.2; settings.halationSpread = 0.35; settings.halationSensitivity = 0.25 }
                 }
             }
@@ -68,16 +63,16 @@ struct FilmEffectsControlSections: View {
         Section {
             Toggle("Glow", isOn: $settings.bloomEnabled)
             if settings.bloomEnabled {
-                amountSlider("Amount", value: $settings.bloomAmount)
+                amountSlider("Amount", value: $settings.bloomAmount, accessibilityLabel: "Glow amount")
                 DisclosureGroup("Adjustments", isExpanded: $showBloomDetails) {
-                    amountSlider("Spread", value: $settings.bloomSpread)
-                    amountSlider("Highlight Sensitivity", value: $settings.bloomSensitivity)
+                    amountSlider("Spread", value: $settings.bloomSpread, accessibilityLabel: "Glow spread")
+                    amountSlider("Highlight Sensitivity", value: $settings.bloomSensitivity, accessibilityLabel: "Glow highlight sensitivity")
                     Button("Reset Glow") { settings.bloomAmount = 0.15; settings.bloomSpread = 0.35; settings.bloomSensitivity = 0.25 }
                 }
             }
         } footer: { Text("Softens the glow around bright lights while keeping their color.") }
     }
-    private func amountSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double> = 0...1, percent: Bool = true) -> some View {
+    private func amountSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double> = 0...1, percent: Bool = true, accessibilityLabel: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(label)
@@ -85,7 +80,8 @@ struct FilmEffectsControlSections: View {
                 Text(percent ? "\(Int((value.wrappedValue * 100).rounded()))%" : String(format: "%.1f×", value.wrappedValue))
                     .monospacedDigit().foregroundStyle(.secondary)
             }
-            Slider(value: value, in: range).accessibilityLabel(label)
+            Slider(value: value, in: range).accessibilityLabel(accessibilityLabel ?? label)
+                .accessibilityValue(percent ? "\(Int((value.wrappedValue * 100).rounded())) percent" : String(format: "%.1f times", value.wrappedValue))
         }.padding(.vertical, 4)
     }
 }

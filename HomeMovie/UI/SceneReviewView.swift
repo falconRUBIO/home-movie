@@ -363,20 +363,20 @@ struct SceneReviewView: View {
     }
     private var lightComparisonControls: some View {
         HStack(spacing: 12) {
-            Text(comparing ? "Original" : "Hold Original")
+            Text(comparing ? "Before Edits" : "Hold to Compare")
                 .foregroundStyle(comparing ? .primary : .secondary)
                 .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                 .onLongPressGesture(minimumDuration: 0, pressing: { pressing in
                     if !busy { comparing = pressing }
                 }, perform: {})
                 .accessibilityElement().accessibilityAddTraits(.isButton)
-                .accessibilityLabel(comparing ? "Show adjusted" : "Compare original scene")
+                .accessibilityLabel(comparing ? "Show adjusted" : "Compare before edits")
                 .accessibilityAction { if !busy { comparing.toggle() } }
                 .accessibilityHint("Hold to compare without Light, Color, or FX edits; the selected look stays applied")
             Button("Reset") { resetTool() }
-                .frame(minWidth: 44, minHeight: 44).disabled(!canReset || busy)
+                .frame(minWidth: 44, minHeight: 44).disabled(!canReset || busy || preview.loading)
                 .accessibilityLabel("Reset \(tool.rawValue)")
-        }
+        }.font(.subheadline).fixedSize(horizontal: true, vertical: false)
     }
     private var lightControls: some View {
         LazyVStack(spacing: 4) {
