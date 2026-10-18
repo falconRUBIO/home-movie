@@ -60,9 +60,21 @@ final class LiveFrames: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
     private var pip: LivePiPFrame?
     private var listener: (@Sendable () -> Void)?
     private var notificationPending = false
+    private var rawPreviewAngle: CGFloat?
+    private var rawPreviewFront: Bool?
+    func configureRawPreview(angle: CGFloat, front: Bool) {
+        lock.lock(); rawPreviewAngle = angle; rawPreviewFront = front; lock.unlock()
+    }
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        push(image)
+        pushRawPreview(image, connectionAngle: connection.videoRotationAngle)
+    }
+    func pushRawPreview(_ image: CVPixelBuffer, connectionAngle: CGFloat) {
+        lock.lock(); let angle = rawPreviewAngle; let front = rawPreviewFront; lock.unlock()
+        // Data outputs may physically rotate their buffers. Apply only the remaining
+        // sensor correction, independently of the native preview layer and movie output.
+        push(image, angle: angle.map { LiveLookGeometry.remainingRotation(captureAngle: $0,
+            connectionAngle: connectionAngle) }, front: front)
     }
     func push(_ image: CVPixelBuffer, composed: Bool = false, angle: CGFloat? = nil, pip: LivePiPFrame? = nil, front: Bool? = nil) {
         lock.lock(); frame = image; self.composed = composed; rotationAngle = angle; self.pip = pip; sourceFront = front
@@ -82,6 +94,11 @@ final class LiveFrames: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
     func clear() { lock.lock(); frame = nil; pip = nil; composed = false; rotationAngle = nil; sourceFront = nil; lock.unlock() }
 }
 enum LiveLookGeometry {
+    static func remainingRotation(captureAngle: CGFloat, connectionAngle: CGFloat) -> CGFloat {
+        guard captureAngle.isFinite, connectionAngle.isFinite else { return 0 }
+        return ((captureAngle - connectionAngle).truncatingRemainder(dividingBy: 360) + 360)
+            .truncatingRemainder(dividingBy: 360)
+    }
     static func transform(source: CGSize, target: CGSize, angle: CGFloat, front: Bool) -> CGAffineTransform {
         guard [source.width, source.height, target.width, target.height, angle].allSatisfy({ $0.isFinite }), source.width > 0, source.height > 0, target.width > 0, target.height > 0 else { return .identity }
         let rotate = CGAffineTransform(rotationAngle: -angle * .pi / 180)

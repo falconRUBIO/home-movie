@@ -4,6 +4,52 @@ import CoreImage
 @testable import HomeMovie
 
 final class ContinuousCaptureTests: XCTestCase {
+    func testRawLogPreviewKeepsPortraitAndMirroringWhenOutputBuffersRotate() throws {
+        let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
+        let sourceSize = CGSize(width: 32, height: 18)
+        let source = CIImage(color: CIColor(red: 1, green: 0, blue: 0)).cropped(to: CGRect(x: 0, y: 0, width: 16, height: 9))
+            .composited(over: CIImage(color: CIColor(red: 0, green: 1, blue: 0)).cropped(to: CGRect(x: 16, y: 0, width: 16, height: 9)))
+            .composited(over: CIImage(color: CIColor(red: 0, green: 0, blue: 1)).cropped(to: CGRect(x: 0, y: 9, width: 16, height: 9)))
+            .composited(over: CIImage(color: CIColor(red: 1, green: 1, blue: 0)).cropped(to: CGRect(x: 16, y: 9, width: 16, height: 9)))
+        func buffer(_ image: CIImage) throws -> CVPixelBuffer {
+            var result: CVPixelBuffer?
+            XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, Int(image.extent.width), Int(image.extent.height),
+                kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &result), kCVReturnSuccess)
+            let pixelBuffer = try XCTUnwrap(result)
+            context.render(image, to: pixelBuffer, bounds: image.extent, colorSpace: nil)
+            return pixelBuffer
+        }
+        func pixels(_ image: CIImage, target: CGSize) -> Data {
+            var bytes = [UInt8](repeating: 0, count: Int(target.width * target.height) * 4)
+            context.render(image, toBitmap: &bytes, rowBytes: Int(target.width) * 4,
+                bounds: CGRect(origin: .zero, size: target), format: .RGBA8, colorSpace: nil)
+            return Data(bytes)
+        }
+        for front in [false, true] {
+            for captureAngle: CGFloat in [0, 90, 180, 270] {
+                let target = captureAngle == 90 || captureAngle == 270 ? CGSize(width: 18, height: 32) : sourceSize
+                let frames = LiveFrames()
+                frames.configureRawPreview(angle: captureAngle, front: front)
+                let expected = source.transformed(by: LiveLookGeometry.transform(source: sourceSize,
+                    target: target, angle: captureAngle, front: front))
+                for connectionAngle: CGFloat in [0, 90, 180, 270] {
+                    // Simulate data-output buffer rotation independently of the file output
+                    // and the native preview layer changing orientation at recording start.
+                    var delivered = source.transformed(by: CGAffineTransform(rotationAngle: -connectionAngle * .pi / 180))
+                    delivered = delivered.transformed(by: CGAffineTransform(translationX: -delivered.extent.minX, y: -delivered.extent.minY))
+                    frames.pushRawPreview(try buffer(delivered), connectionAngle: connectionAngle)
+                    let snapshot = try XCTUnwrap(frames.snapshot())
+                    XCTAssertEqual(snapshot.front, front)
+                    let actual = CIImage(cvPixelBuffer: snapshot.buffer).transformed(by:
+                        LiveLookGeometry.transform(source: delivered.extent.size, target: target,
+                            angle: try XCTUnwrap(snapshot.angle), front: snapshot.front ?? false))
+                    XCTAssertEqual(pixels(actual, target: target), pixels(expected, target: target),
+                        "Capture \(captureAngle), output \(connectionAngle), front \(front)")
+                }
+            }
+        }
+    }
+
     @MainActor func testFirstPortraitFrontTakeSavesPortraitDespiteLandscapeSensorAngle() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -328,4 +374,3 @@ final class ContinuousCaptureTests: XCTestCase {
         XCTAssertEqual(take.writer.status, .cancelled)
     }
 }
-
