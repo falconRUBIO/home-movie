@@ -66,9 +66,12 @@ enum LogPiPColor {
         var color: [String: Any] = [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
                                    AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020]
         if let property = writerLogProperty { color[property.key] = property.value }
-        return [AVVideoCodecKey: AVVideoCodecType.hevc, AVVideoWidthKey: Int(canvas.width), AVVideoHeightKey: Int(canvas.height),
-         AVVideoColorPropertiesKey: color,
+        var settings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.hevc, AVVideoWidthKey: Int(canvas.width), AVVideoHeightKey: Int(canvas.height),
          AVVideoCompressionPropertiesKey: [AVVideoProfileLevelKey: kVTProfileLevel_HEVC_Main10_AutoLevel as String,
             AVVideoAverageBitRateKey: 28_000_000, AVVideoExpectedSourceFrameRateKey: 30, AVVideoMaxKeyFrameIntervalKey: 30]]
+        // Older encoders inherit the complete color description from the source
+        // hint rather than being given an incomplete SDR color dictionary.
+        if writerLogProperty != nil { settings[AVVideoColorPropertiesKey] = color }
+        return settings
     }
 }

@@ -33,8 +33,12 @@ final class ContinuousTakeWriter {
             AVVideoWidthKey: Int(size.width), AVVideoHeightKey: Int(size.height),
             AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: 16_000_000,
                 AVVideoExpectedSourceFrameRateKey: 30, AVVideoMaxKeyFrameIntervalKey: 30]]
+        let videoSettings = profile == .appleLog ? LogPiPColor.videoSettings(canvas: size) : standardSettings
+        guard profile == .standard || writer.canApply(outputSettings: videoSettings, forMediaType: .video) else {
+            throw HomeMovieError.message("This iOS encoder cannot write the requested 10-bit Apple Log settings. Use the ordinary camera.")
+        }
         video = AVAssetWriterInput(mediaType: .video,
-            outputSettings: profile == .appleLog ? LogPiPColor.videoSettings(canvas: size) : standardSettings,
+            outputSettings: videoSettings,
             sourceFormatHint: profile == .appleLog ? try LogPiPColor.sourceHint(canvas: size) : nil)
         audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48_000,

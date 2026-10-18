@@ -131,6 +131,7 @@ struct RecordingFlipHandoff {
             do { try await LogPiPValidation.shared.check() }
             catch {
                 guard active, preparationID == requestID else { return }
+                ReliabilityDiagnostics.shared.record(.cameraFailed, error: error)
                 state = .failed; message = error.localizedDescription; pipSetupFailed = true
                 return
             }

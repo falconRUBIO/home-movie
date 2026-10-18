@@ -75,9 +75,17 @@ struct PiPLayoutView: View {
                                             guard !checkingLogSupport else { return }
                                             checkingLogSupport = true
                                             Task {
-                                                let report = await Task.detached(priority: .userInitiated) {
+                                                var report = await Task.detached(priority: .userInitiated) {
                                                     CaptureService.logPiPCompatibilityReport()
                                                 }.value
+                                                if canPrepare {
+                                                    do {
+                                                        try await LogPiPValidation.shared.check()
+                                                        report += "\n\nEncoder check passed: saved Apple Log metadata, 10-bit HEVC components, and 10-bit decoding verified. Live dual-camera recording still needs device testing."
+                                                    } catch {
+                                                        report += "\n\nEncoder check did not pass: " + error.localizedDescription
+                                                    }
+                                                }
                                                 checkingLogSupport = false
                                                 logSupportReport = report
                                             }
