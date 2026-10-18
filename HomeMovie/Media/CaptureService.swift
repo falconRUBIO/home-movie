@@ -568,12 +568,21 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             }
         }
         coordinator = AVCaptureDevice.RotationCoordinator(device: camera, previewLayer: nil)
+        updateLogPreviewRotation()
         rotationObservation = coordinator?.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.new]) { [weak self] _, _ in
             self?.queue.async {
                 guard let self else { return }
+                // A take keeps the raw-preview orientation that was correct before
+                // MovieFileOutput started; its recording rotation must not turn the viewfinder.
+                if self.ticket == nil { self.updateLogPreviewRotation() }
                 if let options = try? self.options() { self.onEvent?(.ready(options)) }
             }
         }
+    }
+    private func updateLogPreviewRotation() {
+        guard configuredProfile == .appleLog else { return }
+        liveFrames.configureRawPreview(angle: coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90,
+            front: isFront)
     }
     private func options() throws -> CameraOptions {
         // Late metering/rotation/zoom callbacks must not revive failed preparation.
@@ -1029,6 +1038,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
                 do { try self.ensureLogCaptureReady() }
                 catch { self.configured = false; self.onEvent?(.finished(ticket, error)); return }
             }
+            self.updateLogPreviewRotation()
             connection.videoRotationAngle = angle
             self.ticket = ticket; self.recordingURL = url.standardizedFileURL; self.stopRequested = false
             self.output.startRecording(to: url, recordingDelegate: self)
@@ -1122,6 +1132,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         queue.async {
             guard let ticket = self.ticket, self.recordingURL == fileURL.standardizedFileURL else { return }
             self.ticket = nil; self.recordingURL = nil; self.stopRequested = false
+            self.updateLogPreviewRotation()
             let success = error == nil || ((error as NSError?)?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool == true)
             self.onEvent?(.finished(ticket, success ? nil : error))
             if self.session.isRunning, let options = try? self.options() { self.onEvent?(.ready(options)) }
