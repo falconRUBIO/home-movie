@@ -273,7 +273,10 @@ struct SceneReviewView: View {
                 else if let error = export.error { export.saveFeedback = SaveToast(kind: .failure, message: error) }
                 else { export.saveFeedback = nil }
             }
-            .onChange(of: scenePhase) { _, phase in if phase != .active { preview.player?.pause() } }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { comparing = false; preview.player?.pause() }
+            }
+            .onChange(of: busy) { _, value in if value { comparing = false } }
         }
         .interactiveDismissDisabled(busy || hasUnsavedEdits)
         .onDisappear { preview.stop(); export.cancel() }
@@ -367,7 +370,7 @@ struct SceneReviewView: View {
                 .foregroundStyle(comparing ? .primary : .secondary)
                 .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                 .onLongPressGesture(minimumDuration: 0, pressing: { pressing in
-                    if !busy { comparing = pressing }
+                    if !busy || !pressing { comparing = pressing }
                 }, perform: {})
                 .accessibilityElement().accessibilityAddTraits(.isButton)
                 .accessibilityLabel(comparing ? "Show adjusted" : "Compare before edits")
