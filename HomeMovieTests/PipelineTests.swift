@@ -43,6 +43,34 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(OrientationPolicy.interfaceFormat(.unknown, observed: 0), .landscape)
     }
 
+    func testLogMovieFileRotationPreservesCameraCompensationForEveryCanvas() {
+        for format in MovieFormat.allCases {
+            for observed: CGFloat in [0, 90, 180, 270, 359.5, -90, 450] {
+                let expected = (observed.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+                XCTAssertEqual(format.recordingAngle(observed: observed, profile: .appleLog), expected)
+                XCTAssertEqual(format.recordingAngle(observed: observed, profile: .standard),
+                    format.recordingAngle(observed: observed))
+            }
+        }
+        // Native portrait selfie pixels must stay portrait when the coordinator
+        // reports zero. The old canvas-based 90° correction made them landscape.
+        for (format, native, observed) in [
+            (MovieFormat.portrait, CGSize(width: 1080, height: 1920), CGFloat(0)),
+            (.portrait, CGSize(width: 1080, height: 1920), CGFloat(180)),
+            (.portrait, CGSize(width: 1920, height: 1080), CGFloat(90)),
+            (.portrait, CGSize(width: 1920, height: 1080), CGFloat(270)),
+            (.landscape, CGSize(width: 1080, height: 1920), CGFloat(90)),
+            (.landscape, CGSize(width: 1920, height: 1080), CGFloat(0))
+        ] {
+            let angle = format.recordingAngle(observed: observed, profile: .appleLog)
+            let rect = CGRect(origin: .zero, size: native).applying(CGAffineTransform(rotationAngle: angle * .pi / 180))
+            XCTAssertEqual(rect.width, format.canvas.width, accuracy: 0.001)
+            XCTAssertEqual(rect.height, format.canvas.height, accuracy: 0.001)
+        }
+        XCTAssertEqual(MovieFormat.portrait.recordingAngle(observed: .nan, profile: .appleLog), 90)
+        XCTAssertEqual(MovieFormat.landscape.recordingAngle(observed: .infinity, profile: .appleLog), 0)
+    }
+
     @MainActor func testDuplicateSceneOwnsMediaPreservesEditsAndInsertsAfterOriginal() async throws {
         let store = try await makeStore()
         let project = try await store.create(name: "Duplicate", format: .landscape)
