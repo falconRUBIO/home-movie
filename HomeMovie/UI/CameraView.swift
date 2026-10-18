@@ -272,7 +272,7 @@ struct CameraView: View {
                 format: pipCanvasFormat,
                 rearFrames: camera.service.pipRearFrames, frontFrames: camera.service.pipPresenterFrames,
                 ready: camera.options?.piPAvailable == true, canPrepare: camera.options?.canPreparePiP == true,
-                logMode: movie?.captureProfile == .appleLog, obstacles: [],
+                logMode: movie?.captureProfile == .appleLog, logCube: liveCube, obstacles: [],
                 onPrepare: { preparePiPSettingsPreview() })
         }
         .sheet(isPresented: $showingPiPCompatibility) { pipCompatibility }
@@ -425,7 +425,7 @@ struct CameraView: View {
                     .disabled(countdown != nil || !smoothZoomOpen && camera.state != .ready && camera.state != .recording)
             }
             PiPControl(enabled: options.isPiPEnabled,
-                unavailableReason: options.profile == .appleLog ? CameraCompatibility.logPiPExplanation : nil,
+                unavailableReason: options.profile == .appleLog && !options.canPreparePiP ? CameraCompatibility.logPiPExplanation : nil,
                 disabled: countdown != nil || camera.state != .ready && camera.state != .recording || camera.state == .recording && !options.piPAvailable,
                 onToggle: {
                     if options.piPAvailable { camera.togglePiP() }
@@ -894,7 +894,9 @@ struct CameraView: View {
                     frontFrames: camera.service.pipPresenterFrames, layout: camera.pipLayout,
                     format: pipCanvasFormat,
                     liveFrames: camera.service.liveFrames, paused: showingPiPLayout,
-                    sourceFront: camera.options?.isFront == true)
+                    sourceFront: camera.options?.isFront == true,
+                    profile: movie?.captureProfile ?? .standard, cube: liveOriginal ? nil : liveCube,
+                    onStatus: { status in if liveLookStatus != status { liveLookStatus = status } })
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -1116,11 +1118,11 @@ struct CameraView: View {
             Form {
                 Section("Dual Camera") {
                     Text(movie?.captureProfile == .appleLog ? CameraCompatibility.logPiPExplanation : "Prepare both cameras before a take so PiP can appear and disappear without restarting video or audio.")
-                    Text("1080p · 30 fps · SDR · H.264\nRear 1× wide camera with digital zoom. One continuous microphone.")
+                    Text(movie?.captureProfile == .appleLog
+                        ? "1080p · 30 fps · Apple Log · HEVC 10-bit\nCompatible front and rear cameras. One continuous microphone."
+                        : "1080p · 30 fps · SDR · H.264\nRear 1× wide camera with digital zoom. One continuous microphone.")
                         .font(.subheadline).foregroundStyle(.secondary)
-                    if movie?.captureProfile == .appleLog {
-                        Text("Choose a Standard movie before recording with PiP.").foregroundStyle(.secondary)
-                    } else if camera.options?.canPreparePiP == true {
+                    if camera.options?.canPreparePiP == true {
                         Button("Use Dual Camera") { enableDualCamera() }
                     } else { Text("This iPhone cannot use the required front/rear camera combination.").foregroundStyle(.secondary) }
                 }
@@ -1129,7 +1131,7 @@ struct CameraView: View {
         }.presentationDetents([.medium]).presentationDragIndicator(.visible)
     }
     private func preparePiPSettingsPreview() {
-        guard !camera.busy, !pipConfiguring, let movie, movie.captureProfile == .standard,
+        guard !camera.busy, !pipConfiguring, let movie,
               camera.options?.canPreparePiP == true, camera.options?.piPAvailable != true else { return }
         pipConfiguring = true
         preparedPiPForSettings = true
@@ -1138,14 +1140,14 @@ struct CameraView: View {
             guard showingPiPLayout, scenePhase == .active else { return }
             // Settings needs both live feeds even when PiP is off in the viewfinder.
             // Do not dismiss the sheet, enable the inset or persist a Dual Camera choice.
-            await camera.prepare(profile: .standard, movieID: movieID, dualCamera: true,
+            await camera.prepare(profile: movie.captureProfile, movieID: movieID, dualCamera: true,
                 layout: camera.pipLayout,
                 canvasFormat: pipCanvasFormat,
                 enablePiP: false)
         }
     }
     private func enableDualCamera() {
-        guard !camera.busy, !pipConfiguring, countdown == nil, let movie, movie.captureProfile == .standard, camera.options?.canPreparePiP == true else { return }
+        guard !camera.busy, !pipConfiguring, countdown == nil, let movie, camera.options?.canPreparePiP == true else { return }
         pipConfiguring = true; showingPiPLayout = false; showingPiPCompatibility = false
         enablePiPAfterPreparation = true
         Task {

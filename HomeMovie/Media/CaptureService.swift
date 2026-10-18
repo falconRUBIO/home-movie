@@ -85,7 +85,7 @@ enum LogRecordingCodec {
     }
 }
 enum CameraCompatibility {
-    static let logPiPExplanation = "PiP currently records Standard. Your Log movie stays unchanged."
+    static let logPiPExplanation = "Log PiP requires compatible front and rear 10-bit Log capture formats. Your movie’s recording profile is preserved."
     static let logRecordingFlipExplanation = "Camera flip is unavailable while recording in Log. Stop recording to change cameras, or use Standard."
     static let logCameraExplanation = "The other camera cannot record this Log format. Switch to Standard to use it."
 
@@ -94,14 +94,14 @@ enum CameraCompatibility {
         otherCameraSupported && (profile != .appleLog || !recording || continuousFlipSupported)
     }
     static func shouldPreparePiP(profile: CaptureProfile, storedPreference: Bool, requested: Bool, currentlyEnabled: Bool) -> Bool {
-        profile == .standard && storedPreference && (requested || currentlyEnabled)
+        storedPreference && (requested || currentlyEnabled)
     }
     static func allowsPiP(profile: CaptureProfile, deviceSupported: Bool) -> Bool {
-        profile == .standard && deviceSupported
+        deviceSupported
     }
     static func logPiPFormatSummary(frontLog: Bool, rearLog: Bool, compatiblePair: Bool) -> String {
         if compatiblePair {
-            return "Compatible front and rear Log capture formats are advertised. The app still needs a 10-bit Log PiP recording pipeline."
+            return "Compatible front and rear Log capture formats are advertised. Log PiP uses a 10-bit recording pipeline; simultaneous streaming and saved-file validation must also pass."
         }
         if frontLog && rearLog {
             return "Both cameras advertise Log individually, but no supported front/rear pair advertises MultiCam Log at 1080p / 30 fps."
@@ -191,6 +191,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
     let pipRearFrames = LiveFrames()
     let pipPresenterFrames = LiveFrames()
     private lazy var piPCapable = SeamlessCapture.canPreparePiP()
+    private lazy var logPiPCapable = SeamlessCapture.canPreparePiP(profile: .appleLog)
+    private func piPCapable(for profile: CaptureProfile) -> Bool { profile == .appleLog ? logPiPCapable : piPCapable }
     private var dualCameraRequested = false
     private lazy var liveOutput = AVCaptureVideoDataOutput()
     private let liveQueue = DispatchQueue(label: "HomeMovie.live-look", qos: .userInteractive)
@@ -310,12 +312,12 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             let multiCamLog = candidate.log.filter { $0.isMultiCamSupported }.count
             return "\(side) · \(camera.localizedName): \(candidate.log.count) Log formats, \(multiCamLog) MultiCam Log formats at 1080p or higher / 30 fps."
         }.joined(separator: "\n")
-        return summary + "\n\n" + details + "\n\nThis checks advertised formats only. Simultaneous streaming, 10-bit encoding, preview color, and thermal stability still require validation. PiP currently records Standard; this check does not enable Log."
+        return summary + "\n\n" + details + "\n\nThis checks advertised formats only. Simultaneous streaming, 10-bit encoding, preview color, and thermal stability still require validation. This report checks hardware formats; it does not by itself start a recording."
     }
     func prepare(front: Bool, profile: CaptureProfile = .standard, dualCamera: Bool = false,
                  pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) {
         queue.async {
-            guard !dualCamera || CameraCompatibility.allowsPiP(profile: profile, deviceSupported: self.piPCapable) else {
+            guard !dualCamera || CameraCompatibility.allowsPiP(profile: profile, deviceSupported: self.piPCapable(for: profile)) else {
                 self.onEvent?(.pipSetupFailed(profile == .appleLog ? CameraCompatibility.logPiPExplanation : "This iPhone cannot use Dual Camera."))
                 return
             }
@@ -339,6 +341,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
                 guard self.session.isRunning else { throw HomeMovieError.message("The camera could not start.") }
                 guard !self.session.isInterrupted else { throw HomeMovieError.message("The camera is still interrupted. Try Resume Camera again when it is available.") }
                 try self.ensureLogCaptureReady()
+                if profile == .appleLog, dualCamera, self.seamless?.readyToFlip != true { return }
                 self.onEvent?(.ready(try self.options()))
             } catch {
                 self.configured = false
@@ -394,8 +397,8 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             singleSession.outputs.forEach { singleSession.removeOutput($0) }
             singleSession.commitConfiguration()
         }
-        if preparedForPiP, configuredProfile == .standard, let dual = SeamlessCapture(queue: queue, frames: liveFrames,
-            rearFrames: pipRearFrames, presenterFrames: pipPresenterFrames, front: front, preparedForPiP: preparedForPiP,
+        if preparedForPiP, let dual = SeamlessCapture(queue: queue, frames: liveFrames,
+            rearFrames: pipRearFrames, presenterFrames: pipPresenterFrames, front: front, profile: configuredProfile, preparedForPiP: preparedForPiP,
             layout: pipLayout, canvasFormat: canvasFormat) {
             seamless = dual; videoInput = dual.activeInput; isFront = front
             selectSession(dual.session)
@@ -420,10 +423,11 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             dual.onPiPPresentation = { [weak self] in self?.onEvent?(.pipPresentation($0)) }
             dual.onPiPLayout = { [weak self] in self?.onEvent?(.pipLayout($0)) }
             dual.onNotice = { [weak self] in self?.onEvent?(.notice($0)) }
+            dual.onLogFailure = { [weak self] in self?.onEvent?(.failed($0)) }
             setCoordinator(dual.activeInput.device); configured = true
             return
         }
-        if preparedForPiP { throw HomeMovieError.message("This device cannot sustain the selected 1080p, 30 fps SDR front/rear camera combination.") }
+        if preparedForPiP { throw HomeMovieError.message("This device cannot sustain the selected 1080p, 30 fps front/rear camera format. Try the ordinary camera or a Standard movie.") }
         session.beginConfiguration(); defer { session.commitConfiguration() }
         guard session.canSetSessionPreset(.hd1920x1080) else { throw HomeMovieError.message("1080p recording is not available on this device.") }
         session.inputs.forEach { session.removeInput($0) }; session.outputs.forEach { session.removeOutput($0) }
@@ -531,6 +535,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
     }
     private func ensureLogCaptureReady(requireCodec: Bool = true) throws {
         guard configuredProfile == .appleLog else { return }
+        if let seamless { try seamless.verifyLogConfiguration(); return }
         guard let camera = videoInput?.device, camera.activeFormat.supportedColorSpaces.contains(.appleLog) else {
             throw HomeMovieError.message("The camera’s active format no longer supports Apple Log. Tap Resume Camera to reconnect.")
         }
@@ -614,7 +619,7 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
         guard let camera = videoInput?.device else { throw HomeMovieError.message("Camera not configured.") }
         if configuredProfile == .appleLog {
             guard camera.activeColorSpace == .appleLog,
-                  LogRecordingCodec.preferred(in: output.availableVideoCodecTypes) != nil else {
+                  seamless != nil || LogRecordingCodec.preferred(in: output.availableVideoCodecTypes) != nil else {
                 throw HomeMovieError.message("The Log recording format is not ready.")
             }
         }
@@ -644,18 +649,18 @@ final class CaptureService: NSObject, AVCaptureFileOutputRecordingDelegate, AVCa
             canFlip: device(front: !isFront) != nil && seamless?.pipEnabled != true && seamless?.needsPiPReprepare != true, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on,
             canStayOnLens: camera.isVirtualDevice && camera.activePrimaryConstituent != nil && camera.primaryConstituentDeviceSwitchingBehavior != .unsupported,
             smoothMoving: smoothTimer != nil,
-            recordingFormat: configuredProfile == .appleLog ? LogRecordingCodec.label(LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)) : "Standard · H.264",
+            recordingFormat: seamless?.profile == .appleLog ? "Apple Log · HEVC 10-bit" : configuredProfile == .appleLog ? LogRecordingCodec.label(LogRecordingCodec.preferred(in: output.availableVideoCodecTypes)) : "Standard · H.264",
             samplePreview: seamless != nil || configuredProfile == .standard, canFlipWhileRecording: seamless?.readyToFlip == true || (seamless == nil && configuredProfile == .standard && standardVideo.connection(with: .video) != nil),
-            canPreparePiP: CameraCompatibility.allowsPiP(profile: configuredProfile, deviceSupported: piPCapable), piPAvailable: seamless?.supportsPiP == true && seamless?.preparedForPiP == true && configuredProfile == .standard,
+            canPreparePiP: CameraCompatibility.allowsPiP(profile: configuredProfile, deviceSupported: piPCapable(for: configuredProfile)), piPAvailable: seamless?.supportsPiP == true && seamless?.preparedForPiP == true,
             isPiPEnabled: seamless?.pipEnabled == true, dualCameraPrepared: seamless?.preparedForPiP == true,
             piPCanvasFormat: seamless?.canvasFormat)
     }
     func setPiPEnabled(_ enabled: Bool) {
         queue.async {
-            guard CameraCompatibility.allowsPiP(profile: self.configuredProfile, deviceSupported: self.piPCapable) else {
+            guard CameraCompatibility.allowsPiP(profile: self.configuredProfile, deviceSupported: self.piPCapable(for: self.configuredProfile)) else {
                 self.onEvent?(.notice(self.configuredProfile == .appleLog ? CameraCompatibility.logPiPExplanation : "This iPhone cannot use Dual Camera.")); return
             }
-            guard self.session.isRunning, !self.session.isInterrupted, self.configuredProfile == .standard,
+            guard self.session.isRunning, !self.session.isInterrupted,
                   let dual = self.seamless, dual.preparedForPiP else { self.onEvent?(.notice("Prepare Dual Camera before recording to use PiP.")); return }
             dual.setPiPEnabled(enabled)
         }

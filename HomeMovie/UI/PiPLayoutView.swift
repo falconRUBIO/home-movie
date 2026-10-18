@@ -34,6 +34,7 @@ struct PiPLayoutView: View {
     let ready: Bool
     let canPrepare: Bool
     let logMode: Bool
+    var logCube: ColorCube? = nil
     var obstacles: [CGRect] = []
     let onPrepare: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -86,10 +87,11 @@ struct PiPLayoutView: View {
                                                 if checkingLogSupport { ProgressView() }
                                             }
                                         }.disabled(checkingLogSupport)
+                                        if canPrepare { Button("Retry Live Preview", action: onPrepare) }
                                     }
                                     else { Button("Retry Live Preview", action: onPrepare).disabled(!canPrepare) }
                                 } footer: {
-                                    Text(logMode ? "PiP is available in Standard movies." : canPrepare ? "Turn on both cameras for a live preview. PiP records at 1080p, 30 fps." : "Dual Camera is unavailable on this iPhone.")
+                                    Text(logMode ? "Log PiP needs compatible 10-bit front/rear camera formats. No SDR fallback is recorded into a Log movie." : canPrepare ? "Turn on both cameras for a live preview. PiP records at 1080p, 30 fps." : "Dual Camera is unavailable on this iPhone.")
                                 }
                             }
                         }
@@ -109,7 +111,7 @@ struct PiPLayoutView: View {
         }.presentationDetents([.large]).presentationDragIndicator(.visible)
             .sensoryFeedback(.selection, trigger: layout.composition)
             .task {
-                if !ready, canPrepare, !logMode { onPrepare() }
+                if !ready, canPrepare { onPrepare() }
             }
             .alert("Log + PiP Compatibility", isPresented: Binding(
                 get: { logSupportReport != nil }, set: { if !$0 { logSupportReport = nil } })) {
@@ -240,7 +242,7 @@ struct PiPLayoutView: View {
     private var preview: some View {
         ZStack {
             PiPCompositionPreview(rearFrames: rearFrames, frontFrames: frontFrames,
-                layout: layout, format: format, obstacles: obstacles)
+                layout: layout, format: format, obstacles: obstacles, profile: logMode ? .appleLog : .standard, cube: logCube)
             if !ready {
                 GeometryReader { geometry in
                     let rect = layout.splitPresenterRect ?? PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero
@@ -272,6 +274,9 @@ struct PiPCompositionPreview: UIViewRepresentable {
     var liveFrames: LiveFrames? = nil
     var paused = false
     var sourceFront = false
+    var profile: CaptureProfile = .standard
+    var cube: ColorCube? = nil
+    var onStatus: ((LiveLookStatus) -> Void)? = nil
     func makeCoordinator() -> PiPLayoutRenderer? {
         MTLCreateSystemDefaultDevice().flatMap { PiPLayoutRenderer(device: $0) }
     }
@@ -290,6 +295,9 @@ struct PiPCompositionPreview: UIViewRepresentable {
         context.coordinator?.obstacles = obstacles
         context.coordinator?.live = liveFrames
         context.coordinator?.sourceFront = sourceFront
+        context.coordinator?.profile = profile; context.coordinator?.cube = cube
+        context.coordinator?.onStatus = onStatus
+        (view.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: profile == .appleLog ? CGColorSpace.itur_709 : CGColorSpace.sRGB)
         view.isPaused = paused
         (view as? PiPMetalView)?.resizeDrawable()
     }
@@ -311,6 +319,10 @@ final class PiPMetalView: MTKView {
     private let context: CIContext
     private var rendering = false
     var sourceFront = false
+    var profile: CaptureProfile = .standard
+    var cube: ColorCube?
+    var onStatus: ((LiveLookStatus) -> Void)?
+    private lazy var logContext = CIContext(mtlCommandQueue: queue, options: LogPiPColor.contextOptions())
     var live: LiveFrames?
     var rear: LiveFrames?
     var front: LiveFrames?
@@ -325,7 +337,7 @@ final class PiPMetalView: MTKView {
     func image(background: CVPixelBuffer, presenter: CVPixelBuffer?, canvas: CGSize,
                backgroundAngle: CGFloat, presenterAngle: CGFloat, presentation: PiPPresentation) -> CIImage {
         PiPCompositor.image(background: background, presenter: presenter, canvas: canvas,
-            backgroundAngle: backgroundAngle, presenterAngle: presenterAngle, presentation: presentation)
+            backgroundAngle: backgroundAngle, presenterAngle: presenterAngle, presentation: presentation, profile: profile)
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { }
     func draw(in view: MTKView) {
@@ -349,16 +361,20 @@ final class PiPMetalView: MTKView {
             image = image.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: canvas.width, ty: 0))
         }
         let destination = CIRenderDestination(mtlTexture: drawable.texture, commandBuffer: command)
-        destination.isFlipped = true; destination.colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
+        destination.isFlipped = true; destination.colorSpace = profile == .appleLog ? nil : CGColorSpace(name: CGColorSpace.sRGB)
         do {
-            _ = try context.startTask(toRender: image, to: destination)
+            if profile == .appleLog, let cube { image = try cube.apply(to: image) }
+            _ = try (profile == .appleLog ? logContext : context).startTask(toRender: image, to: destination)
             rendering = true
-            command.addCompletedHandler { [weak self, background, presenter, liveSource] _ in
+            command.addCompletedHandler { [weak self, background, presenter, liveSource] buffer in
                 withExtendedLifetime((background, presenter, liveSource)) { }
-                Task { @MainActor in self?.rendering = false }
+                Task { @MainActor in
+                    self?.rendering = false
+                    self?.onStatus?(buffer.status == .completed ? .ready : .unavailable)
+                }
             }
             command.present(drawable); command.commit()
         }
-        catch { }
+        catch { onStatus?(.unavailable) }
     }
 }

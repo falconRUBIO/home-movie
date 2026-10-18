@@ -127,6 +127,15 @@ struct RecordingFlipHandoff {
         let granted = await CaptureService.permissions()
         guard active, preparationID == requestID else { return }
         guard granted else { state = .denied; return }
+        if dualCamera, profile == .appleLog {
+            do { try await LogPiPValidation.shared.check() }
+            catch {
+                guard active, preparationID == requestID else { return }
+                state = .failed; message = error.localizedDescription; pipSetupFailed = true
+                return
+            }
+            guard active, preparationID == requestID, !Task.isCancelled else { return }
+        }
         service.prepare(front: rememberedFront, profile: profile, dualCamera: dualCamera, pipLayout: layout, canvasFormat: canvasFormat)
     }
     func record(movieID: UUID, continuingAt elapsed: CMTime? = nil) {

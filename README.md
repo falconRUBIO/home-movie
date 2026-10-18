@@ -142,3 +142,11 @@ In an Apple Log movie, open the Look menu and choose **Add Rec.709 Look…** for
 Review Scene → Light includes Warmth (blue/yellow) and Tint (green/magenta), centered at zero. Double-tap a value to reset that control. These nondestructive per-scene controls follow the selected look and are shared by preview, playback and export. Existing recipes decode with neutral color balance.
 
 Cinema remains the only built-in creative look. Amber, Heritage and Ember are retired; projects and restored backups selecting those stable built-in IDs fall back to Cinema. Custom imported looks remain available.
+
+### Apple Log dual-camera pipeline
+
+Log PiP selects a compatible front/rear MultiCam pair whose formats support Apple Log at 1080p or higher and 30 fps. Both devices remain in Apple Log and output native 10-bit YCbCr. Spatial inset/split composition uses an unmanaged half-float Core Image working context and renders to 10-bit YCbCr, then records HEVC Main10. The selected Cinema look is applied to the composed viewing image, not baked into original Log recordings.
+
+Before Log PiP preparation, a process-cached encoder check writes a short local test MOV, verifies its Apple Log format-description metadata and HEVC encoded component depths, and checks 10-bit decoding. Unsupported encoders fail preparation with an explanation; there is no SDR recording substitution. Actual captured buffers must also carry verified Apple Log metadata and 10-bit pixels. Saved scenes retain the existing metadata validation on commit.
+
+The implementation requires native simulator encoder tests and physical iPhone acceptance for simultaneous streams, saved color, orientation, audio, thermal behavior and sustained recording. Hardware format advertisements alone do not establish working Log PiP. Apple’s newer explicit AVVideoLogTransferFunctionKey is introduced with iOS 27; the app resolves those documented public constants at runtime on iOS 27 and also supplies a source-format hint and propagated buffer metadata. Earlier OS versions can proceed only if the same encoder check proves that metadata survives writing.
