@@ -213,7 +213,7 @@ struct PiPLayoutView: View {
                 Text(String(format: "%.1f×", Double(layout.framingZoom)))
                     .monospacedDigit().foregroundStyle(.secondary)
             }
-            HapticGlassSlider(value: $layout.zoom, range: 1...2, step: 0.05, neutral: 1)
+            HapticGlassSlider(value: Binding(get: { Double(layout.zoom) }, set: { layout.zoom = CGFloat($0) }), range: 1...2, step: 0.05, neutral: 1)
                 .accessibilityLabel("Presenter zoom")
                 .accessibilityValue(String(format: "%.1f times", Double(layout.framingZoom)))
             HStack {
