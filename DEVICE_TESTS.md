@@ -196,3 +196,16 @@ Validate 1080p30 SDR on each supported iPhone; record model, iOS, camera formats
 - Exercise Smooth Zoom/manual drag/pinch, focus/exposure and torch with PiP, plus movie Film Effects export. Apple Log/LUT modes must be explicitly incompatible, never silently converted or passed through to the SDR presenter.
 - Simulate missing/late presenter samples and front-camera pressure/failure. Confirm rear timing/audio continue where the hardware permits; the inset fades away and a brief notice explains the issue. Test sustained recording, thermal pressure, backgrounding, calls, camera interruptions and low storage. Previously saved clips/journals remain intact; stopped takes never auto-resume from late callbacks.
 - Return to Ordinary Camera while idle and verify the original virtual-camera/optical lens behavior returns. Do not promise zero-delay capture, camera-mode parity or sustained thermal capability before recording these hardware results.
+
+
+## Focused iPhone 17 release check — NOT RUN
+
+Use the exact new TestFlight build containing PR #24; record its version/build and iOS in release-readiness.json. A passing simulator test is not device evidence. Back up existing projects before testing.
+
+1. Open Standard with PiP off. Pan past a clock or moving hand, record 30 seconds, flip front/back ten times, and inspect both live view and playback for persistent delay, rotation errors, freezes and audio gaps. Repeat with PiP on and both landscape orientations.
+2. Record real Apple Log footage with Cinema. Export with grain, halation and glow together, then maximum settings. Repeat three times from the same short project, and once with a longer multi-scene project. Check completion, playable output, duration, sound, framing and untouched originals. Repeat cancellation and retry.
+3. Record a ten-minute Standard take and a ten-minute PiP take with sufficient storage. Check thermal notices, preview responsiveness and saved audio/video continuity. Observe memory in Instruments when available; do not infer bounded memory just because one run completes.
+4. With expendable footage, background/lock during capture and export, reopen, then force quit once while recording. Confirm completed scenes survive and interrupted media remains available for recovery; confirm a new recording/export works afterward.
+5. In Settings → Support → Diagnostics, save a report after any failure. Share only after checking it for private information. Record exact reproduction steps and whether the failure appeared live, in the original or only in export. Do not mark this checklist passed until performed on the phone.
+
+Public-page browser check on October 14, 2026: Support and Privacy rendered in Chrome without entering credentials; navigation from Support to Privacy succeeded. GitHub requires a separate account to submit a support issue, as the pages disclose.
