@@ -240,9 +240,9 @@ struct MovieSettingsView: View {
                 if profile == .appleLog {
                     Section {
                         Menu {
-                            Button("Apple Standard") { selectedLook = nil }
+                            Button("Apple Standard") { UISelectionFeedbackGenerator().selectionChanged(); selectedLook = nil }
                             ForEach(looks, id: \.id) { look in
-                                Button(look.displayName) { selectedLook = look }
+                                Button(look.displayName) { UISelectionFeedbackGenerator().selectionChanged(); selectedLook = look }
                             }
                         } label: {
                             HStack {

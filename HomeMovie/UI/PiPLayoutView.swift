@@ -16,12 +16,13 @@ struct PiPControl: View {
             .opacity(disabled || unavailableReason != nil ? 0.4 : 1).contentShape(Rectangle())
             .gesture(LongPressGesture(minimumDuration: 0.45).exclusively(before: TapGesture()).onEnded { value in
                 guard !disabled else { return }
+                UISelectionFeedbackGenerator().selectionChanged()
                 switch value { case .first: onLayout(); case .second: onToggle() }
             })
             .accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton)
             .accessibilityLabel("Picture-in-Picture").accessibilityValue(enabled ? "On" : "Off")
             .accessibilityHint(unavailableReason ?? (disabled ? "Prepare a compatible Dual Camera configuration before the next take." : "Tap to toggle. Hold for PiP Layout while idle."))
-            .accessibilityAction { if !disabled { onToggle() } }
+            .accessibilityAction { if !disabled { UISelectionFeedbackGenerator().selectionChanged(); onToggle() } }
             .accessibilityAction(named: "PiP Layout") { if !disabled { onLayout() } }
     }
 }

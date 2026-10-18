@@ -291,7 +291,7 @@ struct CameraView: View {
             Spacer(minLength: 8)
             if movie.captureProfile == .appleLog {
                 Menu {
-                    Button { liveOriginal.toggle() } label: { Label("Show Original", systemImage: liveOriginal ? "checkmark" : "circle") }
+                    Button { UISelectionFeedbackGenerator().selectionChanged(); liveOriginal.toggle() } label: { Label("Show Original", systemImage: liveOriginal ? "checkmark" : "circle") }
                     Divider()
                     Button { changeLiveLook(nil) } label: { Label("Apple Standard", systemImage: movie.look == nil ? "checkmark" : "circle") }
                     ForEach(looks, id: \.id) { look in
@@ -1025,6 +1025,7 @@ struct CameraView: View {
     }
     private func changeLiveLook(_ look: LUTReference?) {
         guard !changingLook else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
         changingLook = true; liveOriginal = false
         Task {
             defer { changingLook = false }
