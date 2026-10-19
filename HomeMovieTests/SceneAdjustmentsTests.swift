@@ -25,6 +25,40 @@ final class SceneAdjustmentsTests: XCTestCase {
         let rgb = Array(pixel.prefix(3))
         return (rgb.max()! - rgb.min()!) / max(rgb.max()!, 0.00001)
     }
+    func testHSLRoundTripLegacyDefaultsAndValidation() throws {
+        var recipe = SceneAdjustments.neutral
+        recipe.hsl[.orange] = HSLValues(hue: 0.25, saturation: -0.5, lightness: 0.4)
+        XCTAssertTrue(recipe.isActive)
+        XCTAssertEqual(try JSONDecoder().decode(SceneAdjustments.self, from: JSONEncoder().encode(recipe)), recipe)
+        XCTAssertFalse(try JSONDecoder().decode(SceneAdjustments.self, from: Data("{}".utf8)).hsl.isActive)
+        recipe.hsl[.blue].hue = .nan
+        XCTAssertThrowsError(try recipe.validate())
+        let malformed = Data(#"{"hsl":{"bands":[]}}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(SceneAdjustments.self, from: malformed))
+    }
+    func testHSLNeutralIdentityGrayProtectionAndSelectedColor() throws {
+        let red = color(0.8, 0.2, 0.2), blue = color(0.2, 0.2, 0.8)
+        XCTAssertEqual(sample(try HSLAdjustments().apply(to: red)), sample(red))
+        var hsl = HSLAdjustments(); hsl[.red].saturation = -1
+        let muted = sample(try hsl.apply(to: red))
+        XCTAssertLessThan(colorfulness(muted), colorfulness(sample(red)) * 0.5)
+        let unchanged = sample(try hsl.apply(to: blue))
+        for i in 0..<4 { XCTAssertEqual(unchanged[i], sample(blue)[i], accuracy: 0.002) }
+        for band in HSLBand.allCases { hsl[band] = HSLValues(hue: 1, saturation: 1, lightness: 1) }
+        let neutral = sample(try hsl.apply(to: gray(0.4)))
+        for i in 0..<3 { XCTAssertEqual(neutral[i], 0.4, accuracy: 0.002) }
+    }
+    func testHSLWrapAndSharedFinishingStage() throws {
+        var recipe = SceneAdjustments.neutral
+        recipe.hsl[.red] = HSLValues(hue: 0.5, saturation: 0, lightness: 0.4)
+        let a = sample(try recipe.applyingFinishing(to: color(0.8, 0.2, 0.201)))
+        let b = sample(try recipe.applyingFinishing(to: color(0.8, 0.201, 0.2)))
+        for i in 0..<3 { XCTAssertEqual(a[i], b[i], accuracy: 0.01) }
+        let original = sample(color(0.8, 0.2, 0.2))
+        XCTAssertGreaterThan(a[1], original[1])
+        let balanced = sample(try recipe.applyingBalance(to: color(0.8, 0.2, 0.2), logEncoded: true))
+        for i in 0..<3 { XCTAssertEqual(balanced[i], original[i], accuracy: 0.002) }
+    }
     func testNewControlsRoundTripAndOldEditsRetainTheirPipeline() throws {
         let recipe = SceneAdjustments(exposure: 0.3, contrast: 0.4, blackPoint: -0.2, saturation: 0.5, vibrance: -0.6)
         XCTAssertEqual(try JSONDecoder().decode(SceneAdjustments.self, from: JSONEncoder().encode(recipe)), recipe)
