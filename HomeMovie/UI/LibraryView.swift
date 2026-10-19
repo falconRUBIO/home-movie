@@ -571,6 +571,9 @@ struct SettingsView: View {
 struct PrivacyView: View {
     var body: some View {
         List {
+            Section {
+                Link("Privacy Policy", destination: URL(string: "https://github.com/falconRUBIO/home-movie/blob/main/docs/Privacy-Policy.md")!)
+            }
             Section("Your movies") {
                 Text("Home Movie keeps recordings and edit information on this iPhone. It has no account system, advertising, or analytics service, and does not upload your movies to a developer server.")
             }
