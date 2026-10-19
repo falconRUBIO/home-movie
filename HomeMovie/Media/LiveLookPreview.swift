@@ -160,7 +160,7 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         let managed = passthrough && !logSource && cube == nil
         if nextFrames != nil, contextPassthrough != managed {
             var options: [CIContextOption: Any] = [.cacheIntermediates: false, .name: "HomeMovie.LivePreview"]
-            if !managed { options[.workingColorSpace] = NSNull(); options[.outputColorSpace] = NSNull() }
+            if !managed { options[.workingFormat] = CIFormat.RGBAh.rawValue; options[.workingColorSpace] = NSNull(); options[.outputColorSpace] = NSNull() }
             context = CIContext(mtlCommandQueue: queue, options: options)
             contextPassthrough = managed
         }

@@ -257,7 +257,10 @@ actor ProjectStore {
         if let coordinationError { throw coordinationError }
         if let readError { throw readError }
         guard var imported else { throw HomeMovieError.message("This look could not be opened.") }
-        if displayReferred { imported = try imported.following(ColorCube.appleStandard.get()) }
+        if displayReferred {
+            imported.colorContract = .displayLook
+            imported = try imported.following(ColorCube.appleStandard.get())
+        }
         let reference = LUTReference(id: UUID(), name: imported.name)
         try requireSpace(bytes: 20_000_000)
         try encoder.encode(imported).write(to: url(reference.path), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
