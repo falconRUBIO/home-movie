@@ -106,7 +106,7 @@ import UIKit
                 let usesLog = movie.captureProfile == .appleLog || movie.activeScenes.contains { $0.profile == .appleLog }
                 if usesLog {
                     try await GradedMovieExporter.export(bundle, to: destination) { [weak self] value in
-                        await MainActor.run { self?.progress = value }
+                        await self?.updateProgress(value)
                     }
                 } else {
                     guard let export = AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality), export.supportedFileTypes.contains(.mp4) else {
@@ -138,6 +138,7 @@ import UIKit
             session = nil; running = false; job = nil
         }
     }
+    private func updateProgress(_ value: Double) { progress = value }
     func cancel() { if running && notice == nil { notice = "Export canceled. Your original scenes are safe." }; session?.cancelExport(); job?.cancel() }
     func saveToPhotos() async {
         guard !savingPhotos else { return }

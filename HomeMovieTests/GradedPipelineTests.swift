@@ -32,7 +32,15 @@ final class GradedPipelineTests: XCTestCase {
     func testExtendedLookHighlightsRemainDistinctAndGamutFitsWithoutChannelClipping() throws {
         let context = CIContext(options: LogPiPColor.contextOptions())
         func pixel(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) throws -> [Float] {
-            let source = CIImage(color: CIColor(red: r, green: g, blue: b)).cropped(to: CGRect(x: 0, y: 0, width: 1, height: 1))
+            // CIColor's default color space can bound constant colors before
+            // the kernel. Raw float pixels are the actual extended-range fixture.
+            let values: [Float] = [Float(r), Float(g), Float(b), 1]
+            let source = CIImage(bitmapData: values.withUnsafeBytes { Data($0) }, bytesPerRow: 16,
+                size: CGSize(width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+            var raw = [Float](repeating: 0, count: 4)
+            raw.withUnsafeMutableBytes { context.render(source, toBitmap: $0.baseAddress!, rowBytes: 16,
+                bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil) }
+            XCTAssertEqual(raw[0], Float(r), accuracy: 0.002)
             let mapped = try ColorCube.mapExtendedOutput(source)
             var result = [Float](repeating: 0, count: 4)
             result.withUnsafeMutableBytes { context.render(mapped, toBitmap: $0.baseAddress!, rowBytes: 16,

@@ -1,4 +1,6 @@
-import AVFoundation
+// Each drain exclusively owns its input/output. Reader/writer status and
+// cancellation are shared through AVFoundation's thread-safe control API.
+@preconcurrency import AVFoundation
 import VideoToolbox
 
 // Explicit 10-bit SDR export. Reuses the preview composition and audio mix;
