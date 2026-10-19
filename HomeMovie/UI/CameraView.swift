@@ -273,7 +273,10 @@ struct CameraView: View {
                 rearFrames: camera.service.pipRearFrames, frontFrames: camera.service.pipPresenterFrames,
                 ready: camera.options?.piPAvailable == true, canPrepare: camera.options?.canPreparePiP == true,
                 logMode: movie?.captureProfile == .appleLog, logCube: liveOriginal ? nil : liveCube, obstacles: [],
-                onPrepare: { preparePiPSettingsPreview() })
+                onPrepare: { preparePiPSettingsPreview() }, liveFrames: camera.service.liveFrames,
+                frontMetering: camera.options?.frontMetering, rearMetering: camera.options?.rearMetering,
+                onFocus: { point, locked, front in camera.focus(at: point, locked: locked, front: front) },
+                onExposure: { bias, front in camera.exposure(bias, front: front) })
         }
         .sheet(isPresented: $showingPiPCompatibility) { pipCompatibility }
         .alert("Recording Details", isPresented: $showingErrorDetails) {

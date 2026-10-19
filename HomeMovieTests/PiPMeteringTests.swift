@@ -28,6 +28,32 @@ final class PiPMeteringTests: XCTestCase {
                 angle: 90, panel: panel, zoom: 1, front: true))
         }
     }
+    @MainActor func testSettingsPreviewRoutesBothCamerasInInsetAndSwappedSplits() throws {
+        let rear = LiveFrames(), front = LiveFrames()
+        let buffer = try XCTUnwrap(PiPFrameRenderer().render(CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)), canvas: CGSize(width: 64, height: 64)))
+        rear.push(buffer, angle: 90); front.push(buffer, angle: 0)
+        let canvas = CGSize(width: 390, height: 844)
+        for composition: PiPComposition in [.inset, .sideBySide, .topAndBottom] {
+            for swapped in [false, true] {
+                let state = PiPPresentation(composition: composition, splitSwapped: swapped,
+                    rect: CGRect(x: 0.6, y: 0.6, width: 0.3, height: 0.3), opacity: 1, enabled: true)
+                let surface = PiPMeteringView(frames: rear, presentation: state, presenterFrames: front,
+                    backgroundFrames: rear, useLivePresentation: false, front: nil, rear: nil, protectedRegions: [],
+                    onFocus: { _, _, _ in true }, onExposure: { _, _ in }, onMove: { _, _ in })
+                let coordinator = surface.makeCoordinator()
+                let frontRect: CGRect
+                if composition == .inset { frontRect = state.rect }
+                else { frontRect = try XCTUnwrap(composition.presenterRect(swapped: swapped)) }
+                let frontPoint = CGPoint(x: frontRect.midX * canvas.width, y: frontRect.midY * canvas.height)
+                XCTAssertEqual(coordinator.resolve(frontPoint, canvas: canvas)?.front, true)
+                let rearRect: CGRect
+                if composition == .inset { rearRect = CGRect(x: 0, y: 0, width: 0.5, height: 0.5) }
+                else { rearRect = try XCTUnwrap(composition.presenterRect(swapped: !swapped)) }
+                let rearPoint = CGPoint(x: rearRect.midX * canvas.width, y: rearRect.midY * canvas.height)
+                XCTAssertEqual(coordinator.resolve(rearPoint, canvas: canvas)?.front, false)
+            }
+        }
+    }
     @MainActor func testCustomMeteringUsesRoutedCoordinatesAndHonorsProtectedControls() {
         let view = PreviewUIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         var calls = 0

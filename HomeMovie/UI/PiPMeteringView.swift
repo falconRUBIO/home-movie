@@ -31,6 +31,9 @@ enum PiPMeteringGeometry {
 struct PiPMeteringView: UIViewRepresentable {
     let frames: LiveFrames
     let presentation: PiPPresentation
+    var presenterFrames: LiveFrames? = nil
+    var backgroundFrames: LiveFrames? = nil
+    var useLivePresentation = true
     let front: CameraMetering?
     let rear: CameraMetering?
     var protectedRegions: [CGRect]
@@ -76,16 +79,19 @@ struct PiPMeteringView: UIViewRepresentable {
             view.exposureBias = options.bias; view.exposureRange = options.range; view.locked = options.locked
         }
         func resolve(_ point: CGPoint, canvas: CGSize) -> PiPMeteringHit? {
-            guard let snapshot = parent.frames.snapshot() else { return nil }
-            let state = snapshot.pip?.presentation ?? parent.presentation
+            guard let snapshot = parent.backgroundFrames?.snapshot() ?? parent.frames.snapshot() else { return nil }
+            let state = parent.useLivePresentation ? snapshot.pip?.presentation ?? parent.presentation : parent.presentation
             guard state.opacity > 0.001 else { return nil }
             let presenter = state.composition == .inset ? state.rect : state.composition.presenterRect(swapped: state.splitSwapped) ?? state.rect
             let unit = CGPoint(x: point.x / max(1, canvas.width), y: point.y / max(1, canvas.height))
             let isFront = presenter.contains(unit)
             let panel = isFront ? presenter : state.composition == .inset ? CGRect(x: 0, y: 0, width: 1, height: 1) :
                 state.composition.presenterRect(swapped: !state.splitSwapped) ?? .zero
-            guard let buffer = isFront ? snapshot.pip?.presenter : snapshot.buffer else { return nil }
-            let angle = isFront ? snapshot.pip?.presenterAngle ?? 90 : snapshot.pip?.backgroundAngle ?? snapshot.angle ?? 90
+            let presenterSnapshot = parent.presenterFrames?.snapshot()
+            guard let buffer = isFront ? (snapshot.pip?.presenter ?? presenterSnapshot?.buffer) : snapshot.buffer else { return nil }
+            let observed = isFront ? presenterSnapshot?.angle ?? 90 : snapshot.angle ?? 90
+            let fallbackAngle = (MovieFormat.captureFormat(angle: observed) ?? .portrait).recordingAngle(observed: observed)
+            let angle = isFront ? snapshot.pip?.presenterAngle ?? fallbackAngle : snapshot.pip?.backgroundAngle ?? fallbackAngle
             return PiPMeteringGeometry.hit(at: point, canvas: canvas,
                 source: CGSize(width: CVPixelBufferGetWidth(buffer), height: CVPixelBufferGetHeight(buffer)),
                 angle: angle, panel: panel, zoom: isFront ? state.zoom : 1, front: isFront)
