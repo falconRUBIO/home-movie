@@ -213,6 +213,7 @@ struct TrimRangeControl: View {
     @Binding var start: Double
     @Binding var end: Double
     var movie: Movie? = nil
+    var editingChanged: (Bool) -> Void = { _ in }
     private var duration: Double { max(scene.sourceDuration.seconds, 1 / 600) }
     private var minimum: Double { min(1 / 30, duration) }
     var body: some View {
@@ -246,9 +247,11 @@ struct TrimRangeControl: View {
             .overlay { Capsule().fill(.black.opacity(0.6)).frame(width: 3, height: 20) }
             .frame(width: 44).contentShape(Rectangle()).offset(x: x - 22)
             .gesture(DragGesture(coordinateSpace: .named("trim")).onChanged { value in
+                editingChanged(true)
                 let seconds = max(0, min(duration, Double((value.location.x - 14) / width) * duration))
                 if isStart { start = min(seconds, end - minimum) } else { end = max(seconds, start + minimum) }
-            })
+            }.onEnded { _ in editingChanged(false) })
+            .onDisappear { editingChanged(false) }
             .accessibilityElement().accessibilityLabel(label)
             .accessibilityValue(durationLabel(CMTime(seconds: isStart ? start : end, preferredTimescale: 600)))
             .accessibilityAdjustableAction { direction in

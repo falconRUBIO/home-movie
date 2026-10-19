@@ -7,6 +7,7 @@ import AVFoundation
     private var cameraWarmup: Task<Void, Never>?
     let assembler = MediaAssembler()
     let photosSafety = PhotosSafetyService()
+    @Published var copiedSceneAdjustments: SceneAdjustmentClipboard?
     @Published var movies: [Movie] = []
     @Published var loaded = false
     private var loading = false

@@ -4,6 +4,7 @@ import UIKit
 // Scene review edits the movie recipe used by preview and export.
 struct FilmEffectsControlSections: View {
     @Binding var settings: FilmEffectsSettings
+    var editingChanged: (Bool) -> Void = { _ in }
     @State private var showGrainDetails = false
     @State private var showHalationDetails = false
     @State private var showBloomDetails = false
@@ -85,7 +86,7 @@ struct FilmEffectsControlSections: View {
                     }
                     .accessibilityHidden(true)
             }.font(.subheadline)
-            HapticGlassSlider(value: value, range: range, neutral: percent ? 0 : 1)
+            HapticGlassSlider(value: value, range: range, neutral: percent ? 0 : 1, editingChanged: editingChanged)
                 .frame(minHeight: 44).accessibilityLabel(accessibilityLabel ?? label)
                 .accessibilityAction(named: "Reset Adjustment") {
                     value.wrappedValue = percent ? 0 : 1

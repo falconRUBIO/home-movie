@@ -1650,6 +1650,32 @@ final class PipelineTests: XCTestCase {
         XCTAssertGreaterThan(a[0], 180); XCTAssertLessThan(a[1], 80)
         for channel in 0..<3 { XCTAssertEqual(Double(a[channel]), Double(b[channel]), accuracy: 8) }
     }
+    @MainActor func testPastedAdjustmentsPersistWithoutCopyingTrimLookMediaOrMovieFX() async throws {
+        let store = try await makeStore(), project = try await store.create(name: "Copy edits", format: .landscape)
+        _ = try await record(project, into: store); _ = try await record(project, into: store)
+        let snapshots = await store.snapshot()
+        let before = try XCTUnwrap(snapshots.first)
+        let first = before.activeScenes[0], second = before.activeScenes[1]
+        var source = SceneAdjustments.neutral, target = SceneAdjustments.neutral
+        source.contrast = 0.4; source.saturation = -0.2; source.exposure = 0.8
+        target.exposure = -0.3; target.warmth = 0.2
+        var fx = FilmEffectsSettings.off; fx.grainEnabled = true; fx.grainAmount = 0.4
+        try await store.editScene(movieID: before.id, sceneID: first.id, start: .zero,
+            end: first.sourceDuration.cmTime, adjustments: source, filmEffects: fx)
+        let pasted = try SceneAdjustmentClipboard(source: source, selection: .suggested).applying(to: target)
+        try await store.editScene(movieID: before.id, sceneID: second.id,
+            start: CMTime(seconds: 0.3, preferredTimescale: 600), end: CMTime(seconds: 1.7, preferredTimescale: 600), adjustments: pasted)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let saved = await reopened.snapshot(), movie = try XCTUnwrap(saved.first)
+        XCTAssertEqual(movie.exportEffects, fx); XCTAssertEqual(movie.look, before.look)
+        XCTAssertEqual(movie.activeScenes.map(\.source), before.activeScenes.map(\.source))
+        XCTAssertEqual(movie.activeScenes[0].lightAdjustments, source)
+        XCTAssertEqual(movie.activeScenes[1].lightAdjustments, pasted)
+        XCTAssertEqual(movie.activeScenes[1].trimStart.seconds, 0.3, accuracy: 0.001)
+        XCTAssertEqual(movie.activeScenes[1].trimEnd.seconds, 1.7, accuracy: 0.001)
+        XCTAssertEqual(movie.activeScenes[1].lightAdjustments.exposure, -0.3)
+        XCTAssertEqual(movie.activeScenes[1].lightAdjustments.warmth, 0.2)
+    }
     private func makeStore() async throws -> ProjectStore {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let store = ProjectStore(root: root); _ = try await store.load()
