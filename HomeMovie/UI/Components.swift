@@ -95,6 +95,8 @@ struct SceneThumbnail: View {
 final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+    var meteringConversion: ((CGPoint, CGSize) -> CGPoint?)?
+    private var customFocusPosition: CGPoint?
     var onFocus: ((CGPoint, Bool) -> Bool)?
     var onExposure: ((Float) -> Void)?
     // Rectangles measured from SwiftUI controls in this viewfinder’s coordinate space.
@@ -123,7 +125,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     private var lookRenderer: LiveLookRenderer?
     private var samplePreview = false
     var onLiveLookStatus: ((LiveLookStatus) -> Void)?
-    func configureLiveLook(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false) {
+    func configureLiveLook(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false, logSource: Bool = false) {
         samplePreview = passthrough
         if passthrough { rotationObservation = nil; rotationCoordinator = nil }
         if lookView == nil, active, cube != nil || passthrough, let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) {
@@ -140,7 +142,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         // The Metal display loop reads only the latest frame. Keep its layer visible at full
         // opacity so drawable acquisition never depends on a first-render alpha handshake.
         lookRenderer?.frames?.setListener(nil)
-        lookRenderer?.configure(frames: frames, cube: cube, active: active, passthrough: passthrough)
+        lookRenderer?.configure(frames: frames, cube: cube, active: active, passthrough: passthrough, logSource: logSource)
         lookRenderer?.front = showingFront
         (lookView?.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: passthrough ? CGColorSpace.sRGB : CGColorSpace.itur_709)
         resizeLookView()
@@ -220,10 +222,14 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         guard gesture.state == .began else { return }
         requestFocus(at: gesture.location(in: self), locked: true)
     }
-    private func requestFocus(at point: CGPoint, locked: Bool) {
+    func requestFocus(at point: CGPoint, locked: Bool) {
         guard permitsPreviewInteraction(at: point) else { return }
         let devicePoint: CGPoint
-        if samplePreview {
+        if let meteringConversion {
+            guard let converted = meteringConversion(point, bounds.size) else { return }
+            devicePoint = converted
+            customFocusPosition = CGPoint(x: point.x / bounds.width, y: point.y / bounds.height)
+        } else if samplePreview {
             let size = CGSize(width: 1920, height: 1080)
             let inverse = LiveLookGeometry.transform(source: size, target: bounds.size, angle: lastPreviewAngle, front: showingFront).inverted()
             let source = CGPoint(x: point.x, y: bounds.height - point.y).applying(inverse)
@@ -256,10 +262,16 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         focusIndicator.layer.removeAllAnimations(); sun.layer.removeAllAnimations()
         focusIndicator.alpha = 0; sun.alpha = 0
     }
+    func resetMeteringIndicator() {
+        focusDevicePoint = nil; customFocusPosition = nil; hideIndicator?.cancel()
+        focusIndicator.alpha = 0; sun.alpha = 0
+    }
     func repositionIndicator() {
         guard let focusDevicePoint else { return }
         let point: CGPoint
-        if samplePreview {
+        if meteringConversion != nil, let customFocusPosition {
+            point = CGPoint(x: customFocusPosition.x * bounds.width, y: customFocusPosition.y * bounds.height)
+        } else if samplePreview {
             let size = CGSize(width: 1920, height: 1080)
             let source = CGPoint(x: focusDevicePoint.x * size.width, y: (1 - focusDevicePoint.y) * size.height)
             let rendered = source.applying(LiveLookGeometry.transform(source: size, target: bounds.size, angle: lastPreviewAngle, front: showingFront))
@@ -347,7 +359,7 @@ struct CameraPreview: UIViewRepresentable {
         view.fixedFormat = fixedFormat
         view.onLiveLookStatus = onLiveLookStatus
         view.setFront(front)
-        view.configureLiveLook(frames: liveFrames, cube: liveCube, active: (liveActive || samplePreview) && !displayPaused, passthrough: samplePreview)
+        view.configureLiveLook(frames: liveFrames, cube: liveCube, active: (liveActive || samplePreview) && !displayPaused, passthrough: samplePreview, logSource: options?.profile == .appleLog)
         if let options { view.updateMetering(options) }
         view.updatePreviewRotation(fallback: angle)
         guard let connection = view.previewLayer.connection else { return }

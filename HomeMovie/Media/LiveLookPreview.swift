@@ -146,6 +146,7 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
     private(set) var presentationID = UUID()
     private(set) var status = LiveLookStatus.inactive
     private var passthrough = false
+    private var logSource = false
     var onStatusChanged: ((LiveLookStatus) -> Void)?
     private func report(_ status: LiveLookStatus) {
         guard self.status != status else { return }
@@ -153,14 +154,15 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         if status == .ready { ReliabilityDiagnostics.shared.record(.firstPreviewFrame) }
         onStatusChanged?(status)
     }
-    func configure(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false) {
+    func configure(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false, logSource: Bool = false) {
         let nextFrames = active && (cube != nil || passthrough) ? frames : nil
         let nextCube = active ? cube : nil
-        if nextFrames != nil, contextPassthrough != passthrough {
+        let managed = passthrough && !logSource && cube == nil
+        if nextFrames != nil, contextPassthrough != managed {
             var options: [CIContextOption: Any] = [.cacheIntermediates: false, .name: "HomeMovie.LivePreview"]
-            if !passthrough { options[.workingColorSpace] = NSNull(); options[.outputColorSpace] = NSNull() }
+            if !managed { options[.workingColorSpace] = NSNull(); options[.outputColorSpace] = NSNull() }
             context = CIContext(mtlCommandQueue: queue, options: options)
-            contextPassthrough = passthrough
+            contextPassthrough = managed
         }
         if self.frames !== nextFrames || self.passthrough != passthrough || self.cube?.rgba != nextCube?.rgba ||
             self.cube?.dimension != nextCube?.dimension || self.cube?.minimum != nextCube?.minimum ||
@@ -168,7 +170,7 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
             presentationID = UUID()
             report(nextFrames == nil ? .inactive : .preparing)
         }
-        self.frames = nextFrames; self.cube = nextCube; self.passthrough = passthrough
+        self.frames = nextFrames; self.cube = nextCube; self.passthrough = passthrough; self.logSource = logSource
     }
     func canPresent(_ id: UUID) -> Bool { id == presentationID && frames != nil && (cube != nil || passthrough) }
     var angle: CGFloat = 90
@@ -180,20 +182,29 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         super.init()
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    func previewImage(_ source: CVPixelBuffer, to canvas: CGSize, pip: LivePiPFrame?) throws -> CIImage {
+        let isLog = logSource || cube != nil || LogPiPColor.isLog(source)
+        let image: CIImage
+        if let pip {
+            image = PiPCompositor.image(background: source, presenter: pip.presenter, canvas: canvas,
+                backgroundAngle: pip.backgroundAngle, presenterAngle: pip.presenterAngle, presentation: pip.presentation,
+                profile: isLog ? .appleLog : .standard)
+        } else { image = CIImage(cvPixelBuffer: source, options: isLog ? [.colorSpace: NSNull()] : [:]) }
+        // A sample-buffer preview can still have a viewing LUT. Apply it once,
+        // after spatial composition, to both cameras; never to recorded buffers.
+        return try Self.viewingImage(image, cube: cube)
+    }
+    static func viewingImage(_ image: CIImage, cube: ColorCube?) throws -> CIImage {
+        try cube?.apply(to: image) ?? image
+    }
     func encode(_ source: CVPixelBuffer, to texture: MTLTexture, command: MTLCommandBuffer, composed: Bool = false, sourceAngle: CGFloat? = nil, pip: LivePiPFrame? = nil, sourceFront: Bool? = nil) throws {
         let target = CGSize(width: texture.width, height: texture.height)
-        var image: CIImage
-        let directPiP = passthrough && pip != nil
-        if passthrough, let pip {
-            image = PiPCompositor.image(background: source, presenter: pip.presenter, canvas: target,
-                backgroundAngle: pip.backgroundAngle, presenterAngle: pip.presenterAngle, presentation: pip.presentation)
-        } else if passthrough { image = CIImage(cvPixelBuffer: source) }
-        else if let cube { image = try cube.apply(to: CIImage(cvPixelBuffer: source, options: [.colorSpace: NSNull()])) }
-        else { throw HomeMovieError.message("No live look is selected.") }
+        var image = try previewImage(source, to: target, pip: pip)
+        let directPiP = pip != nil
         image = image.transformed(by: LiveLookGeometry.transform(source: image.extent.size, target: target, angle: composed || directPiP ? 0 : (sourceAngle ?? angle), front: composed || directPiP ? false : (sourceFront ?? front)))
             .cropped(to: CGRect(origin: .zero, size: target))
         let destination = CIRenderDestination(mtlTexture: texture, commandBuffer: command)
-        destination.colorSpace = passthrough ? CGColorSpace(name: CGColorSpace.sRGB) : nil
+        destination.colorSpace = contextPassthrough == true ? CGColorSpace(name: CGColorSpace.sRGB) : nil
         destination.isFlipped = true
         guard let context else { throw HomeMovieError.message("The live preview is not configured.") }
         _ = try context.startTask(toRender: image, to: destination)

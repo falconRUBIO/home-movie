@@ -372,7 +372,7 @@ final class PiPMetalView: MTKView {
         let destination = CIRenderDestination(mtlTexture: drawable.texture, commandBuffer: command)
         destination.isFlipped = true; destination.colorSpace = profile == .appleLog ? nil : CGColorSpace(name: CGColorSpace.sRGB)
         do {
-            if profile == .appleLog, let cube { image = try cube.apply(to: image) }
+            if profile == .appleLog { image = try LiveLookRenderer.viewingImage(image, cube: cube) }
             _ = try (profile == .appleLog ? logContext : context).startTask(toRender: image, to: destination)
             rendering = true
             command.addCompletedHandler { [weak self, background, presenter, liveSource] buffer in

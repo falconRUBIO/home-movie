@@ -215,13 +215,17 @@ struct RecordingFlipHandoff {
     }
     func dollyZoom(to factor: CGFloat, seconds: Int) { if active, !switchingCamera, [.ready, .recording].contains(state) { service.dollyZoom(to: factor, seconds: seconds) } }
     func endSmoothZoom() { service.endSmoothZoom() }
-    func focus(at point: CGPoint, locked: Bool = false) -> Bool {
-        guard active, !switchingCamera, [.ready, .recording].contains(state), options?.canMeter == true else { return false }
-        guard !locked || options?.canLock == true else { return false }
-        service.focus(at: point, locked: locked)
+    func focus(at point: CGPoint, locked: Bool = false, front: Bool? = nil) -> Bool {
+        guard active, !switchingCamera, [.ready, .recording].contains(state) else { return false }
+        let metering = front == true ? options?.frontMetering : options?.rearMetering
+        guard (front == nil ? options?.canMeter : metering?.canMeter) == true,
+              !locked || (front == nil ? options?.canLock : metering?.canLock) == true else { return false }
+        service.focus(at: point, locked: locked, front: front)
         return true
     }
-    func exposure(_ bias: Float) { if active, !switchingCamera, [.ready, .recording].contains(state) { service.exposure(bias) } }
+    func exposure(_ bias: Float, front: Bool? = nil) {
+        if active, !switchingCamera, [.ready, .recording].contains(state) { service.exposure(bias, front: front) }
+    }
     func toggleTorch() { if active, !switchingCamera, [.ready, .recording].contains(state) { service.toggleTorch() } }
     func flip() {
         guard active, !switchingCamera, recordingFlip == nil, let options, options.isPiPEnabled != true, pipPresentation.opacity == 0 else { return }

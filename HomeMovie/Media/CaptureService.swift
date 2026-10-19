@@ -117,6 +117,20 @@ enum CameraCompatibility {
         max(width, height) >= 1920 && min(width, height) >= 1080
     }
 }
+struct CameraMetering: Sendable {
+    let canMeter: Bool
+    let canLock: Bool
+    let bias: Float
+    let range: ClosedRange<Float>
+    let locked: Bool
+    init(_ camera: AVCaptureDevice, locked: Bool) {
+        canMeter = camera.isExposureModeSupported(.continuousAutoExposure) ||
+            (camera.isFocusPointOfInterestSupported && camera.isFocusModeSupported(.continuousAutoFocus))
+        canLock = camera.isExposureModeSupported(.autoExpose)
+        bias = camera.exposureTargetBias; range = camera.minExposureTargetBias...camera.maxExposureTargetBias
+        self.locked = locked
+    }
+}
 struct CameraOptions: Sendable {
     var lenses: [LensChoice]
     var zoom: CGFloat
@@ -146,6 +160,8 @@ struct CameraOptions: Sendable {
     var isPiPEnabled = false
     var dualCameraPrepared = false
     var piPCanvasFormat: MovieFormat? = nil
+    var frontMetering: CameraMetering? = nil
+    var rearMetering: CameraMetering? = nil
 }
 enum CaptureEvent {
     case ready(CameraOptions)
@@ -210,6 +226,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var configured = false
     private var isFront = false
     private var focusLocked = false
+    private var meteringLocks: [String: Bool] = [:]
     private var smoothFilter: SmoothZoomFilter?
     private var smoothTimer: DispatchSourceTimer?
     private var smoothGeneration = UUID()
@@ -386,7 +403,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         previewHandoff = nil; previewHandoffAnnounced = true
         liveFrames.clear()
         pipRearFrames.clear(); pipPresenterFrames.clear()
-        focusLocked = false
+        focusLocked = false; meteringLocks.removeAll()
         if session.isRunning { session.stopRunning() }
         seamless = nil
         selectSession(singleSession)
@@ -629,7 +646,9 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             samplePreview: true, compositedCapture: true, canFlipWhileRecording: seamless?.readyToFlip == true || (seamless == nil && continuousVideo.connection(with: .video) != nil),
             canPreparePiP: CameraCompatibility.allowsPiP(profile: configuredProfile, deviceSupported: piPCapable(for: configuredProfile)), piPAvailable: seamless?.supportsPiP == true && seamless?.preparedForPiP == true,
             isPiPEnabled: seamless?.pipEnabled == true, dualCameraPrepared: seamless?.preparedForPiP == true,
-            piPCanvasFormat: seamless?.canvasFormat)
+            piPCanvasFormat: seamless?.canvasFormat,
+            frontMetering: seamless.map { CameraMetering($0.frontInput.device, locked: meteringLocks[$0.frontInput.device.uniqueID] == true) },
+            rearMetering: seamless.map { CameraMetering($0.backInput.device, locked: meteringLocks[$0.backInput.device.uniqueID] == true) })
     }
     func setPiPEnabled(_ enabled: Bool) {
         queue.async {
@@ -646,10 +665,10 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     }
     func setPiPObstacles(_ rectangles: [CGRect]) { queue.async { self.seamless?.setPiPObstacles(rectangles) } }
     func dragPiP(to point: CGPoint, finished: Bool) { queue.async { self.seamless?.dragPiP(to: point, finished: finished) } }
-    func focus(at point: CGPoint, locked: Bool = false) {
+    func focus(at point: CGPoint, locked: Bool = false, front: Bool? = nil) {
         guard point.x.isFinite, point.y.isFinite, (0...1).contains(point.x), (0...1).contains(point.y) else { return }
         queue.async {
-            guard self.session.isRunning, !self.session.isInterrupted, let camera = self.videoInput?.device else { return }
+            guard self.session.isRunning, !self.session.isInterrupted, let camera = self.meteringCamera(front: front) else { return }
             do {
                 try self.applyFocus(at: point, camera: camera, monitor: !locked, locked: locked)
                 self.onEvent?(.ready(try self.options()))
@@ -672,15 +691,22 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             camera.exposurePointOfInterest = point
             camera.exposureMode = exposureMode
         }
+        if !camera.isExposurePointOfInterestSupported, camera.isExposureModeSupported(exposureMode) { camera.exposureMode = exposureMode }
         // One-shot autofocus/autoexposure settle and hold, unlike continuous metering.
-        focusLocked = locked
+        meteringLocks[camera.uniqueID] = locked
+        if camera.uniqueID == videoInput?.device.uniqueID { focusLocked = locked }
         camera.isSubjectAreaChangeMonitoringEnabled = monitor
         if !locked { camera.setExposureTargetBias(0, completionHandler: nil) }
     }
-    func exposure(_ bias: Float) {
+    private func meteringCamera(front: Bool?) -> AVCaptureDevice? {
+        guard let front else { return videoInput?.device }
+        guard let seamless else { return nil }
+        return front ? seamless.frontInput.device : seamless.backInput.device
+    }
+    func exposure(_ bias: Float, front: Bool? = nil) {
         guard bias.isFinite else { return }
         queue.async {
-            guard self.session.isRunning, !self.session.isInterrupted, let camera = self.videoInput?.device else { return }
+            guard self.session.isRunning, !self.session.isInterrupted, let camera = self.meteringCamera(front: front) else { return }
             do {
                 try camera.lockForConfiguration()
                 camera.setExposureTargetBias(min(camera.maxExposureTargetBias, max(camera.minExposureTargetBias, bias)), completionHandler: nil)
