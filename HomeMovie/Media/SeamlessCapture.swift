@@ -254,14 +254,14 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     var onLogFailure: ((String) -> Void)?
     private var reportedInvalidLog = false
     private let queue: DispatchQueue
-    // Prefer the square Center Stage sensor only when its formats support MultiCam.
-    // Keep the full square feed fixed; both preview and writer crop it identically.
-    // Switching the device aspect ratio during a take would change source dimensions.
+    // Standard can prefer the full square Center Stage feed. Log selects the
+    // smallest compatible HD format to leave bandwidth for two 10-bit streams.
+    // Both preview and writer crop the same fixed feed throughout a take.
     private static func captureFormat(for camera: AVCaptureDevice, profile: CaptureProfile = .standard) -> AVCaptureDevice.Format? {
         let formats = camera.formats.filter {
             $0.isMultiCamSupported && (profile == .standard || CameraCompatibility.supportsLog($0)) && $0.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 }
         }
-        if camera.position == .front, #available(iOS 26.0, *) {
+        if profile == .standard, camera.position == .front, #available(iOS 26.0, *) {
             let square = formats.filter {
                 let size = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
                 return size.width == size.height && size.width >= 1280 && size.width <= 2160 &&
@@ -336,7 +336,10 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             try camera.lockForConfiguration()
             camera.activeFormat = format
             if camera.position == .front, #available(iOS 26.0, *), format.supportedDynamicAspectRatios.contains(.ratio1x1) {
-                camera.setDynamicAspectRatio(.ratio1x1, completionHandler: nil)
+                let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+                if profile == .standard || size.width == size.height {
+                    camera.setDynamicAspectRatio(.ratio1x1, completionHandler: nil)
+                }
             }
             camera.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
             camera.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
