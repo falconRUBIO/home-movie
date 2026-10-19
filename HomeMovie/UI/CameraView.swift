@@ -272,8 +272,11 @@ struct CameraView: View {
                 format: pipCanvasFormat,
                 rearFrames: camera.service.pipRearFrames, frontFrames: camera.service.pipPresenterFrames,
                 ready: camera.options?.piPAvailable == true, canPrepare: camera.options?.canPreparePiP == true,
-                logMode: movie?.captureProfile == .appleLog, logCube: liveCube, obstacles: [],
-                onPrepare: { preparePiPSettingsPreview() })
+                logMode: movie?.captureProfile == .appleLog, logCube: liveOriginal ? nil : liveCube, obstacles: [],
+                onPrepare: { preparePiPSettingsPreview() }, liveFrames: camera.service.liveFrames,
+                frontMetering: camera.options?.frontMetering, rearMetering: camera.options?.rearMetering,
+                onFocus: { point, locked, front in camera.focus(at: point, locked: locked, front: front) },
+                onExposure: { bias, front in camera.exposure(bias, front: front) })
         }
         .sheet(isPresented: $showingPiPCompatibility) { pipCompatibility }
         .alert("Recording Details", isPresented: $showingErrorDetails) {
@@ -291,7 +294,8 @@ struct CameraView: View {
             Spacer(minLength: 8)
             if movie.captureProfile == .appleLog {
                 Menu {
-                    Button { UISelectionFeedbackGenerator().selectionChanged(); liveOriginal.toggle() } label: { Label("Show Original", systemImage: liveOriginal ? "checkmark" : "circle") }
+                    Button { UISelectionFeedbackGenerator().selectionChanged(); liveOriginal.toggle() } label: { Label("Original Log Preview", systemImage: liveOriginal ? "checkmark" : "circle") }
+                    Text("Preview only · Recordings stay in Apple Log.")
                     Divider()
                     Button { changeLiveLook(nil) } label: { Label("Apple Standard", systemImage: movie.look == nil ? "checkmark" : "circle") }
                     ForEach(looks, id: \.id) { look in
@@ -868,6 +872,7 @@ struct CameraView: View {
                 samplePreview: camera.options?.samplePreview == true,
                 displayPaused: showingPiPLayout || camera.options?.dualCameraPrepared == true,
                 onLiveLookStatus: { status in
+                    guard camera.options?.dualCameraPrepared != true else { return }
                     Task { @MainActor in liveLookStatus = status }
                 },
                 fixedFormat: activeTakeFormat,
@@ -1076,19 +1081,21 @@ struct CameraView: View {
     }
     private var pipInteraction: some View {
         GeometryReader { geometry in
-            if camera.pipPresentation.opacity > 0.001, camera.pipLayout.composition == .inset {
-                let r = camera.pipPresentation.rect
-                Color.clear.frame(width: r.width * geometry.size.width, height: r.height * geometry.size.height)
-                    .contentShape(Rectangle()).onTapGesture { }
-                    .gesture(pipDragGesture(size: geometry.size))
-                    .position(x: r.midX * geometry.size.width, y: r.midY * geometry.size.height)
-                    .accessibilityElement(children: .ignore).accessibilityLabel("Presenter inset")
-                    .accessibilityHint("Hold briefly, then drag to another corner.")
+            if camera.options?.dualCameraPrepared == true, camera.pipPresentation.opacity > 0.001 {
+                PiPMeteringView(frames: camera.service.liveFrames, presentation: camera.pipPresentation,
+                    front: camera.options?.frontMetering, rear: camera.options?.rearMetering,
+                    protectedRegions: previewControlRegions,
+                    onFocus: { point, locked, front in camera.focus(at: point, locked: locked, front: front) },
+                    onExposure: { bias, front in camera.exposure(bias, front: front) },
+                    onMove: { point, finished in camera.dragPiP(to: point, finished: finished) })
+                    .accessibilityLabel("Dual camera viewfinder")
+                    .accessibilityHint("Tap either camera to focus and expose. Drag the sun vertically to adjust its brightness. Hold and drag the inset to move it.")
+                    .accessibilityAction(named: "Focus Presenter") { _ = camera.focus(at: CGPoint(x: 0.5, y: 0.5), front: true) }
                     .accessibilityAction(named: "Move to Top Left") { movePiP(to: .topLeft) }
                     .accessibilityAction(named: "Move to Top Right") { movePiP(to: .topRight) }
                     .accessibilityAction(named: "Move to Bottom Left") { movePiP(to: .bottomLeft) }
                     .accessibilityAction(named: "Move to Bottom Right") { movePiP(to: .bottomRight) }
-            }
+            } else { Color.clear.allowsHitTesting(false) }
         }.onGeometryChange(for: CGSize.self) { $0.size } action: { size in viewfinderSize = size; updatePiPObstacles() }
     }
     private func pipDragGesture(size: CGSize) -> some Gesture {

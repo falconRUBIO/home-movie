@@ -38,6 +38,11 @@ struct PiPLayoutView: View {
     var logCube: ColorCube? = nil
     var obstacles: [CGRect] = []
     let onPrepare: () -> Void
+    var liveFrames: LiveFrames? = nil
+    var frontMetering: CameraMetering? = nil
+    var rearMetering: CameraMetering? = nil
+    var onFocus: ((CGPoint, Bool, Bool) -> Bool)? = nil
+    var onExposure: ((Float, Bool) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -252,6 +257,17 @@ struct PiPLayoutView: View {
         ZStack {
             PiPCompositionPreview(rearFrames: rearFrames, frontFrames: frontFrames,
                 layout: layout, format: format, obstacles: obstacles, profile: logMode ? .appleLog : .standard, cube: logCube)
+            if ready, let liveFrames, let onFocus, let onExposure {
+                PiPMeteringView(frames: liveFrames,
+                    presentation: PiPPresentation(composition: layout.composition, splitSwapped: layout.splitSwapped,
+                        rect: layout.splitPresenterRect ?? PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero,
+                        opacity: 1, enabled: true, zoom: layout.framingZoom),
+                    presenterFrames: frontFrames, backgroundFrames: rearFrames, useLivePresentation: false,
+                    front: frontMetering, rear: rearMetering, protectedRegions: [],
+                    onFocus: onFocus, onExposure: onExposure, onMove: { point, finished in
+                        if finished { layout.corner = PiPGeometry.nearestCorner(to: point, layout: layout, canvas: format.canvas, obstacles: obstacles) }
+                    })
+            }
             if !ready {
                 GeometryReader { geometry in
                     let rect = layout.splitPresenterRect ?? PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero
@@ -372,7 +388,7 @@ final class PiPMetalView: MTKView {
         let destination = CIRenderDestination(mtlTexture: drawable.texture, commandBuffer: command)
         destination.isFlipped = true; destination.colorSpace = profile == .appleLog ? nil : CGColorSpace(name: CGColorSpace.sRGB)
         do {
-            if profile == .appleLog, let cube { image = try cube.apply(to: image) }
+            if profile == .appleLog { image = try LiveLookRenderer.viewingImage(image, cube: cube) }
             _ = try (profile == .appleLog ? logContext : context).startTask(toRender: image, to: destination)
             rendering = true
             command.addCompletedHandler { [weak self, background, presenter, liveSource] buffer in
