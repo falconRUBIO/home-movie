@@ -4,7 +4,8 @@ import CoreImage
 // Reversible per-scene nodes: source balance, look, then display finishing.
 struct SceneAdjustments: Codable, Equatable, Sendable {
     static let neutral = SceneAdjustments()
-    static let engineVersion = 4
+    static let engineVersion = 5
+    var hsl = HSLAdjustments()
     var exposure = 0.0
     var shadows = 0.0
     var highlights = 0.0
@@ -20,10 +21,11 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
     var vibrance = 0.0
     // 1 preserves historical all-after-LUT edits; 2 balances before the look.
     var pipelineVersion = 2
-    private enum CodingKeys: String, CodingKey { case exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance, pipelineVersion }
+    private enum CodingKeys: String, CodingKey { case hsl, exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance, pipelineVersion }
     private var values: [Double] { [exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance] }
-    var isActive: Bool { values.contains { $0 != 0 } }
+    var isActive: Bool { hsl.isActive || values.contains { $0 != 0 } }
     func validate() throws {
+        try hsl.validate()
         guard (1...2).contains(pipelineVersion), values.allSatisfy({ $0.isFinite && (-1...1).contains($0) }) else {
             throw HomeMovieError.message("This scene’s light adjustments are invalid.")
         }
@@ -42,7 +44,8 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
     func applyingFinishing(to source: CIImage) throws -> CIImage {
         var finishing = self
         if pipelineVersion == 2 { finishing.exposure = 0; finishing.warmth = 0; finishing.tint = 0 }
-        return try finishing.apply(to: source)
+        finishing.hsl = HSLAdjustments()
+        return try hsl.apply(to: finishing.apply(to: source))
     }
     func apply(to source: CIImage) throws -> CIImage {
         try validate()
@@ -75,6 +78,7 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
 extension SceneAdjustments {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        hsl = try values.decodeIfPresent(HSLAdjustments.self, forKey: .hsl) ?? HSLAdjustments()
         exposure = try values.decodeIfPresent(Double.self, forKey: .exposure) ?? 0
         shadows = try values.decodeIfPresent(Double.self, forKey: .shadows) ?? 0
         highlights = try values.decodeIfPresent(Double.self, forKey: .highlights) ?? 0

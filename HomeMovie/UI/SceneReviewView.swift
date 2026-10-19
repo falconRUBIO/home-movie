@@ -57,11 +57,12 @@ import UIKit
 }
 
 private enum SceneReviewTool: String, CaseIterable, Identifiable {
-    case light = "Light", color = "Color", fx = "FX", trim = "Trim"
+    case light = "Light", color = "Color", hsl = "HSL", fx = "FX", trim = "Trim"
     var symbol: String {
         switch self {
         case .light: "sun.max"
         case .color: "circle.lefthalf.filled"
+        case .hsl: "slider.horizontal.3"
         case .fx: "sparkles"
         case .trim: "crop.rotate"
         }
@@ -157,7 +158,8 @@ struct SceneReviewView: View {
     @State private var start: Double
     @State private var end: Double
     @State private var adjustments: SceneAdjustments
-    @State private var interactingControl: SceneLightControl?
+    @State private var interactingControl: String?
+    @State private var hslBand = HSLBand.red
     @State private var savedScene: Scene
     @State private var effects = FilmEffectsSettings.off
     @State private var originalEffects = FilmEffectsSettings.off
@@ -193,11 +195,12 @@ struct SceneReviewView: View {
         SceneLightControl.allCases.filter { tool == .color ? $0.isColor : !$0.isColor }
     }
     private var canReset: Bool {
-        tool == .fx ? effects != .off : visibleLightControls.contains { adjustments[keyPath: $0.keyPath] != 0 }
+        tool == .hsl ? adjustments.hsl.isActive : tool == .fx ? effects != .off : visibleLightControls.contains { adjustments[keyPath: $0.keyPath] != 0 }
     }
     private func resetTool() {
         UISelectionFeedbackGenerator().selectionChanged()
-        if tool == .fx { effects = .off }
+        if tool == .hsl { adjustments.hsl = HSLAdjustments() }
+        else if tool == .fx { effects = .off }
         else { for control in visibleLightControls { adjustments[keyPath: control.keyPath] = 0 } }
         if !adjustments.isActive { adjustments = .neutral }
         comparing = false
@@ -346,7 +349,7 @@ struct SceneReviewView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 12) {
-                        if tool == .trim { trimControls } else { lightControls }
+                        if tool == .trim { trimControls } else if tool == .hsl { hslControls } else { lightControls }
                     }.padding(.bottom, 8)
                 }.id(tool)
             }
@@ -403,11 +406,53 @@ struct SceneReviewView: View {
                 .accessibilityElement().accessibilityAddTraits(.isButton)
                 .accessibilityLabel(comparing ? "Show adjusted" : "Compare before edits")
                 .accessibilityAction { if !busy { comparing.toggle() } }
-                .accessibilityHint("Hold to compare without Light, Color, or FX edits; the selected look stays applied")
+                .accessibilityHint("Hold to compare without Light, Color, HSL, or FX edits; the selected look stays applied")
             Button("Reset") { resetTool() }
                 .frame(minWidth: 44, minHeight: 44).disabled(!canReset || busy || preview.loading)
                 .accessibilityLabel("Reset \(tool.rawValue)")
         }.font(.subheadline).fixedSize(horizontal: true, vertical: false)
+    }
+    private var hslControls: some View {
+        VStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(HSLBand.allCases) { band in
+                        Button {
+                            hslBand = band; interactingControl = nil
+                            UISelectionFeedbackGenerator().selectionChanged()
+                        } label: {
+                            Circle().fill(Color(hue: band.degrees / 360, saturation: 0.8, brightness: 0.95))
+                                .frame(width: 28, height: 28)
+                                .overlay { if hslBand == band { Circle().stroke(.primary, lineWidth: 2).padding(-4) } }
+                                .frame(width: 44, height: 44)
+                        }.buttonStyle(.plain).accessibilityLabel(band.name)
+                            .accessibilityAddTraits(hslBand == band ? [.isSelected] : [])
+                    }
+                }.padding(.horizontal, 4)
+            }
+            HStack {
+                Text(hslBand.name).font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Reset Color", systemImage: "arrow.counterclockwise") {
+                    adjustments.hsl[hslBand] = HSLValues()
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }.font(.caption).frame(minHeight: 44)
+                    .disabled(!adjustments.hsl[hslBand].isActive)
+            }
+            hslRuler("Hue", symbol: "paintpalette", path: \.hue, detail: "Shifts the selected color toward neighboring colors.")
+            hslRuler("Saturation", symbol: "drop.fill", path: \.saturation, detail: "Mutes or enriches the selected color.")
+            hslRuler("Lightness", symbol: "sun.max", path: \.lightness, detail: "Darkens or brightens the selected color.")
+        }.padding(.horizontal, 16)
+            .disabled(busy || comparing || preview.loading || preview.error != nil)
+    }
+    private func hslRuler(_ title: String, symbol: String, path: WritableKeyPath<HSLValues, Double>, detail: String) -> some View {
+        let band = hslBand
+        let value = Binding(get: { adjustments.hsl[band][keyPath: path] }, set: { value in
+            adjustments.hsl[band][keyPath: path] = value
+            if !adjustments.isActive { adjustments = .neutral }
+        })
+        return adjustmentRuler(title: title, symbol: symbol, detail: "\(band.name). \(detail)", value: value)
+            .id("\(band.rawValue)-\(title)")
     }
     private var lightControls: some View {
         LazyVStack(spacing: 4) {
@@ -422,20 +467,23 @@ struct SceneReviewView: View {
                 adjustments[keyPath: control.keyPath] = $0
                 if !adjustments.isActive { adjustments = .neutral }
             })
+        return adjustmentRuler(title: control.rawValue, symbol: control.symbol, detail: control.detail, value: value)
+    }
+    private func adjustmentRuler(title: String, symbol: String, detail: String, value: Binding<Double>) -> some View {
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: control.symbol).frame(width: 20).accessibilityHidden(true)
-                Text(control.rawValue).fontWeight(.semibold)
+                Image(systemName: symbol).frame(width: 20).accessibilityHidden(true)
+                Text(title).fontWeight(.semibold)
                 Spacer(minLength: 8)
                 Text(abs(value.wrappedValue) < 0.005 ? "0" : String(format: "%+.0f", value.wrappedValue * 100))
                     .monospacedDigit().fontWeight(.semibold)
                     .frame(minWidth: 44, minHeight: 24).contentShape(Rectangle())
                     .onTapGesture(count: 2) { if !busy && !comparing { UISelectionFeedbackGenerator().selectionChanged(); value.wrappedValue = 0 } }
-                    .accessibilityLabel("\(control.rawValue) value")
+                    .accessibilityLabel("\(title) value")
                     .accessibilityAction(named: "Reset to Zero") { if !busy && !comparing { value.wrappedValue = 0 } }
             }.font(.subheadline).frame(minHeight: 24).accessibilityHidden(true)
             SceneAdjustmentRuler(value: value, editingChanged: { interacting in
-                interactingControl = interacting ? control : nil
+                interactingControl = interacting ? title : nil
             })
                 .frame(height: 44).disabled(busy || comparing)
                 .overlay {
@@ -453,9 +501,9 @@ struct SceneReviewView: View {
                 }
                 .padding(.vertical, -4)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(control.rawValue)
+                .accessibilityLabel(title)
                 .accessibilityValue(Text(value.wrappedValue * 100, format: .number.precision(.fractionLength(0))))
-                .accessibilityHint(control.detail)
+                .accessibilityHint(detail)
                 .accessibilityAdjustableAction { direction in
                     guard !busy && !comparing else { return }
                     UISelectionFeedbackGenerator().selectionChanged()
@@ -468,7 +516,7 @@ struct SceneReviewView: View {
                 .accessibilityAction(named: "Reset to Zero") { if !busy && !comparing { value.wrappedValue = 0 } }
         }
         .background {
-            if interactingControl == control {
+            if interactingControl == title {
                 Color.clear.homeGlass().allowsHitTesting(false)
             }
         }
@@ -487,7 +535,7 @@ struct SceneReviewView: View {
                     }.frame(maxWidth: .infinity, minHeight: 44)
                 }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
                     .disabled(busy || preview.loading || preview.error != nil || movie == nil)
-                Text("This scene only · Current look, Light, Color, and FX")
+                Text("This scene only · Current look, Light, Color, HSL, and FX")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }.padding(.horizontal, 20).padding(.vertical, 6).background(.bar)

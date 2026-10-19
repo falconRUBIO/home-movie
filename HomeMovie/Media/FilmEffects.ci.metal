@@ -67,6 +67,41 @@ float particles(float2 p, float size, uint seed, uint salt) {
 }
 
 extern "C" { namespace coreimage {
+    float4 sceneHSL(sample_t input, float4 red, float4 orange, float4 yellow,
+                    float4 green, float4 aqua, float4 blue, float4 purple, float4 magenta) {
+        float3 rgb = clamp(input.rgb, 0.0, 1.0);
+        float hi = max(rgb.r, max(rgb.g, rgb.b)), lo = min(rgb.r, min(rgb.g, rgb.b));
+        float chroma = hi - lo;
+        // Achromatic pixels have no meaningful hue. Avoid coloring gray noise.
+        if (chroma < 0.00001) return input;
+        float light = (hi + lo) * 0.5;
+        float sat = chroma / max(1.0 - abs(2.0 * light - 1.0), 0.00001);
+        float hue = hi == rgb.r ? (rgb.g - rgb.b) / chroma :
+                    (hi == rgb.g ? (rgb.b - rgb.r) / chroma + 2.0 : (rgb.r - rgb.g) / chroma + 4.0);
+        hue = fract(hue / 6.0 + 1.0);
+        float4 bands[8] = {red, orange, yellow, green, aqua, blue, purple, magenta};
+        float3 adjustment = float3(0.0); float total = 0.0;
+        // All masks use the original hue, wrap across red, and have smooth edges.
+        for (int i = 0; i < 8; ++i) {
+            float delta = fract(hue - bands[i].w + 1.5) - 0.5;
+            float previous = bands[(i + 7) % 8].w;
+            float next = bands[(i + 1) % 8].w;
+            float reach = delta < 0.0 ? fract(bands[i].w - previous + 1.0) : fract(next - bands[i].w + 1.0);
+            float weight = 1.0 - smoothstep(0.0, reach, abs(delta));
+            adjustment += bands[i].xyz * weight; total += weight;
+        }
+        adjustment /= max(total, 0.00001);
+        float protection = smoothstep(0.0, 0.08, chroma);
+        hue = fract(hue + adjustment.x * protection / 6.0 + 1.0);
+        sat = adjustment.y < 0.0 ? sat * (1.0 + adjustment.y * protection) :
+              sat + (1.0 - sat) * adjustment.y * protection;
+        light = adjustment.z < 0.0 ? light * (1.0 + adjustment.z * protection * 0.6) :
+                light + (1.0 - light) * adjustment.z * protection * 0.6;
+        float c = (1.0 - abs(2.0 * light - 1.0)) * sat;
+        float3 wave = clamp(abs(fract(hue + float3(0.0, 2.0/3.0, 1.0/3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+        return float4((wave - 0.5) * c + light, input.a);
+    }
+
     float4 sceneBalance(sample_t input, float exposure, float warmth, float tint, float logEncoded) {
         float3 rgb;
         if (logEncoded > 0.5) {
