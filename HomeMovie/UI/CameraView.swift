@@ -743,6 +743,7 @@ struct CameraView: View {
                 ForEach([true, false], id: \.self) { isStart in
                     Circle().fill((isStart ? DollyEndpoint.start : .end) == dollyEditor.selected ? Color.yellow : .white).frame(width: 22, height: 22)
                         .overlay(Text(isStart ? "S" : "E").font(.system(size: 10, weight: .bold)).foregroundStyle(.black))
+                        .zIndex((isStart ? DollyEndpoint.start : .end) == dollyEditor.selected ? 1 : 0)
                         .offset(x: 11 + (isStart ? a : b) * width)
                         .accessibilityElement().accessibilityLabel(isStart ? "Start zoom" : "End zoom")
                         .accessibilityValue(zoomLabel(isStart ? start : end, multiplier: options.multiplier))
