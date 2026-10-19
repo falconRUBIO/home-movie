@@ -76,6 +76,10 @@ import UIKit
                         _ = await player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
                     }
                 }
+                // A tab/lifecycle change can replace the output while a paused
+                // seek is suspended. An obsolete task must not acquire the new
+                // output's only paused frame and then discard it.
+                guard !Task.isCancelled, histogramRequest == token else { return }
                 let time = player?.currentTime() ?? .invalid
                 if time.isNumeric, let output = histogramOutput,
                    output.hasNewPixelBuffer(forItemTime: time),
