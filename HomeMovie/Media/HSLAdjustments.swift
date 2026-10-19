@@ -34,7 +34,8 @@ struct HSLAdjustments: Codable, Equatable, Sendable {
             return CIVector(x: CGFloat(value.hue), y: CGFloat(value.saturation),
                 z: CGFloat(value.lightness), w: CGFloat(band.degrees / 360))
         }
-        guard let kernel = try Self.kernel.get(), let output = kernel.apply(extent: image.extent, arguments: arguments) else {
+        let kernel = try Self.kernel.get()
+        guard let output = kernel.apply(extent: image.extent, arguments: arguments) else {
             throw HomeMovieError.message("This scene’s HSL adjustments could not be rendered.")
         }
         return output
