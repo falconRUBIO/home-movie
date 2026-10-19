@@ -238,6 +238,8 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var stayOnLens = false
     private var smoothLensLocked = false
     private var smoothUnlockedRange: ClosedRange<CGFloat>?
+    private var smoothPreviousSwitching: (behavior: AVCaptureDevice.PrimaryConstituentDeviceSwitchingBehavior,
+        conditions: AVCaptureDevice.PrimaryConstituentDeviceRestrictedSwitchingBehaviorConditions)?
     private var zoomObservation: NSKeyValueObservation?
     private var zoomNotificationPending = false
     var onEvent: (@Sendable (CaptureEvent) -> Void)?
@@ -773,22 +775,29 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         do {
             try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
             camera.cancelVideoZoomRamp()
-            // .locked holds the current primary camera and narrows its hardware zoom range.
-            if lockLens, stayOnLens, camera.isVirtualDevice, camera.activePrimaryConstituent != nil,
+            if camera.isVirtualDevice, camera.activePrimaryConstituent != nil,
+               camera.activePrimaryConstituentDeviceSwitchingBehavior != .unsupported,
                camera.primaryConstituentDeviceSwitchingBehavior != .unsupported {
+                smoothPreviousSwitching = (camera.primaryConstituentDeviceSwitchingBehavior,
+                    camera.primaryConstituentDeviceRestrictedSwitchingBehaviorConditions)
+            }
+            // .locked holds the current primary camera and narrows its hardware zoom range.
+            if lockLens, stayOnLens, smoothPreviousSwitching != nil {
                 smoothUnlockedRange = camera.minAvailableVideoZoomFactor...camera.maxAvailableVideoZoomFactor
                 camera.setPrimaryConstituentDeviceSwitchingBehavior(.locked, restrictedSwitchingBehaviorConditions: [])
                 smoothLensLocked = true
-            } else if camera.isVirtualDevice, camera.activePrimaryConstituent != nil,
-                      camera.primaryConstituentDeviceSwitchingBehavior != .unsupported {
-                // Let Apple consider light and focus, not just optical zoom boundaries.
-                // Suppressing fallback can force a darker telephoto image during a Dolly.
-                camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
+            } else if smoothPreviousSwitching != nil {
+                // Boundary crossings still permit a better lens after AE/AF settle.
+                // Unlike .auto, continuous zoom ticks don't repeatedly invite fallback
+                // switches as light/focus fluctuate near the telephoto boundary.
+                // Do not use .videoZoomChanged: every tick would permit fallback again.
+                camera.setPrimaryConstituentDeviceSwitchingBehavior(.restricted, restrictedSwitchingBehaviorConditions: [])
             }
             smoothFilter = SmoothZoomFilter(current: Double(camera.videoZoomFactor), minimum: Double(camera.minAvailableVideoZoomFactor), maximum: Double(camera.maxAvailableVideoZoomFactor))
             smoothOpen = smoothFilter != nil
-            if !smoothOpen, smoothLensLocked {
-                camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
+            if !smoothOpen, let previous = smoothPreviousSwitching {
+                camera.setPrimaryConstituentDeviceSwitchingBehavior(previous.behavior, restrictedSwitchingBehaviorConditions: previous.conditions)
+                smoothPreviousSwitching = nil
                 smoothLensLocked = false; smoothUnlockedRange = nil
             }
             if let options = try? options() { onEvent?(.ready(options)) }
@@ -905,9 +914,10 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         do {
             try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
             camera.cancelVideoZoomRamp()
-            if smoothLensLocked, camera.primaryConstituentDeviceSwitchingBehavior != .unsupported {
-                camera.setPrimaryConstituentDeviceSwitchingBehavior(.auto, restrictedSwitchingBehaviorConditions: [])
+            if let previous = smoothPreviousSwitching, camera.activePrimaryConstituentDeviceSwitchingBehavior != .unsupported {
+                camera.setPrimaryConstituentDeviceSwitchingBehavior(previous.behavior, restrictedSwitchingBehaviorConditions: previous.conditions)
             }
+            smoothPreviousSwitching = nil
             smoothLensLocked = false; smoothUnlockedRange = nil
         } catch { onEvent?(.notice("Zoom could not be paused. Try again.")) }
     }
