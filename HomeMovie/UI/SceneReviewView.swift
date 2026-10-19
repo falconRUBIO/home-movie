@@ -320,7 +320,7 @@ struct SceneReviewView: View {
             }
             .safeAreaInset(edge: .bottom) { photosFooter }
             .saveStatusToast($export.saveFeedback)
-            .navigationTitle("Review Scene").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Edit Scene").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -328,7 +328,7 @@ struct SceneReviewView: View {
                         else { preview.stop(); dismiss() }
                     }.disabled(busy)
                 }
-                ToolbarItemGroup(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarLeading) {
                     Button("Undo", systemImage: "arrow.uturn.backward", action: undoEdit)
                         .labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
                         .disabled(history?.canUndo != true || busy || preview.loading)
