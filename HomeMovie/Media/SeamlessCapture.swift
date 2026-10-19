@@ -35,7 +35,7 @@ final class ContinuousTakeWriter {
                 AVVideoExpectedSourceFrameRateKey: 30, AVVideoMaxKeyFrameIntervalKey: 30]]
         let videoSettings = profile == .appleLog ? LogPiPColor.videoSettings(canvas: size) : standardSettings
         guard profile == .standard || writer.canApply(outputSettings: videoSettings, forMediaType: .video) else {
-            throw HomeMovieError.message("This iOS encoder cannot write the requested 10-bit Apple Log settings. Use the ordinary camera.")
+            throw HomeMovieError.message("This iOS encoder cannot write the requested 10-bit Apple Log settings. Try Resume Camera.")
         }
         video = AVAssetWriterInput(mediaType: .video,
             outputSettings: videoSettings,
@@ -157,7 +157,7 @@ final class ContinuousTakePipeline: @unchecked Sendable {
             defer { videoSlot.signal() }
             autoreleasepool {
                 if profile == .appleLog, !LogPiPColor.isLog(image) || presenter.map({ !LogPiPColor.isLog($0) }) == true {
-                    callbackQueue.async { completion(false, HomeMovieError.message("Both PiP inputs must be verified 10-bit Apple Log.")) }
+                    callbackQueue.async { completion(false, HomeMovieError.message("Camera inputs must be verified 10-bit Apple Log.")) }
                     return
                 }
                 let accepted: Bool
