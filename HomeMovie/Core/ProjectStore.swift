@@ -84,10 +84,10 @@ actor ProjectStore {
         guard !loaded else { return [] }
         try ensureDirectories()
         // Install exact supplied samples into durable storage so backups remain self-contained.
-        let filmica = try ColorCube.filmica.get()
-        let filmicaURL = root.appendingPathComponent(LUTReference.filmica.path)
-        if !fm.fileExists(atPath: filmicaURL.path) {
-            try encoder.encode(filmica).write(to: filmicaURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        let cinema = try ColorCube.cinema.get()
+        let cinemaURL = root.appendingPathComponent(LUTReference.cinema.path)
+        if !fm.fileExists(atPath: cinemaURL.path) {
+            try encoder.encode(cinema).write(to: cinemaURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         }
         if !cleanedTransfers {
             // These are app-owned temporary copies, never the source recordings.
@@ -115,7 +115,7 @@ actor ProjectStore {
         } else { try write(catalog) }
         var migrated = catalog
         for index in migrated.movies.indices where migrated.movies[index].look?.isRetiredBundledLook == true {
-            migrated.movies[index].look = .filmica
+            migrated.movies[index].look = .cinema
             migrated.movies[index].revision += 1
         }
         if migrated.movies != catalog.movies { try write(migrated) }
@@ -192,7 +192,7 @@ actor ProjectStore {
         try requireIdle()
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= 80 else { throw HomeMovieError.message("Give your movie a name of up to 80 characters.") }
-        let look = look ?? (profile == .appleLog && useDefaultLook ? .filmica : nil)
+        let look = look ?? (profile == .appleLog && useDefaultLook ? .cinema : nil)
         if let look {
             guard profile == .appleLog else { throw HomeMovieError.message("Choose Apple Log to use this look.") }
             _ = try ColorCube.load(look, root: root)
@@ -246,10 +246,10 @@ actor ProjectStore {
             let reference = LUTReference(id: id, name: "Look")
             guard !reference.isRetiredBundledLook else { return nil }
             guard let cube = try? ColorCube.load(reference, root: root) else { return nil }
-            return LUTReference(id: id, name: id == LUTReference.filmica.id ? LUTReference.filmica.name : cube.name)
+            return LUTReference(id: id, name: id == LUTReference.cinema.id ? LUTReference.cinema.name : cube.name)
         }.sorted {
-            if $0.id == LUTReference.filmica.id { return $1.id != LUTReference.filmica.id }
-            if $1.id == LUTReference.filmica.id { return false }
+            if $0.id == LUTReference.cinema.id { return $1.id != LUTReference.cinema.id }
+            if $1.id == LUTReference.cinema.id { return false }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
     }
@@ -282,7 +282,7 @@ actor ProjectStore {
         try requireIdle()
         let i = try index(movieID)
         guard catalog.movies[i].captureProfile == .appleLog else { throw HomeMovieError.message("Looks are available for Apple Log movies.") }
-        let look = look?.isRetiredBundledLook == true ? LUTReference.filmica : look
+        let look = look?.isRetiredBundledLook == true ? LUTReference.cinema : look
         if let look { _ = try ColorCube.load(look, root: root) }
         guard catalog.movies[i].look != look else { return }
         var next = catalog; next.movies[i].look = look; next.movies[i].revision += 1; try write(next)

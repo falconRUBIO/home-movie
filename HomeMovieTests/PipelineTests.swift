@@ -14,7 +14,7 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(first.captureProfile, .standard)
         XCTAssertNil(first.look)
         XCTAssertNil(first.recordingFormat)
-        try await store.setMovieRecordingSettings(movieID: first.id, profile: .appleLog, look: .filmica)
+        try await store.setMovieRecordingSettings(movieID: first.id, profile: .appleLog, look: .cinema)
         let logSnapshots = await store.snapshot()
         XCTAssertEqual(logSnapshots.first { $0.id == first.id }?.captureProfile, .appleLog)
         try await store.setMovieRecordingSettings(movieID: first.id, profile: .standard, look: nil)
@@ -23,7 +23,7 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(renamed.first { $0.id == first.id }?.name, "Optional custom title")
         _ = try await record(first, into: store)
         do {
-            try await store.setMovieRecordingSettings(movieID: first.id, profile: .appleLog, look: .filmica)
+            try await store.setMovieRecordingSettings(movieID: first.id, profile: .appleLog, look: .cinema)
             XCTFail("Existing recordings must not be relabeled as Log")
         } catch {}
         let saved = await store.snapshot()
@@ -208,7 +208,7 @@ final class PipelineTests: XCTestCase {
         let first = try XCTUnwrap(before.activeScenes.first), last = try XCTUnwrap(before.activeScenes.last)
         let originalURL = store.root.appendingPathComponent(first.source)
         let bytes = try Data(contentsOf: originalURL)
-        let lutURL = store.root.appendingPathComponent(LUTReference.filmica.path)
+        let lutURL = store.root.appendingPathComponent(LUTReference.cinema.path)
         let lutBytes = try Data(contentsOf: lutURL)
         let recipe = SceneAdjustments(exposure: 0.1, shadows: 0.2, highlights: -0.3,
             warmth: 0.15, tint: -0.1, contrast: 0.35, blackPoint: -0.2, whitePoint: -0.15, saturation: -0.4, vibrance: 0.5)
@@ -312,12 +312,12 @@ final class PipelineTests: XCTestCase {
     func testOnlyCinemaIsInstalledAndRetiredSelectionFallsBack() async throws {
         let store = try await makeStore()
         let looks = await store.availableLooks()
-        XCTAssertEqual(looks.map(\.id), [LUTReference.filmica.id])
+        XCTAssertEqual(looks.map(\.id), [LUTReference.cinema.id])
         let movie = try await store.create(name: "Original look", format: .landscape, profile: .appleLog)
         try await store.setLook(movieID: movie.id, look: .cinemaTwo)
         let saved = await store.snapshot()
-        XCTAssertEqual(saved.first?.look?.id, LUTReference.filmica.id)
-        let original = try ColorCube.load(.filmica, root: store.root)
+        XCTAssertEqual(saved.first?.look?.id, LUTReference.cinema.id)
+        let original = try ColorCube.load(.cinema, root: store.root)
         let retired = try ColorCube.load(.cinemaThree, root: store.root)
         XCTAssertEqual(original.rgba, retired.rgba)
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.root.appendingPathComponent(LUTReference.cinemaTwo.path).path))
@@ -387,7 +387,7 @@ final class PipelineTests: XCTestCase {
         let sourceBytes = try Data(contentsOf: source)
         for format in [MovieFormat.landscape, .portrait] {
             var movie = Movie(name: "Short Log effects", format: format, profile: .appleLog)
-            movie.look = .filmica
+            movie.look = .cinema
             movie.scenes = [Scene(id: UUID(), sequence: 0, source: source.lastPathComponent,
                 capturedAt: Date(), timeZone: "UTC", sourceDuration: MediaTime(seconds: 0.4),
                 trimStart: MediaTime(seconds: 0), trimEnd: MediaTime(seconds: 0.4),
@@ -402,7 +402,7 @@ final class PipelineTests: XCTestCase {
             movie.filmEffects = effects
             let bundle = try await MediaAssembler().build(movie: movie, root: store.root, filmEffects: effects)
             let instruction = try XCTUnwrap(bundle.videoComposition.instructions.first as? ColorInstruction)
-            XCTAssertEqual(instruction.cube?.dimension, try ColorCube.filmica.get().dimension)
+            XCTAssertEqual(instruction.cube?.dimension, try ColorCube.cinema.get().dimension)
             XCTAssertTrue(instruction.adjustments.isActive)
             let destination = store.root.appendingPathComponent("short-log-\(format.rawValue).mp4")
             let session = try XCTUnwrap(AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality))
@@ -691,7 +691,7 @@ final class PipelineTests: XCTestCase {
     }
     @MainActor func testLiveCinemaGPUOutputMatchesSelectedCubeForEightAndTenBitFrames() async throws {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice()), renderer = try XCTUnwrap(LiveLookRenderer(device: device))
-        let queue = try XCTUnwrap(device.makeCommandQueue()), cube = try ColorCube.filmica.get()
+        let queue = try XCTUnwrap(device.makeCommandQueue()), cube = try ColorCube.cinema.get()
         renderer.configure(frames: LiveFrames(), cube: cube, active: true); renderer.angle = 0
         for format in [kCVPixelFormatType_32BGRA, kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange] {
             let source = try livePreviewFrame(format: format)
@@ -728,15 +728,15 @@ final class PipelineTests: XCTestCase {
         var statuses: [LiveLookStatus] = []
         preview.onLiveLookStatus = { status in statuses.append(status); if status == .ready { shown.fulfill() } }
         let frames = LiveFrames(); frames.push(try livePreviewFrame())
-        preview.configureLiveLook(frames: frames, cube: try ColorCube.filmica.get(), active: true)
+        preview.configureLiveLook(frames: frames, cube: try ColorCube.cinema.get(), active: true)
         let metal = try XCTUnwrap(preview.subviews.compactMap { $0 as? MTKView }.first)
         XCTAssertEqual(metal.alpha, 1); XCTAssertFalse(metal.isHidden); XCTAssertFalse(metal.isPaused)
         await fulfillment(of: [shown], timeout: 15)
         XCTAssertTrue(statuses.contains(.preparing)); XCTAssertEqual(statuses.last, .ready)
         preview.configureLiveLook(frames: frames, cube: nil, active: true)
         XCTAssertTrue(metal.isHidden); XCTAssertTrue(metal.isPaused); XCTAssertEqual(statuses.last, .inactive)
-        preview.configureLiveLook(frames: frames, cube: try ColorCube.filmica.get(), active: true)
-        preview.configureLiveLook(frames: frames, cube: try ColorCube.filmica.get(), active: false)
+        preview.configureLiveLook(frames: frames, cube: try ColorCube.cinema.get(), active: true)
+        preview.configureLiveLook(frames: frames, cube: try ColorCube.cinema.get(), active: false)
         XCTAssertTrue(metal.isHidden); XCTAssertTrue(metal.isPaused); XCTAssertEqual(statuses.last, .inactive)
     }
     @MainActor func testCinemaPreviewResizesWithoutReplacingItsSessionOrMetalSurface() throws {
@@ -744,7 +744,7 @@ final class PipelineTests: XCTestCase {
         let preview = PreviewUIView(frame: CGRect(x: 0, y: 0, width: 393, height: 698))
         let session = AVCaptureSession(); preview.previewLayer.session = session
         let frames = LiveFrames(); frames.push(try livePreviewFrame())
-        preview.configureLiveLook(frames: frames, cube: try ColorCube.filmica.get(), active: true)
+        preview.configureLiveLook(frames: frames, cube: try ColorCube.cinema.get(), active: true)
         let metal = try XCTUnwrap(preview.subviews.compactMap { $0 as? MTKView }.first)
         let delegate = metal.delegate
         for size in [CGSize(width: 698, height: 393), CGSize(width: 393, height: 698), CGSize(width: 698, height: 393)] {
@@ -1398,17 +1398,17 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(decoded.captureProfile, .standard)
         XCTAssertNil(decoded.look)
     }
-    func testBundledFilmicaDefaultsPersistAndStandardRemainsSelectable() async throws {
-        let cube = try ColorCube.filmica.get(); try cube.validate()
+    func testBundledCinemaDefaultsPersistAndStandardRemainsSelectable() async throws {
+        let cube = try ColorCube.cinema.get(); try cube.validate()
         XCTAssertEqual(cube.name, "Cinema"); XCTAssertEqual(cube.dimension, 65)
         let first = cube.rgba.withUnsafeBytes { $0.loadUnaligned(as: Float.self) }
         XCTAssertEqual(first, 0.0308995, accuracy: 0.0000001)
         let store = try await makeStore()
         let looks = await store.availableLooks()
-        XCTAssertTrue(looks.contains(.filmica))
-        let movie = try await store.create(name: "Filmica", format: .portrait, profile: .appleLog)
-        XCTAssertEqual(movie.look, .filmica)
-        let stored = try ColorCube.load(.filmica, root: store.root)
+        XCTAssertTrue(looks.contains(.cinema))
+        let movie = try await store.create(name: "Cinema", format: .portrait, profile: .appleLog)
+        XCTAssertEqual(movie.look, .cinema)
+        let stored = try ColorCube.load(.cinema, root: store.root)
         XCTAssertEqual(stored.rgba, cube.rgba)
         try await store.setLook(movieID: movie.id, look: nil)
         let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
@@ -1417,11 +1417,11 @@ final class PipelineTests: XCTestCase {
         let standard = try await reopened.create(name: "SDR", format: .portrait)
         XCTAssertNil(standard.look)
         XCTAssertEqual(standard.captureProfile, .standard)
-        XCTAssertEqual(LUTReference(id: LUTReference.filmica.id, name: "Filmica").displayName, "Cinema")
+        XCTAssertEqual(LUTReference(id: LUTReference.cinema.id, name: "Filmica").displayName, "Cinema")
         let explicit = try await reopened.create(name: "Apple Standard", format: .portrait, profile: .appleLog, useDefaultLook: false)
         XCTAssertNil(explicit.look)
     }
-    func testBundledFilmicaBackupIncludesExactSamples() async throws {
+    func testBundledCinemaBackupIncludesExactSamples() async throws {
         let store = try await makeStore()
         let movie = try await store.create(name: "Default look backup", format: .portrait, profile: .appleLog)
         _ = try await record(movie, into: store)
@@ -1432,7 +1432,7 @@ final class PipelineTests: XCTestCase {
         let look = try XCTUnwrap(movies.first?.look)
         XCTAssertEqual(look.name, "Cinema")
         let restored = try ColorCube.load(look, root: destination.root)
-        XCTAssertEqual(restored.rgba, try ColorCube.filmica.get().rgba)
+        XCTAssertEqual(restored.rgba, try ColorCube.cinema.get().rgba)
         try await service.discard(backup.url)
     }
     func testAppleLogVerificationReadsExactTransferIdentifier() throws {
@@ -1474,19 +1474,19 @@ final class PipelineTests: XCTestCase {
         let recovered = await store.snapshot().first { $0.id == standard.id }
         XCTAssertEqual(recovered?.scenes.first?.profile, .standard)
     }
-    func testThumbnailsHonorFilmicaAndInvalidateOnLookChange() async throws {
+    func testThumbnailsHonorCinemaAndInvalidateOnLookChange() async throws {
         let store = try await makeStore()
         var movie = try await store.create(name: "Thumbnail", format: .landscape, profile: .appleLog)
         _ = try await record(movie, into: store)
         let saved = await store.snapshot(); movie = try XCTUnwrap(saved.first)
         let scene = try XCTUnwrap(movie.activeScenes.first)
-        let filmica = try await ThumbnailService.shared.image(scene: scene, root: store.root, movie: movie)
+        let cinema = try await ThumbnailService.shared.image(scene: scene, root: store.root, movie: movie)
         movie.look = nil; movie.revision += 1
         let standard = try await ThumbnailService.shared.image(scene: scene, root: store.root, movie: movie)
-        XCTAssertNotEqual(filmica.pngData(), standard.pngData(), "Look changes must not return a stale cached thumbnail")
+        XCTAssertNotEqual(cinema.pngData(), standard.pngData(), "Look changes must not return a stale cached thumbnail")
         movie.profile = nil; movie.revision += 1
         let original = try await ThumbnailService.shared.image(scene: scene, root: store.root, movie: movie)
-        XCTAssertNotEqual(filmica.pngData(), original.pngData())
+        XCTAssertNotEqual(cinema.pngData(), original.pngData())
     }
     func testUndoLastTakeIsRecoverableAndRejectsStaleTargets() async throws {
         let store = try await makeStore()
@@ -2038,11 +2038,11 @@ extension PipelineTests {
             let migrated = try XCTUnwrap(movies.first)
             XCTAssertEqual(migrated.id, movie.id)
             XCTAssertEqual(migrated.name, movie.name)
-            XCTAssertEqual(migrated.look, .filmica)
+            XCTAssertEqual(migrated.look, .cinema)
             XCTAssertEqual(migrated.revision, originalRevision + 1)
             let available = await reopened.availableLooks()
-            XCTAssertEqual(available.map(\.id), [LUTReference.filmica.id])
-            XCTAssertEqual(try ColorCube.load(retired, root: reopened.root).rgba, try ColorCube.filmica.get().rgba)
+            XCTAssertEqual(available.map(\.id), [LUTReference.cinema.id])
+            XCTAssertEqual(try ColorCube.load(retired, root: reopened.root).rgba, try ColorCube.cinema.get().rgba)
         }
     }
 }

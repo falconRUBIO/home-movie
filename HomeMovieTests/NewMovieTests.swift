@@ -42,7 +42,7 @@ final class NewMovieTests: XCTestCase {
         release.signal()
         await holder.value
         let looks = await scan.value
-        XCTAssertTrue(looks.contains(.filmica))
+        XCTAssertTrue(looks.contains(.cinema))
         let canceled = Task {
             withUnsafeCurrentTask { $0?.cancel() }
             return await store.availableLooks()

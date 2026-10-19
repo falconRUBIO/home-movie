@@ -4,7 +4,7 @@ import CoreImage
 import CryptoKit
 
 struct LUTReference: Codable, Equatable, Sendable {
-    static let filmica = LUTReference(id: UUID(uuidString: "BAA6B811-4136-44D8-92ED-56C78AF001CA")!, name: "Cinema")
+    static let cinema = LUTReference(id: UUID(uuidString: "BAA6B811-4136-44D8-92ED-56C78AF001CA")!, name: "Cinema")
     static let cinemaTwo = LUTReference(id: UUID(uuidString: "2FAA1534-0DAD-41F0-928C-AC4B9E014422")!, name: "Cinema II")
     static let cinemaThree = LUTReference(id: UUID(uuidString: "3FAA1534-0DAD-41F0-928C-AC4B9E014433")!, name: "Cinema III")
     static let amber = LUTReference(id: UUID(uuidString: "F19A0001-C031-4A52-9D61-50D0A3000001")!, name: "Amber")
@@ -13,7 +13,7 @@ struct LUTReference: Codable, Equatable, Sendable {
     var isRetiredBundledLook: Bool { id == Self.cinemaTwo.id || id == Self.cinemaThree.id || id == Self.amber.id || id == Self.heritage.id || id == Self.ember.id }
     var id: UUID
     var name: String
-    var displayName: String { id == Self.filmica.id ? "Cinema" : name }
+    var displayName: String { id == Self.cinema.id ? "Cinema" : name }
     var path: String { "Looks/\(id.uuidString).json" }
 }
 enum LUTEncoding: String, Codable, Sendable { case appleLogRec2020, rec709 }
@@ -146,7 +146,7 @@ struct ColorCube: Codable, Sendable {
         return result
     }
     static func load(_ reference: LUTReference, root: URL) throws -> ColorCube {
-        let reference = reference.isRetiredBundledLook ? LUTReference.filmica : reference
+        let reference = reference.isRetiredBundledLook ? LUTReference.cinema : reference
         let url = root.appendingPathComponent(reference.path)
         let info = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
         guard info.isRegularFile == true, info.isSymbolicLink != true, (info.fileSize ?? 0) <= 8_000_000 else {
@@ -154,8 +154,8 @@ struct ColorCube: Codable, Sendable {
         }
         var cube = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: url)); try cube.validate(); cube.identifyOutputRange(); return cube
     }
-    static let filmica: Result<ColorCube, Error> = Result {
-        guard let url = Bundle.main.url(forResource: "Filmica", withExtension: "json") else {
+    static let cinema: Result<ColorCube, Error> = Result {
+        guard let url = Bundle.main.url(forResource: "Cinema", withExtension: "json") else {
             throw HomeMovieError.message("The Cinema look is unavailable.")
         }
         let cube = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: url))

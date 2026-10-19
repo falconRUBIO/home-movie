@@ -387,7 +387,7 @@ struct MovieSettingsView: View {
     init(movie: Movie) {
         self.movie = movie
         _profile = State(initialValue: movie.captureProfile)
-        _selectedLook = State(initialValue: movie.captureProfile == .appleLog ? movie.look : .filmica)
+        _selectedLook = State(initialValue: movie.captureProfile == .appleLog ? movie.look : .cinema)
     }
     private var hasRecordedScenes: Bool { !movie.scenes.isEmpty || movie.lastRecordedAt != nil }
     var body: some View {

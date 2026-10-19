@@ -38,7 +38,7 @@ class ReleaseChecks(unittest.TestCase):
             with zipfile.ZipFile(ipa, 'w') as archive:
                 archive.writestr(prefix + 'Info.plist', plistlib.dumps(info))
                 archive.writestr(prefix + 'PrivacyInfo.xcprivacy', plistlib.dumps({'NSPrivacyTracking': False}))
-                for resource in ('Filmica.json', 'AppleLogToRec709.lut'):
+                for resource in ('Cinema.json', 'AppleLogToRec709.lut'):
                     archive.writestr(prefix + resource, b'fixture')
             with self.assertRaisesRegex(ValueError, 'FilmEffects.metallib'):
                 release.inspect_ipa(ipa)

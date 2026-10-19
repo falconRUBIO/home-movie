@@ -53,7 +53,7 @@ def inspect_ipa(path):
             raise ValueError('Missing permission purpose strings')
         if 'NSPhotoLibraryUsageDescription' in info:
             raise ValueError('Unexpected Photos read permission')
-        for resource in ('PrivacyInfo.xcprivacy', 'Filmica.json', 'AppleLogToRec709.lut', 'FilmEffects.metallib'):
+        for resource in ('PrivacyInfo.xcprivacy', 'Cinema.json', 'AppleLogToRec709.lut', 'FilmEffects.metallib'):
             if prefix + resource not in names:
                 raise ValueError('Missing bundled resource: ' + resource)
         if any(prefix + resource in names for resource in ('CinemaTwo.json', 'CinemaThree.json')):

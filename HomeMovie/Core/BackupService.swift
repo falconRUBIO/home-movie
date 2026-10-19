@@ -151,7 +151,7 @@ actor BackupService {
             var restoredLooks: [UUID: LUTReference] = [:]
             for look in references.values {
                 if look.isRetiredBundledLook {
-                    restoredLooks[look.id] = .filmica
+                    restoredLooks[look.id] = .cinema
                     continue
                 }
                 try Task.checkCancellation()
@@ -169,7 +169,7 @@ actor BackupService {
                 if let readError { throw readError }
                 guard entry?.sha256 == expected.sha256 else { throw HomeMovieError.message("Backup look verification failed.") }
                 let cube = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: copied)); try cube.validate()
-                if look.id == LUTReference.filmica.id, cube.name != newLook.name {
+                if look.id == LUTReference.cinema.id, cube.name != newLook.name {
                     // Rename only the verified built-in copy; preserve every color sample and the source backup.
                     let renamed = ColorCube(name: newLook.name, dimension: cube.dimension, rgba: cube.rgba,
                         minimum: cube.minimum, maximum: cube.maximum)

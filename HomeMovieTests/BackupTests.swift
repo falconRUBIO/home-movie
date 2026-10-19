@@ -79,10 +79,10 @@ final class BackupTests: XCTestCase {
     func testLegacyBundledLookRestoreUsesCinemaNameWithoutChangingSamples() async throws {
         let (store, _) = try await sourceMovie(), service = BackupService()
         let movie = try await store.create(name: "Legacy look", format: .portrait, profile: .appleLog)
-        let cube = try ColorCube.filmica.get()
+        let cube = try ColorCube.cinema.get()
         let legacy = ColorCube(name: "Filmica", dimension: cube.dimension, rgba: cube.rgba,
             minimum: cube.minimum, maximum: cube.maximum)
-        let reference = LUTReference(id: LUTReference.filmica.id, name: "Filmica")
+        let reference = LUTReference(id: LUTReference.cinema.id, name: "Filmica")
         try JSONEncoder().encode(legacy).write(to: store.root.appendingPathComponent(reference.path))
         try await store.setLook(movieID: movie.id, look: reference)
         let prepared = try await service.create(store: store) { _ in }
