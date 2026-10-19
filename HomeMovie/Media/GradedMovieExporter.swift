@@ -54,31 +54,24 @@ enum GradedMovieExporter {
                     throw writer.error ?? reader.error ?? HomeMovieError.message("Could not start 10-bit export.")
                 }
                 writer.startSession(atSourceTime: .zero)
-                var videoDone = false, audioDone = audio == nil, frames = 0
-                // Drain both streams with backpressure, without buffering the movie in RAM.
-                while !videoDone || !audioDone {
-                    try Task.checkCancellation()
-                    if writer.status == .failed || reader.status == .failed {
-                        throw writer.error ?? reader.error ?? HomeMovieError.message("Movie export was interrupted.")
+                // Independent drains are essential: a blocked video read must
+                // never prevent the audio output from being consumed (or vice versa).
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        try await drain(video, into: videoInput, reader: reader, writer: writer,
+                                        duration: bundle.duration, progress: progress)
                     }
-                    var advanced = false
-                    if !videoDone && videoInput.isReadyForMoreMediaData {
-                        if let sample = video.copyNextSampleBuffer() {
-                            guard videoInput.append(sample) else { throw writer.error ?? HomeMovieError.message("Could not encode a movie frame.") }
-                            frames += 1
-                            if frames % 6 == 0 {
-                                await progress(min(0.99, CMSampleBufferGetPresentationTimeStamp(sample).seconds / bundle.duration.seconds))
-                            }
-                        } else { videoDone = true; videoInput.markAsFinished() }
-                        advanced = true
+                    if let audio, let audioInput {
+                        group.addTask {
+                            try await drain(audio, into: audioInput, reader: reader, writer: writer,
+                                            duration: bundle.duration)
+                        }
                     }
-                    if !audioDone, let audio, let audioInput, audioInput.isReadyForMoreMediaData {
-                        if let sample = audio.copyNextSampleBuffer() {
-                            guard audioInput.append(sample) else { throw writer.error ?? HomeMovieError.message("Could not encode movie audio.") }
-                        } else { audioDone = true; audioInput.markAsFinished() }
-                        advanced = true
+                    do { while let _ = try await group.next() { } }
+                    catch {
+                        reader.cancelReading(); writer.cancelWriting(); group.cancelAll()
+                        throw error
                     }
-                    if !advanced { try await Task.sleep(for: .milliseconds(2)) }
                 }
                 guard reader.status == .completed else { throw reader.error ?? HomeMovieError.message("The movie could not be read completely.") }
                 writer.endSession(atSourceTime: bundle.duration)
@@ -100,4 +93,24 @@ enum GradedMovieExporter {
             throw error
         }
     }
+    private static func drain(_ output: AVAssetReaderOutput, into input: AVAssetWriterInput,
+                              reader: AVAssetReader, writer: AVAssetWriter, duration: CMTime,
+                              progress: (@Sendable (Double) async -> Void)? = nil) async throws {
+        var frames = 0
+        while true {
+            try Task.checkCancellation()
+            if writer.status == .failed || reader.status == .failed {
+                throw writer.error ?? reader.error ?? HomeMovieError.message("Movie export was interrupted.")
+            }
+            if writer.status == .cancelled || reader.status == .cancelled { throw CancellationError() }
+            guard input.isReadyForMoreMediaData else { try await Task.sleep(for: .milliseconds(2)); continue }
+            guard let sample = output.copyNextSampleBuffer() else { input.markAsFinished(); return }
+            guard input.append(sample) else { throw writer.error ?? HomeMovieError.message("Could not encode movie media.") }
+            frames += 1
+            if frames % 6 == 0, let progress {
+                await progress(min(0.99, CMSampleBufferGetPresentationTimeStamp(sample).seconds / duration.seconds))
+            }
+        }
+    }
+
 }

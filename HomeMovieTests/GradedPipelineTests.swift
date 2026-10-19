@@ -58,14 +58,19 @@ final class GradedPipelineTests: XCTestCase {
             kCVPixelBufferPixelFormatTypeKey as String: GradedMovieExporter.pixelFormat,
             kCVPixelBufferWidthKey as String: 1024, kCVPixelBufferHeightKey as String: 64,
             kCVPixelBufferIOSurfacePropertiesKey as String: [:]])
-        writer.add(input); XCTAssertTrue(writer.startWriting()); writer.startSession(atSourceTime: .zero)
+        writer.add(input)
+        guard writer.startWriting() else { throw writer.error ?? HomeMovieError.message("Main10 fixture could not start") }
+        writer.startSession(atSourceTime: .zero)
         let context = CIContext(options: LogPiPColor.contextOptions())
         let image = try XCTUnwrap(CIFilter(name: "CILinearGradient", parameters: [
             "inputPoint0": CIVector(x: 0, y: 0), "inputPoint1": CIVector(x: 1024, y: 0),
             "inputColor0": CIColor(red: 0.1, green: 0.1, blue: 0.1),
             "inputColor1": CIColor(red: 0.9, green: 0.9, blue: 0.9)])?.outputImage)
         for frame in 0..<12 {
-            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(2)) }
+            while !input.isReadyForMoreMediaData {
+                if writer.status == .failed { throw writer.error ?? HomeMovieError.message("Main10 fixture encoder failed") }
+                try await Task.sleep(for: .milliseconds(2))
+            }
             var pixel: CVPixelBuffer?
             XCTAssertEqual(CVPixelBufferPoolCreatePixelBuffer(nil, try XCTUnwrap(adaptor.pixelBufferPool), &pixel), kCVReturnSuccess)
             let buffer = try XCTUnwrap(pixel)
