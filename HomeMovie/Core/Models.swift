@@ -89,6 +89,9 @@ struct Movie: Codable, Identifiable, Equatable, Sendable {
     var filmEffects: FilmEffectsSettings? = nil
     var pipLayout: PiPLayout? = nil
     var dualCameraCapture: Bool? = nil
+    var libraryOrder: Int? = nil
+    var coverSceneID: UUID? = nil
+    var coverScene: Scene? { activeScenes.first { $0.id == coverSceneID && !$0.missing } ?? activeScenes.first }
     var preferredPiPLayout: PiPLayout { pipLayout ?? PiPLayout() }
     var exportEffects: FilmEffectsSettings { filmEffects ?? .off }
     var captureProfile: CaptureProfile { profile ?? .standard }
@@ -106,9 +109,26 @@ struct Movie: Codable, Identifiable, Equatable, Sendable {
     var nextSequence: Int { (scenes.map(\.sequence).max() ?? -1) + 1 }
 }
 
+enum MovieLibrarySort: String, CaseIterable, Identifiable {
+    case newest = "Newest First", oldest = "Oldest First", custom = "Custom Order"
+    var id: String { rawValue }
+    func sorted(_ movies: [Movie]) -> [Movie] {
+        movies.sorted { a, b in
+            if self == .custom, a.libraryOrder != b.libraryOrder {
+                if let x = a.libraryOrder, let y = b.libraryOrder { return x < y }
+                return a.libraryOrder == nil // Newly created/restored unranked movies appear first.
+            }
+            let x = a.lastRecordedAt ?? a.createdAt, y = b.lastRecordedAt ?? b.createdAt
+            if x != y { return self == .oldest ? x < y : x > y }
+            return a.id.uuidString < b.id.uuidString
+        }
+    }
+}
+
 struct Catalog: Codable, Sendable {
     var schemaVersion = 1
     var movies: [Movie] = []
+    var pendingDeletionIDs: [UUID]? = nil
 }
 
 struct CaptureTicket: Codable, Sendable {
