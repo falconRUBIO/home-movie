@@ -83,9 +83,11 @@ extern "C" { namespace coreimage {
         float3 adjustment = float3(0.0); float total = 0.0;
         // All masks use the original hue, wrap across red, and have smooth edges.
         for (int i = 0; i < 8; ++i) {
-            float distance = abs(hue - bands[i].w);
-            distance = min(distance, 1.0 - distance);
-            float weight = 1.0 - smoothstep(0.0, 1.0 / 6.0, distance);
+            float delta = fract(hue - bands[i].w + 1.5) - 0.5;
+            float previous = bands[(i + 7) % 8].w;
+            float next = bands[(i + 1) % 8].w;
+            float reach = delta < 0.0 ? fract(bands[i].w - previous + 1.0) : fract(next - bands[i].w + 1.0);
+            float weight = 1.0 - smoothstep(0.0, reach, abs(delta));
             adjustment += bands[i].xyz * weight; total += weight;
         }
         adjustment /= max(total, 0.00001);

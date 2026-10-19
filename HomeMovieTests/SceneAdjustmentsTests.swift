@@ -41,7 +41,7 @@ final class SceneAdjustmentsTests: XCTestCase {
         XCTAssertEqual(sample(try HSLAdjustments().apply(to: red)), sample(red))
         var hsl = HSLAdjustments(); hsl[.red].saturation = -1
         let muted = sample(try hsl.apply(to: red))
-        XCTAssertLessThan(colorfulness(muted), colorfulness(sample(red)) * 0.5)
+        XCTAssertLessThan(colorfulness(muted), 0.002)
         let unchanged = sample(try hsl.apply(to: blue))
         for i in 0..<4 { XCTAssertEqual(unchanged[i], sample(blue)[i], accuracy: 0.002) }
         for band in HSLBand.allCases { hsl[band] = HSLValues(hue: 1, saturation: 1, lightness: 1) }
