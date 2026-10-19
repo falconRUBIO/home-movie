@@ -370,6 +370,73 @@ final class ContinuousCaptureTests: XCTestCase {
             sampleBufferOut: &sample), noErr)
         return try XCTUnwrap(sample)
     }
+    @MainActor func testLogFlipUsesContinuousCaptureAndRequiresTenBitFormats() {
+        XCTAssertTrue(CameraCompatibility.allowsFlip(profile: .appleLog, recording: true,
+            otherCameraSupported: true, continuousFlipSupported: true))
+        XCTAssertFalse(CameraCompatibility.allowsFlip(profile: .appleLog, recording: true,
+            otherCameraSupported: false, continuousFlipSupported: true))
+        XCTAssertNil(CaptureService.logPixelFormat(in: [kCVPixelFormatType_32BGRA, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]))
+        XCTAssertEqual(CaptureService.logPixelFormat(in: [kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange]), kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange)
+        XCTAssertEqual(CaptureService.logPixelFormat(in: [kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange, LogPiPColor.pixelFormat]), LogPiPColor.pixelFormat)
+        let portrait = OrientationPolicy.interfaceFormat(.portrait, observed: 0)
+        XCTAssertEqual(portrait.recordingAngle(observed: 0, profile: .appleLog, composited: true), 90)
+    }
+    func testOrdinaryLogKeepsOnePortraitTakeAndAudioAcrossFrontRearFront() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let angle = MovieFormat.portrait.recordingAngle(observed: 0, profile: .appleLog, composited: true)
+        let writer = try ContinuousTakeWriter(url: url, angle: angle, profile: .appleLog)
+        let renderer = PiPFrameRenderer(profile: .appleLog)
+        func image(_ value: CGFloat, size: CGSize) throws -> CVPixelBuffer {
+            try XCTUnwrap(renderer.render(CIImage(color: CIColor(red: value, green: value, blue: value)), canvas: size))
+        }
+        let front = try image(0.2, size: CGSize(width: 64, height: 96))
+        let rear = try image(0.8, size: CGSize(width: 96, height: 64))
+        let returnedFront = try image(0.4, size: CGSize(width: 64, height: 96))
+        for index in 0..<45 {
+            let buffer = index < 15 ? front : index < 30 ? rear : returnedFront
+            let sensorAngle: CGFloat = index >= 15 && index < 30 ? 90 : 0
+            let time = CMTime(value: Int64(index), timescale: 30)
+            var accepted = false
+            for _ in 0..<100 {
+                if writer.appendVideo(buffer, at: time, sourceAngle: sensorAngle) { accepted = true; break }
+                if let error = writer.failure { throw error }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(accepted)
+            writer.appendAudio(try audio(at: time))
+        }
+        let completed = expectation(description: "Continuous front/rear Log take finishes")
+        writer.finish { error in XCTAssertNil(error); completed.fulfill() }
+        await fulfillment(of: [completed], timeout: 30)
+        try await LogPiPValidation.verifySavedFile(url: url, expectedCanvas: MovieFormat.portrait.canvas)
+        let asset = AVURLAsset(url: url)
+        let video = try await asset.loadTracks(withMediaType: .video)
+        let audio = try await asset.loadTracks(withMediaType: .audio)
+        XCTAssertEqual(video.count, 1); XCTAssertEqual(audio.count, 1)
+        let range = try await XCTUnwrap(audio.first).load(.timeRange)
+        XCTAssertGreaterThanOrEqual(range.duration.seconds, 1.4)
+        let track = try XCTUnwrap(video.first)
+        let context = CIContext(options: LogPiPColor.contextOptions())
+        for (time, expected) in [(0.2, Float(0.2)), (0.7, Float(0.8)), (1.2, Float(0.4))] {
+            let reader = try AVAssetReader(asset: asset)
+            let output = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: LogPiPColor.pixelFormat])
+            reader.add(output)
+            reader.timeRange = CMTimeRange(start: CMTime(seconds: time, preferredTimescale: 600), duration: CMTime(value: 1, timescale: 30))
+            XCTAssertTrue(reader.startReading())
+            let sample = try XCTUnwrap(output.copyNextSampleBuffer())
+            let buffer = try XCTUnwrap(CMSampleBufferGetImageBuffer(sample))
+            XCTAssertTrue(LogPiPColor.isTenBit(buffer))
+            var pixel = [Float](repeating: 0, count: 4)
+            pixel.withUnsafeMutableBytes {
+                context.render(CIImage(cvPixelBuffer: buffer, options: [.colorSpace: NSNull()]),
+                    toBitmap: $0.baseAddress!, rowBytes: 16, bounds: CGRect(x: 540, y: 960, width: 1, height: 1),
+                    format: .RGBAf, colorSpace: nil)
+            }
+            XCTAssertEqual(pixel[0], expected, accuracy: 0.03, "Log code values must survive both camera changes without baking a look")
+            reader.cancelReading()
+        }
+    }
     func testOneTakeKeepsVideoAndAudioTimelineAcrossCameraFrameChange() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
         defer { try? FileManager.default.removeItem(at: url) }

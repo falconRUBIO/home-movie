@@ -1,7 +1,7 @@
 import AVFoundation
 import CoreImage
 
-// Exercise the actual encoder once per process before exposing Log PiP. Merely
+// Exercise the actual encoder once per process before exposing continuous Log recording. Merely
 // advertising MultiCam formats does not prove that the saved MOV retains Log.
 actor LogPiPValidation {
     static let shared = LogPiPValidation()
@@ -9,15 +9,15 @@ actor LogPiPValidation {
     static func verifySavedFile(url: URL, expectedCanvas: CGSize) async throws {
         let info = try await MediaInspector.inspect(url)
         guard info.profile == .appleLog, info.size == expectedCanvas else {
-            throw HomeMovieError.message("The saved Log PiP recording has invalid color or orientation metadata. Its original file has been kept for recovery.")
+            throw HomeMovieError.message("The saved Log recording has invalid color or orientation metadata. Its original file has been kept for recovery.")
         }
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
-            throw HomeMovieError.message("The Log PiP recording has no video track.")
+            throw HomeMovieError.message("The Log recording has no video track.")
         }
         let descriptions = try await track.load(.formatDescriptions)
         guard !descriptions.isEmpty, descriptions.allSatisfy(LogPiPColor.encodedTenBit) else {
-            throw HomeMovieError.message("The Log PiP encoder did not save 10-bit HEVC components. Its original file has been kept for recovery.")
+            throw HomeMovieError.message("The Log encoder did not save 10-bit HEVC components. Its original file has been kept for recovery.")
         }
     }
     func check() async throws {
@@ -34,7 +34,7 @@ actor LogPiPValidation {
         guard let frame = PiPFrameRenderer(profile: .appleLog).render(
             CIImage(color: CIColor(red: 0.4, green: 0.4, blue: 0.4)), canvas: CGSize(width: 64, height: 64)) else {
             writer.writer.cancelWriting()
-            throw HomeMovieError.message("This iPhone could not render a 10-bit Log frame. Your movie remains in Log; use the ordinary camera.")
+            throw HomeMovieError.message("This iPhone could not render a 10-bit Log frame. Your movie remains in Log; try Resume Camera.")
         }
         do {
             for index in 0..<3 {
@@ -55,20 +55,20 @@ actor LogPiPValidation {
             }
             let info = try await MediaInspector.inspect(url)
             guard info.profile == .appleLog else {
-                throw HomeMovieError.message("This iOS encoder did not preserve Apple Log metadata. Your movie stays in Log; use the ordinary camera.")
+                throw HomeMovieError.message("This iOS encoder did not preserve Apple Log metadata. Your movie stays in Log; try Resume Camera.")
             }
             let asset = AVURLAsset(url: url)
             guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw HomeMovieError.message("The Log encoder produced no video track.") }
             let descriptions = try await track.load(.formatDescriptions)
             guard !descriptions.isEmpty, descriptions.allSatisfy(LogPiPColor.encodedTenBit) else {
-                throw HomeMovieError.message("The Log PiP encoder did not save 10-bit HEVC components.")
+                throw HomeMovieError.message("The Log encoder did not save 10-bit HEVC components.")
             }
             let reader = try AVAssetReader(asset: asset)
             let output = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: LogPiPColor.pixelFormat])
             reader.add(output)
             guard reader.startReading(), let sample = output.copyNextSampleBuffer(),
                   let decoded = CMSampleBufferGetImageBuffer(sample), LogPiPColor.isTenBit(decoded) else {
-                throw HomeMovieError.message("The Log PiP test could not decode 10-bit video.")
+                throw HomeMovieError.message("The Log test could not decode 10-bit video.")
             }
             reader.cancelReading()
         } catch {

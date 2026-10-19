@@ -309,8 +309,8 @@ struct CameraView: View {
                     Text(options.recordingFormat)
                     if options.profile == .appleLog {
                         Text(CameraCompatibility.logPiPExplanation)
-                        Text(camera.state == .recording ? CameraCompatibility.logRecordingFlipExplanation :
-                            options.canFlip ? "Camera flip is available before recording. It is unavailable during a Log take." : CameraCompatibility.logCameraExplanation)
+                        Text(options.canFlipWhileRecording ? "Switch cameras during a take. Log video and microphone recording stay continuous." :
+                            options.canFlip ? "Camera flip is available before recording." : CameraCompatibility.logCameraExplanation)
                     }
                     Divider()
                 }
@@ -960,7 +960,7 @@ struct CameraView: View {
             }.background(.white.opacity(0.15), in: Circle())
         }.accessibilityLabel(camera.recordingFlip == nil ? "Switch camera" : "Switching camera")
             .accessibilityHint(movie.captureProfile == .appleLog ?
-                (camera.state == .recording ? CameraCompatibility.logRecordingFlipExplanation : camera.options?.canFlip == true ? "Switch cameras before recording." : CameraCompatibility.logCameraExplanation) : "Switch between the front and rear cameras.")
+                (camera.options?.canFlipWhileRecording == true ? "Switch cameras while keeping this Log take and microphone recording continuous." : camera.state == .recording ? CameraCompatibility.logRecordingFlipExplanation : camera.options?.canFlip == true ? "Switch cameras before recording." : CameraCompatibility.logCameraExplanation) : "Switch between the front and rear cameras.")
             .disabled(camera.switchingCamera || camera.recordingFlip != nil || camera.state != .ready && camera.state != .recording || camera.options?.canFlip != true ||
                 movie.captureProfile == .appleLog && camera.state == .recording && camera.options?.canFlipWhileRecording != true ||
                 camera.options?.isPiPEnabled == true || camera.pipPresentation.opacity > 0)
