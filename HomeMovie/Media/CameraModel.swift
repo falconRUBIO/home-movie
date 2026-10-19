@@ -210,6 +210,10 @@ struct RecordingFlipHandoff {
         if active, !switchingCamera, [.ready, .recording].contains(state) { service.smoothZoom(to: factor, inputTime: inputTime, inputEnded: inputEnded) }
     }
     func endSmoothInput() { service.endSmoothInput() }
+    func pauseSmoothZoom(completion: @escaping @MainActor @Sendable (CGFloat?) -> Void) {
+        guard active, !switchingCamera, [.ready, .recording].contains(state) else { completion(nil); return }
+        service.pauseSmoothZoom { factor in Task { @MainActor in completion(factor) } }
+    }
     func adjustDollyDestination(to factor: CGFloat) {
         if active, !switchingCamera, [.ready, .recording].contains(state) { service.adjustDollyDestination(to: factor) }
     }
