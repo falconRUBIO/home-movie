@@ -4,6 +4,11 @@ import UIKit
 
 @MainActor final class SceneReviewPreviewModel: ObservableObject {
     @Published var player: AVPlayer?
+    @Published var histogram: ReviewHistogram?
+    private let histogramAnalyzer = ReviewHistogramAnalyzer()
+    private var histogramOutput: AVPlayerItemVideoOutput?
+    private weak var histogramItem: AVPlayerItem?
+    private var histogramRequest = UUID()
     @Published var loading = false
     @Published var error: String?
     private var template: AVMutableVideoComposition?
@@ -45,12 +50,53 @@ import UIKit
             return ColorInstruction(range: source.timeRange, trackID: source.trackID, transform: source.transform,
                 cube: source.cube, filmEffects: filmEffects, adjustments: adjustments)
         }
+        histogram = nil
         item.videoComposition = composition
         if player.timeControlStatus == .paused, player.currentTime().isNumeric {
             _ = await player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
         }
     }
+    // One sampled frame at a time, at most four times a second. The output
+    // belongs to the displayed composition, including looks, HSL and effects.
+    func monitorHistogram(enabled: Bool) async {
+        let token = UUID(); histogramRequest = token
+        removeHistogramOutput()
+        guard enabled else { return }
+        defer { if histogramRequest == token { removeHistogramOutput() } }
+        while !Task.isCancelled, histogramRequest == token {
+            if let item = player?.currentItem {
+                if histogramItem !== item {
+                    removeHistogramOutput()
+                    let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+                        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+                    item.add(output); histogramOutput = output; histogramItem = item
+                    if let player, player.timeControlStatus == .paused, player.currentTime().isNumeric {
+                        // A newly attached output needs a rendered frame even
+                        // when the user returns to Light with playback paused.
+                        _ = await player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
+                    }
+                }
+                // A tab/lifecycle change can replace the output while a paused
+                // seek is suspended. An obsolete task must not acquire the new
+                // output's only paused frame and then discard it.
+                guard !Task.isCancelled, histogramRequest == token else { return }
+                let time = player?.currentTime() ?? .invalid
+                if time.isNumeric, let output = histogramOutput,
+                   output.hasNewPixelBuffer(forItemTime: time),
+                   let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
+                    let result = await histogramAnalyzer.measure(HistogramFrame(buffer))
+                    if !Task.isCancelled, histogramRequest == token, histogramOutput === output { histogram = result }
+                }
+            }
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+        }
+    }
+    private func removeHistogramOutput() {
+        if let histogramItem, let histogramOutput { histogramItem.remove(histogramOutput) }
+        histogramOutput = nil; histogramItem = nil; histogram = nil
+    }
     func stop() {
+        histogramRequest = UUID(); removeHistogramOutput()
         requestID = UUID(); player?.pause(); statusObservation = nil
         player = nil; template = nil; loading = false
     }
@@ -72,11 +118,13 @@ private enum SceneReviewTool: String, CaseIterable, Identifiable {
 private enum SceneLightControl: String, CaseIterable, Identifiable {
     case exposure = "Exposure", brilliance = "Brilliance", highlights = "Highlights", shadows = "Shadows"
     case contrast = "Contrast", brightness = "Brightness", blackPoint = "Black Point", whitePoint = "White Point", pushPull = "Push/Pull"
+    case fade = "Fade"
     case saturation = "Saturation", vibrance = "Vibrance", warmth = "Warmth", tint = "Tint"
     var id: String { rawValue }
     var isColor: Bool { self == .saturation || self == .vibrance || self == .warmth || self == .tint }
     var keyPath: WritableKeyPath<SceneAdjustments, Double> {
         switch self {
+        case .fade: \.fade
         case .exposure: \.exposure
         case .shadows: \.shadows
         case .highlights: \.highlights
@@ -94,6 +142,7 @@ private enum SceneLightControl: String, CaseIterable, Identifiable {
     }
     var symbol: String {
         switch self {
+        case .fade: "circle.dotted"
         case .exposure: "sun.max"
         case .brightness: "sun.min"
         case .brilliance: "sun.max.circle"
@@ -111,6 +160,7 @@ private enum SceneLightControl: String, CaseIterable, Identifiable {
     }
     var endpoints: (String, String)? {
         switch self {
+        case .fade: ("Off", "Lifted Blacks")
         case .warmth: ("Blue", "Yellow")
         case .tint: ("Green", "Magenta")
         case .pushPull: ("Pull · Softer", "Push · Denser")
@@ -124,6 +174,7 @@ private enum SceneLightControl: String, CaseIterable, Identifiable {
     }
     var detail: String {
         switch self {
+        case .fade: "Lifts the finished black level for a softer, faded look. Zero is off."
         case .exposure: "Adjusts the overall light level."
         case .brightness: "Brightens or darkens the midtones."
         case .brilliance: "Balances darker areas and bright highlights."
@@ -160,6 +211,7 @@ struct SceneReviewView: View {
     @State private var adjustments: SceneAdjustments
     @State private var interactingControl: String?
     @State private var hslBand = HSLBand.red
+    @State private var advancedLight = false
     @State private var savedScene: Scene
     @State private var effects = FilmEffectsSettings.off
     @State private var originalEffects = FilmEffectsSettings.off
@@ -195,13 +247,14 @@ struct SceneReviewView: View {
         SceneLightControl.allCases.filter { tool == .color ? $0.isColor : !$0.isColor }
     }
     private var canReset: Bool {
-        tool == .hsl ? adjustments.hsl.isActive : tool == .fx ? effects != .off : visibleLightControls.contains { adjustments[keyPath: $0.keyPath] != 0 }
+        tool == .hsl ? adjustments.hsl.isActive : tool == .fx ? effects != .off : (tool == .light && adjustments.curve.isActive) || visibleLightControls.contains { adjustments[keyPath: $0.keyPath] != 0 }
     }
     private func resetTool() {
         UISelectionFeedbackGenerator().selectionChanged()
         if tool == .hsl { adjustments.hsl = HSLAdjustments() }
         else if tool == .fx { effects = .off }
         else { for control in visibleLightControls { adjustments[keyPath: control.keyPath] = 0 } }
+        if tool == .light { adjustments.curve = .neutral }
         if !adjustments.isActive { adjustments = .neutral }
         comparing = false
     }
@@ -279,6 +332,9 @@ struct SceneReviewView: View {
                     await preview.update(adjustments: shownRecipe.adjustments, filmEffects: shownRecipe.effects)
                     if scenePhase == .active, preview.error == nil { preview.player?.play() }
                 }
+            }
+            .task(id: tool == .light && scenePhase == .active && !busy) {
+                await preview.monitorHistogram(enabled: tool == .light && scenePhase == .active && !busy)
             }
             .task(id: shownRecipe) {
                 // Coalesce slider changes and abandon obsolete paused-frame seeks.
@@ -456,8 +512,17 @@ struct SceneReviewView: View {
     }
     private var lightControls: some View {
         LazyVStack(spacing: 4) {
-            ForEach(visibleLightControls) { control in
-                lightRuler(control)
+            if tool == .light { LightHistogramView(histogram: preview.histogram) }
+            ForEach(visibleLightControls) { control in lightRuler(control) }
+            if tool == .light {
+                DisclosureGroup(isExpanded: $advancedLight.withSelectionFeedback()) {
+                    LightCurveEditor(curve: $adjustments.curve, editingChanged: { active in
+                        interactingControl = active ? "Curve" : nil
+                    }).disabled(busy || comparing)
+                } label: {
+                    Label("Advanced · Curves", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                        .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+                }.tint(.primary).padding(.top, 8).disabled(busy || comparing)
             }
         }.padding(.horizontal, 16).disabled(preview.loading || preview.error != nil)
     }
@@ -467,9 +532,9 @@ struct SceneReviewView: View {
                 adjustments[keyPath: control.keyPath] = $0
                 if !adjustments.isActive { adjustments = .neutral }
             })
-        return adjustmentRuler(title: control.rawValue, symbol: control.symbol, detail: control.detail, value: value)
+        return adjustmentRuler(title: control.rawValue, symbol: control.symbol, detail: control.detail, value: value, range: control == .fade ? 0...1 : -1...1)
     }
-    private func adjustmentRuler(title: String, symbol: String, detail: String, value: Binding<Double>) -> some View {
+    private func adjustmentRuler(title: String, symbol: String, detail: String, value: Binding<Double>, range: ClosedRange<Double> = -1...1) -> some View {
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: symbol).frame(width: 20).accessibilityHidden(true)
@@ -482,7 +547,7 @@ struct SceneReviewView: View {
                     .accessibilityLabel("\(title) value")
                     .accessibilityAction(named: "Reset to Zero") { if !busy && !comparing { value.wrappedValue = 0 } }
             }.font(.subheadline).frame(minHeight: 24).accessibilityHidden(true)
-            SceneAdjustmentRuler(value: value, editingChanged: { interacting in
+            SceneAdjustmentRuler(value: value, range: range, editingChanged: { interacting in
                 interactingControl = interacting ? title : nil
             })
                 .frame(height: 44).disabled(busy || comparing)
@@ -508,8 +573,8 @@ struct SceneReviewView: View {
                     guard !busy && !comparing else { return }
                     UISelectionFeedbackGenerator().selectionChanged()
                     switch direction {
-                    case .increment: value.wrappedValue = min(1, value.wrappedValue + 0.01)
-                    case .decrement: value.wrappedValue = max(-1, value.wrappedValue - 0.01)
+                    case .increment: value.wrappedValue = min(range.upperBound, value.wrappedValue + 0.01)
+                    case .decrement: value.wrappedValue = max(range.lowerBound, value.wrappedValue - 0.01)
                     @unknown default: break
                     }
                 }
@@ -607,6 +672,7 @@ struct SceneReviewView: View {
 // A native horizontal scroll view preserves vertical scrolling between adjustment rows.
 private struct SceneAdjustmentRuler: UIViewRepresentable {
     @Binding var value: Double
+    var range: ClosedRange<Double> = -1...1
     var editingChanged: (Bool) -> Void
     @Environment(\.isEnabled) private var enabled
     func makeCoordinator() -> Coordinator { Coordinator(value: $value, editingChanged: editingChanged) }
@@ -619,6 +685,7 @@ private struct SceneAdjustmentRuler: UIViewRepresentable {
         context.coordinator.value = $value
         context.coordinator.editingChanged = editingChanged
         view.isScrollEnabled = enabled
+        view.configure(range: range)
         view.apply(value)
     }
     static func dismantleUIView(_ view: SceneRulerScrollView, coordinator: Coordinator) {
@@ -663,6 +730,7 @@ private final class SceneRulerScrollView: UIScrollView {
     private let ticks = SceneRulerTicks()
     private let tickSpacing: CGFloat = 6
     private var previousWidth: CGFloat = 0
+    private var range: ClosedRange<Double> = -1...1
     var displayedValue = 0.0
     var applying = false
     var readyForInput: Bool { previousWidth > 0 && previousWidth == bounds.width }
@@ -675,12 +743,18 @@ private final class SceneRulerScrollView: UIScrollView {
         addSubview(ticks)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func configure(range: ClosedRange<Double>) {
+        guard self.range != range else { return }
+        self.range = range; ticks.tickCount = Int((range.upperBound - range.lowerBound) * 100)
+        ticks.zeroIndex = Int(-range.lowerBound * 100); ticks.setNeedsDisplay()
+        setNeedsLayout(); layoutIfNeeded()
+    }
     func value(at offset: CGFloat) -> Double {
-        let raw = Double((offset + bounds.width / 2) / (100 * tickSpacing)) - 1
-        return min(1, max(-1, (raw * 100).rounded() / 100))
+        let raw = Double((offset + bounds.width / 2) / (100 * tickSpacing)) + range.lowerBound
+        return min(range.upperBound, max(range.lowerBound, (raw * 100).rounded() / 100))
     }
     func offset(for value: Double) -> CGFloat {
-        CGFloat(min(1, max(-1, value)) + 1) * 100 * tickSpacing - bounds.width / 2
+        CGFloat(min(range.upperBound, max(range.lowerBound, value)) - range.lowerBound) * 100 * tickSpacing - bounds.width / 2
     }
     func apply(_ value: Double) {
         displayedValue = value
@@ -695,7 +769,7 @@ private final class SceneRulerScrollView: UIScrollView {
         let previouslyApplying = applying
         super.layoutSubviews()
         applying = true
-        ticks.frame = CGRect(x: 0, y: 0, width: 200 * tickSpacing, height: bounds.height)
+        ticks.frame = CGRect(x: 0, y: 0, width: CGFloat(ticks.tickCount) * tickSpacing, height: bounds.height)
         if contentSize != ticks.bounds.size { contentSize = ticks.bounds.size }
         let half = bounds.width / 2
         if contentInset.left != half || contentInset.right != half {
@@ -709,14 +783,16 @@ private final class SceneRulerScrollView: UIScrollView {
     }
 }
 private final class SceneRulerTicks: UIView {
+    var tickCount = 200
+    var zeroIndex = 100
     override init(frame: CGRect) { super.init(frame: frame); backgroundColor = .clear; isOpaque = false; isAccessibilityElement = false }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         context.setStrokeColor(UIColor.secondaryLabel.withAlphaComponent(0.55).cgColor)
         context.setLineWidth(1.5); context.setLineCap(.round)
-        for index in 0...200 {
-            let height: CGFloat = index == 100 ? 14 : (index % 10 == 0 ? 11 : 6)
+        for index in 0...tickCount {
+            let height: CGFloat = index == zeroIndex ? 14 : (index % 10 == 0 ? 11 : 6)
             let x = CGFloat(index) * 6
             context.move(to: CGPoint(x: x, y: 15 - height))
             context.addLine(to: CGPoint(x: x, y: 15))

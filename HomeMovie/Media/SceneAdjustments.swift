@@ -4,8 +4,10 @@ import CoreImage
 // Reversible per-scene nodes: source balance, look, then display finishing.
 struct SceneAdjustments: Codable, Equatable, Sendable {
     static let neutral = SceneAdjustments()
-    static let engineVersion = 5
+    static let engineVersion = 6
     var hsl = HSLAdjustments()
+    var curve = LightCurve.neutral
+    var fade = 0.0
     var exposure = 0.0
     var shadows = 0.0
     var highlights = 0.0
@@ -21,11 +23,15 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
     var vibrance = 0.0
     // 1 preserves historical all-after-LUT edits; 2 balances before the look.
     var pipelineVersion = 2
-    private enum CodingKeys: String, CodingKey { case hsl, exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance, pipelineVersion }
+    private enum CodingKeys: String, CodingKey { case hsl, curve, fade, exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance, pipelineVersion }
     private var values: [Double] { [exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance] }
-    var isActive: Bool { hsl.isActive || values.contains { $0 != 0 } }
+    var isActive: Bool { hsl.isActive || curve.isActive || fade != 0 || values.contains { $0 != 0 } }
     func validate() throws {
         try hsl.validate()
+        try curve.validate()
+        guard fade.isFinite, (0...1).contains(fade) else {
+            throw HomeMovieError.message("This scene’s fade adjustment is invalid.")
+        }
         guard (1...2).contains(pipelineVersion), values.allSatisfy({ $0.isFinite && (-1...1).contains($0) }) else {
             throw HomeMovieError.message("This scene’s light adjustments are invalid.")
         }
@@ -58,7 +64,7 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
                 contrast, blackPoint, whitePoint, saturation, vibrance, Double(pipelineVersion)]) else {
             throw HomeMovieError.message("This scene’s light adjustments could not be rendered.")
         }
-        return output
+        return try curve.apply(to: output, fade: fade)
     }
     private static let kernel: Result<CIColorKernel?, Error> = Result {
         guard let url = Bundle.main.url(forResource: "FilmEffects", withExtension: "metallib") else {
@@ -79,6 +85,8 @@ extension SceneAdjustments {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         hsl = try values.decodeIfPresent(HSLAdjustments.self, forKey: .hsl) ?? HSLAdjustments()
+        curve = try values.decodeIfPresent(LightCurve.self, forKey: .curve) ?? .neutral
+        fade = try values.decodeIfPresent(Double.self, forKey: .fade) ?? 0
         exposure = try values.decodeIfPresent(Double.self, forKey: .exposure) ?? 0
         shadows = try values.decodeIfPresent(Double.self, forKey: .shadows) ?? 0
         highlights = try values.decodeIfPresent(Double.self, forKey: .highlights) ?? 0

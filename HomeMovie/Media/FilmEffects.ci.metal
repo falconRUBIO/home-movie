@@ -67,6 +67,23 @@ float particles(float2 p, float size, uint seed, uint salt) {
 }
 
 extern "C" { namespace coreimage {
+    float4 sceneTone(sample_t input, float4 levels, float4 slopes, float lastSlope, float fade) {
+        float3 rgb = clamp(input.rgb, 0.0, 1.0);
+        float l = clamp(luminance(rgb), 0.0, 1.0);
+        int i = min(3, int(l * 4.0));
+        float t = l * 4.0 - float(i), t2 = t * t, t3 = t2 * t;
+        float nextLevel = i == 3 ? 1.0 : levels[i + 1];
+        float nextSlope = i == 3 ? lastSlope : slopes[i + 1];
+        float target = (2.0 * t3 - 3.0 * t2 + 1.0) * levels[i]
+            + (t3 - 2.0 * t2 + t) * slopes[i] * 0.25
+            + (-2.0 * t3 + 3.0 * t2) * nextLevel + (t3 - t2) * nextSlope * 0.25;
+        // Fade is an output pedestal, unlike Black Point's shadow threshold.
+        // White stays fixed; adjacent tones keep their ordering and headroom.
+        target = mix(clamp(target, 0.0, 1.0), 1.0, fade * 0.22);
+        float3 result = target >= l ? rgb + (1.0 - rgb) * ((target - l) / max(1.0 - l, 0.000001))
+            : rgb * (target / max(l, 0.000001));
+        return float4(result, input.a);
+    }
     float4 sceneHSL(sample_t input, float4 red, float4 orange, float4 yellow,
                     float4 green, float4 aqua, float4 blue, float4 purple, float4 magenta) {
         float3 rgb = clamp(input.rgb, 0.0, 1.0);
