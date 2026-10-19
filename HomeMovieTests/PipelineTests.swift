@@ -1569,6 +1569,61 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: store.root.appendingPathComponent(ticket.source)), original)
         try await backup.discard(prepared.url)
     }
+    @MainActor func testLightToolsPersistMatchExportAndRefreshPausedHistogram() async throws {
+        let store = try await makeStore(), movie = try await store.create(name: "Light Tools", format: .landscape)
+        _ = try await record(movie, into: store)
+        let initialMovies = await store.snapshot()
+        let original = try XCTUnwrap(initialMovies.first?.activeScenes.first)
+        var recipe = SceneAdjustments.neutral
+        recipe.fade = 0.7; recipe.curve = LightCurve(shadows: 0.12, midtones: 0.58, highlights: 0.88)
+        try await store.editScene(movieID: movie.id, sceneID: original.id,
+            start: original.trimStart.cmTime, end: original.trimEnd.cmTime, adjustments: recipe)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let reopenedMovies = await reopened.snapshot()
+        let saved = try XCTUnwrap(reopenedMovies.first)
+        let scene = try XCTUnwrap(saved.activeScenes.first)
+        XCTAssertEqual(scene.lightAdjustments, recipe)
+        let bundle = try await MediaAssembler().build(movie: saved, root: store.root)
+        let generator = AVAssetImageGenerator(asset: bundle.asset)
+        generator.videoComposition = bundle.videoComposition
+        generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+        let previewImage = try await generator.image(at: .zero).image
+        let url = store.root.appendingPathComponent("light-tools-export.mp4")
+        let exporter = try XCTUnwrap(AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality))
+        exporter.videoComposition = bundle.videoComposition
+        try await exporter.export(to: url, as: .mp4)
+        let exported = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        exported.requestedTimeToleranceBefore = .zero; exported.requestedTimeToleranceAfter = .zero
+        let exportedImage = try await exported.image(at: .zero).image
+        func center(_ image: CGImage) -> [UInt8] {
+            var pixel = [UInt8](repeating: 0, count: 4)
+            CIContext().render(CIImage(cgImage: image), toBitmap: &pixel, rowBytes: 4,
+                bounds: CGRect(x: image.width / 2, y: image.height / 2, width: 1, height: 1),
+                format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+            return pixel
+        }
+        let a = center(previewImage), b = center(exportedImage)
+        for channel in 0..<3 { XCTAssertEqual(Double(a[channel]), Double(b[channel]), accuracy: 8) }
+        let app = AppModel(store: reopened), model = SceneReviewPreviewModel()
+        await model.prepare(movie: saved, scene: scene, app: app)
+        XCTAssertNil(model.error)
+        let monitor = Task { await model.monitorHistogram(enabled: true) }
+        defer { monitor.cancel(); model.stop() }
+        let deadline = Date().addingTimeInterval(15)
+        while model.histogram == nil, Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        let before = try XCTUnwrap(model.histogram, "Light must receive a rendered frame while paused")
+        XCTAssertGreaterThan(before.samples, 0)
+        await model.update(adjustments: .neutral, filmEffects: .off)
+        let updateDeadline = Date().addingTimeInterval(15)
+        while (model.histogram == nil || model.histogram?.bins == before.bins), Date() < updateDeadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let after = try XCTUnwrap(model.histogram)
+        XCTAssertNotEqual(before.bins, after.bins, "Paused edits must refresh the histogram")
+        monitor.cancel(); await model.monitorHistogram(enabled: false)
+        XCTAssertNil(model.histogram)
+        XCTAssertTrue(model.player?.currentItem?.outputs.isEmpty == true)
+    }
     func testCustomLookPlaybackAndExportUseSameCompositor() async throws {
         let store = try await makeStore(), movie = try await store.create(name: "Look Export", format: .portrait, profile: .appleLog)
         _ = try await record(movie, into: store, rotated: true)
