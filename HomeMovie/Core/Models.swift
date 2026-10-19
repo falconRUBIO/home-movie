@@ -128,6 +128,7 @@ enum MovieLibrarySort: String, CaseIterable, Identifiable {
 struct Catalog: Codable, Sendable {
     var schemaVersion = 1
     var movies: [Movie] = []
+    var pendingDeletionIDs: [UUID]? = nil
 }
 
 struct CaptureTicket: Codable, Sendable {

@@ -502,24 +502,12 @@ struct SettingsView: View {
                     Text("Projects stay on this iPhone. Deleting the app can delete your movies. Save finished videos to Photos or Files.").font(.footnote).foregroundStyle(.secondary)
                     Text("A finished video does not preserve editable scene boundaries. Use Backup & Restore to save originals together with movie order and trims.").font(.footnote).foregroundStyle(.secondary)
                 }
-                Section("Recently Deleted Movies") {
-                    let deleted = app.movies.filter { $0.deletedAt != nil }
-                    if deleted.isEmpty { Text("No deleted movies").foregroundStyle(.secondary) }
-                    ForEach(deleted) { movie in
-                        HStack { Text(movie.name); Spacer(); Button("Restore") { Task { await app.run { try await app.store.setMovieDeleted(movie.id, deleted: false) } } } }
-                    }
+                Section {
+                    NavigationLink {
+                        RecentlyDeletedView().environmentObject(app)
+                    } label: { Label("Recently Deleted", systemImage: "trash") }
                 }
-                Section("Recently Deleted Scenes") {
-                    let deleted = app.movies.flatMap { m in m.scenes.filter { $0.deletedAt != nil }.map { (m, $0) } }
-                    if deleted.isEmpty { Text("No deleted scenes").foregroundStyle(.secondary) }
-                    ForEach(deleted, id: \.1.id) { item in
-                        let (movie, scene) = item
-                        HStack {
-                            VStack(alignment: .leading) { Text(movie.name); Text(scene.capturedAt, style: .date).font(.caption).foregroundStyle(.secondary) }
-                            Spacer(); Button("Restore") { Task { await app.run { try await app.store.setSceneDeleted(movieID: movie.id, sceneID: scene.id, deleted: false) } } }
-                        }
-                    }
-                }
+
             }.navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
@@ -545,7 +533,7 @@ struct PrivacyView: View {
                 Text("When you save or share, the destination you choose handles that copy. Files backups include original recordings and project metadata. iCloud Drive and iCloud Photos follow your Apple settings; Home Movie does not confirm completed cloud syncing.")
             }
             Section("Deleting footage") {
-                Text("Recently Deleted keeps original files so you can restore scenes and movies. Deleting this app can remove its local projects. Copies saved to Photos, Files, or shared elsewhere remain separate and must be managed at those destinations.")
+                Text("Recently Deleted keeps original files until you choose Delete Permanently. Copies saved to Photos, Files, or backups remain separate and must be managed at those destinations. Deleting this app can remove its local projects.")
             }
         }.navigationTitle("Privacy").navigationBarTitleDisplayMode(.inline)
     }

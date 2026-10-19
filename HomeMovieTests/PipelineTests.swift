@@ -1703,6 +1703,63 @@ final class PipelineTests: XCTestCase {
         XCTAssertNil(automatic.first?.coverSceneID)
         XCTAssertEqual(automatic.first?.coverScene?.id, before.activeScenes.first?.id)
     }
+    func testPermanentSceneDeletionRejectsActiveItemsAndPreservesOtherFootage() async throws {
+        let store = try await makeStore(), movie = try await store.createQuickMovie()
+        let a = try await record(movie, into: store), b = try await record(movie, into: store)
+        let source = try await store.url(a.source), survivor = try await store.url(b.source)
+        let survivorBytes = try Data(contentsOf: survivor)
+        do { try await store.permanentlyDelete(movieIDs: [], sceneIDs: [a.sceneID]); XCTFail("Active scene deleted") } catch { }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+        try await store.setMovieCover(movie.id, sceneID: a.sceneID)
+        try await store.setSceneDeleted(movieID: movie.id, sceneID: a.sceneID, deleted: true)
+        do { try await store.permanentlyDelete(movieIDs: [], sceneIDs: [a.sceneID, b.sceneID]); XCTFail("Mixed active/deleted batch accepted") } catch { }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+        let pending = try await store.permanentlyDelete(movieIDs: [], sceneIDs: [a.sceneID])
+        XCTAssertEqual(pending, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertEqual(try Data(contentsOf: survivor), survivorBytes)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let saved = await reopened.snapshot()
+        XCTAssertEqual(saved.count, 1); XCTAssertEqual(saved.first?.scenes.map(\.id), [b.sceneID])
+        XCTAssertNil(saved.first?.coverSceneID)
+        XCTAssertNotNil(saved.first?.recordingFormat)
+    }
+
+    func testPermanentMovieDeletionAndInterruptedCleanupNeverRecoverDeletedOriginals() async throws {
+        let store = try await makeStore(), movie = try await store.createQuickMovie()
+        let ticket = try await record(movie, into: store)
+        let source = try await store.url(ticket.source)
+        let bytes = try Data(contentsOf: source)
+        try await store.setMovieDeleted(movie.id, deleted: true)
+        let pending = try await store.permanentlyDelete(movieIDs: [movie.id], sceneIDs: [])
+        XCTAssertEqual(pending, 0); XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        // Simulate termination after durable catalog removal but before unlinking the media.
+        try bytes.write(to: source)
+        var interrupted = Catalog(); interrupted.pendingDeletionIDs = [ticket.sceneID]
+        try JSONEncoder().encode(interrupted).write(to: store.root.appendingPathComponent("catalog.json"), options: .atomic)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let saved = await reopened.snapshot()
+        XCTAssertTrue(saved.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        let recovery = try await reopened.recoveryFiles()
+        XCTAssertFalse(recovery.contains { $0.url == source })
+    }
+
+    func testPermanentMovieDeletionProtectsUnfinishedRecordingAndRestoreIsAtomic() async throws {
+        let store = try await makeStore(), movie = try await store.createQuickMovie()
+        let unfinished = try await store.begin(movieID: movie.id)
+        try await store.setMovieDeleted(movie.id, deleted: true)
+        do { try await store.permanentlyDelete(movieIDs: [movie.id], sceneIDs: []); XCTFail("Unfinished recording discarded") } catch { }
+        let before = await store.snapshot()
+        XCTAssertEqual(before.count, 1); XCTAssertNotNil(before.first?.deletedAt)
+        do { try await store.restoreDeleted(movieIDs: [movie.id, UUID()], sceneIDs: []); XCTFail("Partial restore accepted") } catch { }
+        let unchanged = await store.snapshot()
+        XCTAssertNotNil(unchanged.first?.deletedAt)
+        try await store.restoreDeleted(movieIDs: [movie.id], sceneIDs: [])
+        let restored = await store.snapshot()
+        XCTAssertNil(restored.first?.deletedAt)
+        try await store.abandonUnstarted(unfinished)
+    }
     private func makeStore() async throws -> ProjectStore {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let store = ProjectStore(root: root); _ = try await store.load()

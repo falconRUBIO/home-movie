@@ -29,6 +29,10 @@ actor ProjectStore {
     }
     private func validate(_ value: Catalog) throws {
         let scenes = value.movies.flatMap(\.scenes)
+        let deleting = value.pendingDeletionIDs ?? []
+        guard Set(deleting).count == deleting.count, Set(deleting).isDisjoint(with: scenes.map(\.id)) else {
+            throw HomeMovieError.message("The pending deletion metadata is inconsistent.")
+        }
         guard Set(value.movies.map(\.id)).count == value.movies.count,
               Set(scenes.map(\.id)).count == scenes.count else { throw HomeMovieError.message("The catalog contains duplicate identifiers. Its file has been preserved.") }
         var totalBytes: Int64 = 0
@@ -116,6 +120,8 @@ actor ProjectStore {
         }
         if migrated.movies != catalog.movies { try write(migrated) }
         var notices: [String] = []
+        if finishPermanentDeletions() > 0 { notices.append("Some deleted files could not be removed yet. Home Movie will retry when reopened.") }
+        let deleting = Set(catalog.pendingDeletionIDs ?? [])
         let journalFiles = try fm.contentsOfDirectory(at: root.appendingPathComponent("Journal"), includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" }
         var pending: [(URL, CaptureTicket)] = []
         for file in journalFiles {
@@ -123,6 +129,7 @@ actor ProjectStore {
             catch { notices.append("A damaged recovery journal was preserved for inspection.") }
         }
         for (file, ticket) in pending.sorted(by: { $0.1.capturedAt == $1.1.capturedAt ? $0.1.sequence < $1.1.sequence : $0.1.capturedAt < $1.1.capturedAt }) {
+            if deleting.contains(ticket.sceneID) { continue }
             do {
                 if catalog.movies.flatMap(\.scenes).contains(where: { $0.id == ticket.sceneID }) {
                     try fm.removeItem(at: file); continue
@@ -141,6 +148,7 @@ actor ProjectStore {
             let relative = "\(file.deletingLastPathComponent().lastPathComponent)/\(file.lastPathComponent)"
             guard !known.contains(relative) else { continue }
             let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent)
+            if let id, deleting.contains(id) { continue }
             if let id, fm.fileExists(atPath: root.appendingPathComponent("Journal/\(id.uuidString).json").path) { continue }
             do {
                 let info = try await MediaInspector.inspect(file)
@@ -522,6 +530,72 @@ actor ProjectStore {
         var next = catalog; next.movies[i].coverSceneID = sceneID
         next.movies[i].revision += 1; try write(next)
     }
+    /// Persist removal and cleanup intent together before touching any original.
+    /// Failed/interrupted cleanup stays excluded from automatic recording recovery.
+    @discardableResult func permanentlyDelete(movieIDs: Set<UUID>, sceneIDs: Set<UUID>) throws -> Int {
+        try requireIdle()
+        guard !movieIDs.isEmpty || !sceneIDs.isEmpty else { throw HomeMovieError.message("Select deleted items first.") }
+        let deletedMovies = Set(catalog.movies.filter { $0.deletedAt != nil }.map(\.id))
+        let deletedScenes = Set(catalog.movies.filter { $0.deletedAt == nil }.flatMap(\.scenes).filter { $0.deletedAt != nil }.map(\.id))
+        guard movieIDs.isSubset(of: deletedMovies), sceneIDs.isSubset(of: deletedScenes) else {
+            throw HomeMovieError.message("Recently Deleted changed. Select the items again.")
+        }
+        let journals = try fm.contentsOfDirectory(at: root.appendingPathComponent("Journal"), includingPropertiesForKeys: nil)
+        for file in journals where file.pathExtension == "json" {
+            if let data = try? Data(contentsOf: file), let ticket = try? JSONDecoder().decode(CaptureTicket.self, from: data),
+               movieIDs.contains(ticket.movieID) {
+                throw HomeMovieError.message("Recover the unfinished recording before permanently deleting this movie.")
+            }
+        }
+        var next = catalog
+        let removed = Set(next.movies.filter { movieIDs.contains($0.id) }.flatMap(\.scenes).map(\.id)).union(sceneIDs)
+        next.movies.removeAll { movieIDs.contains($0.id) }
+        for i in next.movies.indices where next.movies[i].scenes.contains(where: { sceneIDs.contains($0.id) }) {
+            next.movies[i].scenes.removeAll { sceneIDs.contains($0.id) }
+            if let cover = next.movies[i].coverSceneID, removed.contains(cover) { next.movies[i].coverSceneID = nil }
+            next.movies[i].revision += 1
+        }
+        next.pendingDeletionIDs = Array(Set(next.pendingDeletionIDs ?? []).union(removed)).sorted { $0.uuidString < $1.uuidString }
+        try write(next)
+        return finishPermanentDeletions()
+    }
+    private func finishPermanentDeletions() -> Int {
+        guard let ids = catalog.pendingDeletionIDs, !ids.isEmpty else { return 0 }
+        var remaining: [UUID] = []
+        for id in ids {
+            do {
+                for path in ["Originals/\(id.uuidString).mov", "Staging/\(id.uuidString).mov", "Journal/\(id.uuidString).json"] {
+                    let file = try url(path)
+                    do { try fm.removeItem(at: file) }
+                    catch {
+                        let failure = error as NSError
+                        guard failure.domain == NSCocoaErrorDomain,
+                              failure.code == NSFileNoSuchFileError || failure.code == NSFileReadNoSuchFileError else { throw error }
+                    }
+                }
+            } catch { remaining.append(id) }
+        }
+        if remaining != ids {
+            var next = catalog; next.pendingDeletionIDs = remaining.isEmpty ? nil : remaining
+            try? write(next) // Durable intent remains if this cleanup-only write fails.
+        }
+        return catalog.pendingDeletionIDs?.count ?? 0
+    }
+    func restoreDeleted(movieIDs: Set<UUID>, sceneIDs: Set<UUID>) throws {
+        try requireIdle()
+        guard movieIDs.isSubset(of: Set(catalog.movies.filter { $0.deletedAt != nil }.map(\.id))),
+              sceneIDs.isSubset(of: Set(catalog.movies.filter { $0.deletedAt == nil }.flatMap(\.scenes).filter { $0.deletedAt != nil }.map(\.id))) else {
+            throw HomeMovieError.message("Recently Deleted changed. Select the items again.")
+        }
+        var next = catalog
+        for i in next.movies.indices {
+            if movieIDs.contains(next.movies[i].id) { next.movies[i].deletedAt = nil; next.movies[i].revision += 1 }
+            for c in next.movies[i].scenes.indices where sceneIDs.contains(next.movies[i].scenes[c].id) {
+                next.movies[i].scenes[c].deletedAt = nil; next.movies[i].revision += 1
+            }
+        }
+        try write(next)
+    }
     func storageBytes() -> Int64 { catalog.movies.flatMap(\.scenes).reduce(0) { $0 + $1.bytes } }
     func availableBytes() throws -> Int64 {
         let values = try root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
@@ -612,11 +686,13 @@ actor ProjectStore {
     func recoveryFiles() throws -> [RecoveryFile] {
         try ensureDirectories()
         let known = Set(catalog.movies.flatMap(\.scenes).map(\.source))
+        let deleting = Set(catalog.pendingDeletionIDs ?? [])
         var files: [RecoveryFile] = []
         for directory in ["Staging", "Originals", "Recovery"] {
             for file in try fm.contentsOfDirectory(at: root.appendingPathComponent(directory), includingPropertiesForKeys: [.fileSizeKey]) {
                 let path = "\(directory)/\(file.lastPathComponent)"
                 guard !known.contains(path) else { continue }
+                if directory != "Recovery", let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent), deleting.contains(id) { continue }
                 let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
                 files.append(RecoveryFile(id: path, url: file, bytes: Int64(size)))
             }
