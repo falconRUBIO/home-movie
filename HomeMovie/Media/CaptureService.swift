@@ -839,6 +839,19 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
     }
     func endSmoothInput() { queue.async { self.smoothInput.end() } }
+    func pauseSmoothZoom(completion: @escaping @Sendable (CGFloat?) -> Void) {
+        queue.async {
+            guard self.smoothOpen, let camera = self.videoInput?.device else { completion(nil); return }
+            self.smoothTimer?.cancel(); self.smoothTimer = nil
+            self.smoothGeneration = UUID(); self.smoothClock.reset(); self.smoothInput.reset()
+            self.smoothClosing = false
+            self.smoothFilter = SmoothZoomFilter(current: Double(camera.videoZoomFactor),
+                minimum: Double(camera.minAvailableVideoZoomFactor), maximum: Double(camera.maxAvailableVideoZoomFactor))
+            // Hold the measured view. No zoom write, AE/AF change, or lens-policy reset.
+            if let options = try? self.options() { self.onEvent?(.ready(options)) }
+            completion(camera.videoZoomFactor)
+        }
+    }
     private func setSmoothTargetOnQueue(_ factor: CGFloat, duration: Double? = nil) {
         smoothClosing = false
         if !smoothOpen { beginSmoothZoomOnQueue() }
