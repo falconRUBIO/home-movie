@@ -12,7 +12,7 @@ enum FilmGrainTexture: String, Codable, CaseIterable, Identifiable, Sendable {
 
 // Stored separately from capture profile and LUT selection. Optional on Movie for old catalogs.
 struct FilmEffectsSettings: Codable, Equatable, Sendable {
-    static let engineVersion = 4
+    static let engineVersion = 5
     static let off = FilmEffectsSettings()
     var version = 1
     var grainEnabled = false
@@ -105,7 +105,7 @@ final class FilmEffectsRenderer {
         }
         let data = try Data(contentsOf: url)
         var result: [String: CIColorKernel] = [:]
-        for name in ["filmLinear", "filmHighlights", "filmOptics", "filmSoftness", "filmRolloff", "filmGrain", "filmVignette"] {
+        for name in ["filmLinear", "filmHighlights", "filmOptics", "filmSoftness", "filmRolloff", "filmGrain", "filmVignette", "filmDetail"] {
             result[name] = try CIColorKernel(functionName: name, fromMetalLibraryData: data)
         }
         return result
@@ -156,8 +156,9 @@ final class FilmEffectsRenderer {
             image = try apply("filmRolloff", extent: bounds, arguments: [image, settings.rolloffAmount])
         }
         if settings.sharpnessAmount > 0 {
-            image = image.clampedToExtent().applyingFilter("CISharpenLuminance", parameters: [
+            let sharp = image.clampedToExtent().applyingFilter("CISharpenLuminance", parameters: [
                 "inputSharpness": settings.sharpnessAmount * 1.2]).cropped(to: bounds)
+            image = try apply("filmDetail", extent: bounds, arguments: [image, sharp])
         }
         if settings.vignetteAmount > 0 {
             image = try apply("filmVignette", extent: bounds, arguments: [image, settings.vignetteAmount, CIVector(cgRect: content)])

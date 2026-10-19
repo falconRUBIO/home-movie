@@ -4,7 +4,7 @@ import CoreImage
 // Reversible per-scene nodes: source balance, look, then display finishing.
 struct SceneAdjustments: Codable, Equatable, Sendable {
     static let neutral = SceneAdjustments()
-    static let engineVersion = 7
+    static let engineVersion = 8
     var hsl = HSLAdjustments()
     var curve = LightCurve.neutral
     var fade = 0.0
