@@ -61,43 +61,73 @@ struct RecentlyDeletedView: View {
             Spacer(minLength: 0)
         }.frame(minHeight: 44).contentShape(Rectangle())
     }
-    var body: some View {
-        Group {
-            if items.isEmpty {
-                ContentUnavailableView("No Recently Deleted Items", systemImage: "trash", description: Text("Deleted movies and scenes appear here."))
-            } else {
-                List {
-                    Section {
-                        ForEach(items) { item in
-                            Group {
-                                if selecting {
-                                    Button {
-                                        if !selected.insert(item.id).inserted { selected.remove(item.id) }
-                                    } label: { row(item) }.tint(.primary)
-                                        .accessibilityAddTraits(selected.contains(item.id) ? [.isSelected] : [])
-                                        .accessibilityValue(selected.contains(item.id) ? "Selected" : "Not selected")
-                                } else {
-                                    HStack {
-                                        row(item)
-                                        Menu { actions(item) } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                                            .accessibilityLabel("Manage \(item.title), \(item.detail)")
-                                    }
-                                    .contextMenu { actions(item) }
-                                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                        Button("Restore", systemImage: "arrow.uturn.backward") { restore([item.id]) }.tint(.blue)
-                                    }
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                        Button("Delete", systemImage: "trash") { requestDelete([item.id]) }.tint(.red)
-                                    }
-                                }
-                            }
-                        }
-                    } footer: {
-                        Text("Items stay here until you restore or permanently delete them. Copies in Photos, Files, and backups are separate.")
-                    }
+    @ViewBuilder private func managedRow(_ item: Item) -> some View {
+        if selecting {
+            Button {
+                if !selected.insert(item.id).inserted { selected.remove(item.id) }
+            } label: { row(item) }
+                .tint(.primary)
+                .accessibilityAddTraits(selected.contains(item.id) ? [.isSelected] : [])
+                .accessibilityValue(selected.contains(item.id) ? "Selected" : "Not selected")
+        } else {
+            HStack {
+                row(item)
+                Menu { actions(item) } label: {
+                    Image(systemName: "ellipsis").frame(width: 44, height: 44)
+                }.accessibilityLabel("Manage \(item.title), \(item.detail)")
+            }
+            .contextMenu { actions(item) }
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                Button("Restore", systemImage: "arrow.uturn.backward") { restore([item.id]) }.tint(.blue)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button("Delete", systemImage: "trash") { requestDelete([item.id]) }.tint(.red)
+            }
+        }
+    }
+    @ViewBuilder private var contents: some View {
+        if items.isEmpty {
+            ContentUnavailableView("No Recently Deleted Items", systemImage: "trash", description: Text("Deleted movies and scenes appear here."))
+        } else {
+            List {
+                Section {
+                    ForEach(items) { item in managedRow(item) }
+                } footer: {
+                    Text("Items stay here until you restore or permanently delete them. Copies in Photos, Files, and backups are separate.")
                 }
             }
         }
+    }
+    @ViewBuilder private var selectionBar: some View {
+        if selecting && !items.isEmpty {
+            VStack(spacing: 0) {
+                Button(selected.count == items.count ? "Deselect All" : "Select All") {
+                    selected = selected.count == items.count ? [] : Set(items.map(\.id))
+                }.frame(minHeight: 44)
+                HStack {
+                    Button("Restore") { restore(selected) }
+                    Spacer()
+                    Text("\(selected.count) selected").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Delete", role: .destructive) { requestDelete(selected) }
+                }.frame(minHeight: 44).disabled(selected.isEmpty)
+            }.padding(.horizontal, 20).background(.bar).disabled(busy)
+        }
+    }
+    private func deleteConfirmedItems() {
+        let movies = deletingMovies, scenes = deletingScenes
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                let pending = try await app.store.permanentlyDelete(movieIDs: movies, sceneIDs: scenes)
+                await app.refresh(); selected = []
+                if pending > 0 { notice = "Items were removed. Some files could not be deleted yet; Home Movie will retry when reopened." }
+            } catch { problem = error.localizedDescription }
+        }
+    }
+    var body: some View {
+        contents
         .navigationTitle("Recently Deleted").navigationBarTitleDisplayMode(.inline)
         .disabled(busy)
         .toolbar {
@@ -106,40 +136,14 @@ struct RecentlyDeletedView: View {
                 else { Button(selecting ? "Done" : "Select") { selecting.toggle(); selected = [] }.disabled(items.isEmpty) }
             }
         }
-        .safeAreaInset(edge: .bottom) {
-            if selecting && !items.isEmpty {
-                VStack(spacing: 0) {
-                    Button(selected.count == items.count ? "Deselect All" : "Select All") {
-                        selected = selected.count == items.count ? [] : Set(items.map(\.id))
-                    }.frame(minHeight: 44)
-                    HStack {
-                        Button("Restore") { restore(selected) }
-                        Spacer()
-                        Text("\(selected.count) selected").font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Delete", role: .destructive) { requestDelete(selected) }
-                    }.frame(minHeight: 44).disabled(selected.isEmpty)
-                }.padding(.horizontal, 20).background(.bar).disabled(busy)
-            }
-        }
+        .safeAreaInset(edge: .bottom) { selectionBar }
         .onChange(of: items.map(\.id)) { _, ids in
             selected.formIntersection(ids)
             if ids.isEmpty { selecting = false }
         }
         .alert("Delete Permanently?", isPresented: $confirmDelete) {
             Button("Cancel", role: .cancel) { }
-            Button("Delete Permanently", role: .destructive) {
-                let movies = deletingMovies, scenes = deletingScenes
-                busy = true
-                Task {
-                    defer { busy = false }
-                    do {
-                        let pending = try await app.store.permanentlyDelete(movieIDs: movies, sceneIDs: scenes)
-                        await app.refresh(); selected = []
-                        if pending > 0 { notice = "Items were removed. Some files could not be deleted yet; Home Movie will retry when reopened." }
-                    } catch { problem = error.localizedDescription }
-                }
-            }
+            Button("Delete Permanently", role: .destructive, action: deleteConfirmedItems)
         } message: {
             Text("\(deletingMovies.count + deletingScenes.count) selected items and their original recordings will be deleted from Home Movie. This cannot be undone. Copies in Photos, Files, and backups remain.")
         }
