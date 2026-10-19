@@ -1676,6 +1676,33 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(movie.activeScenes[1].lightAdjustments.exposure, -0.3)
         XCTAssertEqual(movie.activeScenes[1].lightAdjustments.warmth, 0.2)
     }
+    func testLibraryCoverPersistsWithoutChangingMediaOrSceneOrder() async throws {
+        let store = try await makeStore(), movie = try await store.createQuickMovie()
+        _ = try await record(movie, into: store)
+        _ = try await record(movie, into: store)
+        let beforeMovies = await store.snapshot()
+        let before = try XCTUnwrap(beforeMovies.first)
+        let cover = try XCTUnwrap(before.activeScenes.last)
+        try await store.setMovieCover(movie.id, sceneID: cover.id)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let reopenedMovies = await reopened.snapshot()
+        let saved = try XCTUnwrap(reopenedMovies.first)
+        XCTAssertEqual(saved.coverSceneID, cover.id)
+        XCTAssertEqual(saved.coverScene?.id, cover.id)
+        XCTAssertEqual(saved.activeScenes, before.activeScenes)
+        XCTAssertEqual(saved.duration, before.duration)
+        do { try await reopened.setMovieCover(movie.id, sceneID: UUID()); XCTFail("Unknown scene accepted") } catch { }
+        try await reopened.setSceneDeleted(movieID: movie.id, sceneID: cover.id, deleted: true)
+        let deleted = await reopened.snapshot()
+        XCTAssertEqual(deleted.first?.coverScene?.id, before.activeScenes.first?.id)
+        try await reopened.setSceneDeleted(movieID: movie.id, sceneID: cover.id, deleted: false)
+        let restored = await reopened.snapshot()
+        XCTAssertEqual(restored.first?.coverScene?.id, cover.id)
+        try await reopened.setMovieCover(movie.id, sceneID: nil)
+        let automatic = await reopened.snapshot()
+        XCTAssertNil(automatic.first?.coverSceneID)
+        XCTAssertEqual(automatic.first?.coverScene?.id, before.activeScenes.first?.id)
+    }
     private func makeStore() async throws -> ProjectStore {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let store = ProjectStore(root: root); _ = try await store.load()

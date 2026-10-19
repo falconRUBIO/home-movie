@@ -14,6 +14,14 @@ struct LibraryView: View {
     @State private var deleteMovie: Movie?
     @State private var exportMovie: Movie?
     @State private var playingMovie: Movie?
+    @State private var coverMovie: Movie?
+    @State private var rearranging = false
+    @State private var selecting = false
+    @State private var selected: Set<UUID> = []
+    @State private var confirmingSelection = false
+    @State private var deletingSelection = false
+    @AppStorage("movieLibrarySort") private var sortValue = MovieLibrarySort.newest.rawValue
+    private var sortedMovies: [Movie] { (MovieLibrarySort(rawValue: sortValue) ?? .newest).sorted(app.activeMovies) }
     @AppStorage("openLastMovie") private var openLastMovie = false
     @AppStorage("lastMovieID") private var lastMovieID = ""
     private var movieColumns: [GridItem] {
@@ -24,6 +32,19 @@ struct LibraryView: View {
         lastMovieID = movie.id.uuidString
         app.prewarmCamera(movieID: movie.id)
         path.append(movie.id)
+    }
+    private func toggleSelection(_ id: UUID) {
+        if !selected.insert(id).inserted { selected.remove(id) }
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+    @ViewBuilder private func movieActions(_ movie: Movie) -> some View {
+        Button("Play Movie", systemImage: "play.fill") { playingMovie = movie }.disabled(movie.activeScenes.isEmpty)
+        Button("Rename", systemImage: "pencil") { renameText = movie.name; renameMovie = movie }
+        Button("Change Cover", systemImage: "photo") { coverMovie = movie }.disabled(!movie.activeScenes.contains { !$0.missing })
+        Button("Share / Export", systemImage: "square.and.arrow.up") { exportMovie = movie }.disabled(movie.activeScenes.isEmpty)
+        Button("Rearrange", systemImage: "arrow.up.arrow.down") { rearranging = true }.disabled(app.activeMovies.count < 2)
+        Divider()
+        Button("Delete Movie", systemImage: "trash", role: .destructive) { deleteMovie = movie }
     }
     private func createMovie() {
         guard !creating, app.loaded else { return }
@@ -41,6 +62,74 @@ struct LibraryView: View {
             .foregroundStyle(.white).frame(width: 48, height: 48)
             .background(.black.opacity(0.4), in: Circle()).homeGlass()
             .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+    }
+    private func movieCard(_ movie: Movie) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            ZStack(alignment: .bottom) {
+                Button { openMovie(movie) } label: {
+                    SceneThumbnail(scene: movie.coverScene, root: app.store.root, movie: movie)
+                        .frame(height: 210).clipShape(RoundedRectangle(cornerRadius: 22))
+                        .overlay(alignment: .topTrailing) {
+                            if !movie.activeScenes.isEmpty {
+                                Text(durationLabel(movie.duration)).font(.caption.monospacedDigit())
+                                    .padding(.horizontal, 9).padding(.vertical, 5)
+                                    .homeGlass(interactive: false).padding(12)
+                            }
+                        }
+                        .contentShape(RoundedRectangle(cornerRadius: 22))
+                }.buttonStyle(.plain).accessibilityLabel("Record into \(movie.name), \(durationLabel(movie.duration))")
+                    .accessibilityHint("Opens the camera to add scenes")
+                HStack {
+                    if !movie.activeScenes.isEmpty {
+                        Button { playingMovie = movie } label: {
+                            thumbnailActionIcon("play.fill")
+                        }.buttonStyle(.plain)
+                            .accessibilityLabel("Play \(movie.name)")
+                            .accessibilityHint("Plays the full movie from the beginning")
+                    }
+                    Spacer(minLength: 8)
+                    Button { openMovie(movie) } label: {
+                        thumbnailActionIcon("video.fill")
+                    }.buttonStyle(.plain)
+                        .accessibilityLabel(movie.activeScenes.isEmpty
+                            ? "Start Recording in \(movie.name)" : "Continue Recording in \(movie.name)")
+                        .accessibilityHint("Opens the camera. Recording starts when you tap Record.")
+                }.padding(12)
+            }
+            HStack(alignment: .top) {
+                Button { openMovie(movie) } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(movie.name).font(.headline)
+                        Text(movie.activeScenes.count == 1 ? "1 scene" : "\(movie.activeScenes.count) scenes").font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .accessibilityLabel("Record into \(movie.name)")
+                    .accessibilityHint("Opens the camera to add scenes")
+                Menu { movieActions(movie) } label: {
+                    Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
+                }.menuOrder(.fixed).accessibilityLabel("Manage \(movie.name)")
+            }
+        }
+        .allowsHitTesting(!selecting)
+        .accessibilityHidden(selecting)
+        .contextMenu { if !selecting { movieActions(movie) } }
+        .overlay {
+            if selecting {
+                Button { toggleSelection(movie.id) } label: {
+                    RoundedRectangle(cornerRadius: 22).fill(.clear)
+                        .contentShape(Rectangle())
+                        .overlay(alignment: .topTrailing) {
+                            Image(systemName: selected.contains(movie.id) ? "checkmark.circle.fill" : "circle")
+                                .font(.title).foregroundStyle(selected.contains(movie.id) ? Color.accentColor : .white)
+                                .background(.regularMaterial, in: Circle()).padding(12)
+                        }
+                }.buttonStyle(.plain).accessibilityLabel(movie.name)
+                    .accessibilityValue(selected.contains(movie.id) ? "Selected" : "Not selected")
+                    .accessibilityAddTraits(selected.contains(movie.id) ? [.isSelected] : [])
+            }
+        }
     }
     var body: some View {
         NavigationStack(path: $path) {
@@ -65,77 +154,78 @@ struct LibraryView: View {
                 } else {
                     ScrollView {
                         LazyVGrid(columns: movieColumns, alignment: .leading, spacing: 24) {
-                            ForEach(app.activeMovies) { movie in
-                                VStack(alignment: .leading, spacing: 9) {
-                                    ZStack(alignment: .bottom) {
-                                        Button { openMovie(movie) } label: {
-                                            SceneThumbnail(scene: movie.activeScenes.first, root: app.store.root, movie: movie)
-                                                .frame(height: 210).clipShape(RoundedRectangle(cornerRadius: 22))
-                                                .overlay(alignment: .topTrailing) {
-                                                    if !movie.activeScenes.isEmpty {
-                                                        Text(durationLabel(movie.duration)).font(.caption.monospacedDigit())
-                                                            .padding(.horizontal, 9).padding(.vertical, 5)
-                                                            .homeGlass(interactive: false).padding(12)
-                                                    }
-                                                }
-                                                .contentShape(RoundedRectangle(cornerRadius: 22))
-                                        }.buttonStyle(.plain).accessibilityLabel("Record into \(movie.name), \(durationLabel(movie.duration))")
-                                            .accessibilityHint("Opens the camera to add scenes")
-                                        HStack {
-                                            if !movie.activeScenes.isEmpty {
-                                                Button { playingMovie = movie } label: {
-                                                    thumbnailActionIcon("play.fill")
-                                                }.buttonStyle(.plain)
-                                                    .accessibilityLabel("Play \(movie.name)")
-                                                    .accessibilityHint("Plays the full movie from the beginning")
-                                            }
-                                            Spacer(minLength: 8)
-                                            Button { openMovie(movie) } label: {
-                                                thumbnailActionIcon("video.fill")
-                                            }.buttonStyle(.plain)
-                                                .accessibilityLabel(movie.activeScenes.isEmpty
-                                                    ? "Start Recording in \(movie.name)" : "Continue Recording in \(movie.name)")
-                                                .accessibilityHint("Opens the camera. Recording starts when you tap Record.")
-                                        }.padding(12)
-                                    }
-                                    HStack(alignment: .top) {
-                                        Button { openMovie(movie) } label: {
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text(movie.name).font(.headline)
-                                                Text(movie.activeScenes.count == 1 ? "1 scene" : "\(movie.activeScenes.count) scenes").font(.caption).foregroundStyle(.secondary)
-                                            }
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .contentShape(Rectangle())
-                                        }.buttonStyle(.plain)
-                                            .accessibilityLabel("Record into \(movie.name)")
-                                            .accessibilityHint("Opens the camera to add scenes")
-                                        MovieOverflowMenu(movieName: movie.name,
-                                            canExport: !movie.activeScenes.isEmpty,
-                                            onExport: { exportMovie = movie },
-                                            onRename: { renameText = movie.name; renameMovie = movie },
-                                            onDelete: { deleteMovie = movie })
-                                            .frame(width: 44, height: 44)
-                                    }
-                                }
+                            ForEach(sortedMovies) { movie in
+                                movieCard(movie)
                             }
                         }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 25)
                     }
                 }
             }
             .navigationTitle("Movies").navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                if selecting {
+                    HStack {
+                        Text("\(selected.count) selected").font(.subheadline)
+                        Spacer()
+                        Button("Delete", systemImage: "trash", role: .destructive) { confirmingSelection = true }
+                            .disabled(selected.isEmpty || deletingSelection).frame(minHeight: 44)
+                    }.padding(.horizontal, 20).background(.bar)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    if !selecting {
                     Button { createMovie() } label: {
                         if creating { ProgressView().frame(width: 44, height: 44) }
                         else { MovieControlIcon(systemName: "plus") }
                     }
                         .accessibilityLabel("New Movie").disabled(!app.loaded || creating)
+                    } else {
+                        Button(selected.count == app.activeMovies.count ? "Deselect All" : "Select All") {
+                            selected = selected.count == app.activeMovies.count ? [] : Set(app.activeMovies.map(\.id))
+                        }.disabled(deletingSelection)
+                    }
                 }
                 ToolbarItem(placement: .topBarLeading) {
+                    if selecting {
+                        Button("Done") { selecting = false; selected = [] }.disabled(deletingSelection)
+                    } else {
                     Button { settings = true } label: { MovieControlIcon(systemName: "gearshape") }
                         .accessibilityLabel("Settings").disabled(!app.loaded)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !selecting {
+                        Menu {
+                            Button("Select", systemImage: "checkmark.circle") { selected = []; selecting = true }
+                            Button("Rearrange", systemImage: "arrow.up.arrow.down") { rearranging = true }.disabled(app.activeMovies.count < 2)
+                            Picker("Sort", selection: $sortValue) {
+                                ForEach(MovieLibrarySort.allCases) { Text($0.rawValue).tag($0.rawValue) }
+                            }
+                        } label: { MovieControlIcon(systemName: "ellipsis.circle") }
+                            .accessibilityLabel("Library options").disabled(!app.loaded || app.activeMovies.isEmpty)
+                    }
                 }
             }
+            .onChange(of: app.activeMovies.map(\.id)) { _, ids in selected.formIntersection(ids) }
+            .sheet(item: $coverMovie) { MovieCoverPicker(movie: $0).environmentObject(app) }
+            .sheet(isPresented: $rearranging) {
+                MovieReorderView(movies: sortedMovies) { sortValue = MovieLibrarySort.custom.rawValue }.environmentObject(app)
+            }
+            .alert("Delete \(selected.count) movies?", isPresented: $confirmingSelection) {
+                Button("Cancel", role: .cancel) { }
+                Button("Move to Recently Deleted", role: .destructive) {
+                    let ids = selected
+                    deletingSelection = true
+                    Task {
+                        defer { deletingSelection = false }
+                        do {
+                            try await app.store.setMoviesDeleted(ids); await app.refresh()
+                            selected = []; selecting = false
+                        } catch { app.error = error.localizedDescription }
+                    }
+                }
+            } message: { Text("You can restore these movies and their original scenes in Settings.") }
             .navigationDestination(for: UUID.self) { id in CameraView(app: app, movieID: id) }
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $backups) { BackupView() }
@@ -174,32 +264,109 @@ struct LibraryView: View {
 }
 
 
-private struct MovieOverflowMenu: View {
-    let movieName: String
-    let canExport: Bool
-    let onExport: () -> Void
-    let onRename: () -> Void
-    let onDelete: () -> Void
-
+private struct MovieReorderView: View {
+    @EnvironmentObject private var app: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var movies: [Movie]
+    @State private var saving = false
+    @State private var error: String?
+    private let expected: Set<UUID>
+    let onSave: () -> Void
+    init(movies: [Movie], onSave: @escaping () -> Void) {
+        _movies = State(initialValue: movies); expected = Set(movies.map(\.id)); self.onSave = onSave
+    }
     var body: some View {
-        Menu {
-            Button("Export", systemImage: "square.and.arrow.up", action: onExport)
-                .disabled(!canExport)
-            Section {
-                Button("Rename", systemImage: "pencil", action: onRename)
-                Button("Delete Movie", systemImage: "trash", role: .destructive, action: onDelete)
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(.primary)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(movies) { movie in
+                        HStack(spacing: 12) {
+                            SceneThumbnail(scene: movie.coverScene, root: app.store.root, movie: movie)
+                                .frame(width: 64, height: 48).clipShape(RoundedRectangle(cornerRadius: 8))
+                            Text(movie.name)
+                        }.padding(.vertical, 4)
+                    }.onMove { offsets, destination in
+                        movies.move(fromOffsets: offsets, toOffset: destination)
+                        UISelectionFeedbackGenerator().selectionChanged()
+                    }
+                } footer: { Text("Drag the handles to reorder your movies. Done saves Custom Order.") }
+            }.environment(\.editMode, .constant(.active)).disabled(saving)
+                .navigationTitle("Rearrange Movies").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            saving = true
+                            Task {
+                                defer { saving = false }
+                                do {
+                                    try await app.store.reorderMovies(movies.map(\.id), expected: expected)
+                                    await app.refresh(); onSave(); dismiss()
+                                } catch { self.error = error.localizedDescription }
+                            }
+                        }.disabled(saving)
+                    }
+                }
+                .interactiveDismissDisabled(saving)
+                .alert("Couldn’t Save Order", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+                    Button("OK") { error = nil }
+                } message: { Text(error ?? "") }
         }
-        .buttonStyle(.plain)
-        .menuOrder(.fixed)
-        .accessibilityLabel("Manage \(movieName)")
-        .accessibilityHint("Opens movie actions")
+    }
+}
+
+private struct MovieCoverPicker: View {
+    @EnvironmentObject private var app: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let movie: Movie
+    @State private var saving = false
+    @State private var error: String?
+    private var current: Movie { app.movie(movie.id) ?? movie }
+    private func save(_ sceneID: UUID?) {
+        saving = true
+        Task {
+            defer { saving = false }
+            do {
+                try await app.store.setMovieCover(movie.id, sceneID: sceneID)
+                await app.refresh(); UISelectionFeedbackGenerator().selectionChanged(); dismiss()
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button { save(nil) } label: {
+                        HStack {
+                            Text("Automatic"); Spacer()
+                            if current.coverSceneID == nil { Image(systemName: "checkmark").accessibilityLabel("Selected") }
+                        }.frame(minHeight: 44)
+                    }
+                } footer: { Text("Choose a scene for the cover. Automatic uses the first scene. Your movie stays the same.") }
+                Section("Scenes") {
+                    ForEach(Array(current.activeScenes.enumerated()), id: \.element.id) { index, scene in
+                        if !scene.missing {
+                            Button { save(scene.id) } label: {
+                                HStack(spacing: 12) {
+                                    SceneThumbnail(scene: scene, root: app.store.root, movie: current)
+                                        .frame(width: 96, height: 68).clipShape(RoundedRectangle(cornerRadius: 8))
+                                    Text("Scene \(index + 1)").foregroundStyle(.primary)
+                                    Spacer()
+                                    if current.coverSceneID == scene.id { Image(systemName: "checkmark").accessibilityLabel("Selected") }
+                                }
+                            }.accessibilityLabel("Scene \(index + 1)")
+                                .accessibilityAddTraits(current.coverSceneID == scene.id ? [.isSelected] : [])
+                        }
+                    }
+                }
+            }.disabled(saving)
+                .navigationTitle("Change Cover").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) } }
+                .interactiveDismissDisabled(saving)
+                .alert("Couldn’t Change Cover", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+                    Button("OK") { error = nil }
+                } message: { Text(error ?? "") }
+        }
     }
 }
 

@@ -34,6 +34,10 @@ actor ProjectStore {
         var totalBytes: Int64 = 0
         for movie in value.movies {
             try movie.exportEffects.validate()
+            guard movie.libraryOrder.map({ $0 >= 0 && $0 < 1_000_000_000 }) ?? true,
+                  movie.coverSceneID == nil || movie.scenes.contains(where: { $0.id == movie.coverSceneID }) else {
+                throw HomeMovieError.message("The movie’s library metadata is invalid.")
+            }
             if let look = movie.look {
                 guard movie.captureProfile == .appleLog, !look.name.isEmpty, look.name.count <= 80 else {
                     throw HomeMovieError.message("The movie’s look metadata is invalid.")
@@ -480,6 +484,43 @@ actor ProjectStore {
     func setMovieDeleted(_ id: UUID, deleted: Bool) throws {
         try requireIdle()
         let m = try index(id); var next = catalog; next.movies[m].deletedAt = deleted ? Date() : nil; next.movies[m].revision += 1; try write(next)
+    }
+    func setMoviesDeleted(_ ids: Set<UUID>) throws {
+        try requireIdle()
+        guard !ids.isEmpty, ids.isSubset(of: Set(catalog.movies.filter { $0.deletedAt == nil }.map(\.id))) else {
+            throw HomeMovieError.message("The movie selection changed. Select the movies again.")
+        }
+        var next = catalog
+        let date = Date()
+        for i in next.movies.indices where ids.contains(next.movies[i].id) {
+            next.movies[i].deletedAt = date; next.movies[i].revision += 1
+        }
+        try write(next)
+    }
+    func reorderMovies(_ order: [UUID], expected: Set<UUID>) throws {
+        try requireIdle()
+        let active = Set(catalog.movies.filter { $0.deletedAt == nil }.map(\.id))
+        guard active == expected, Set(order) == active, order.count == active.count else {
+            throw HomeMovieError.message("Your movie library changed. Open Rearrange again.")
+        }
+        var next = catalog
+        for (position, id) in order.enumerated() {
+            let i = try index(id)
+            if next.movies[i].libraryOrder != position {
+                next.movies[i].libraryOrder = position; next.movies[i].revision += 1
+            }
+        }
+        try write(next)
+    }
+    func setMovieCover(_ id: UUID, sceneID: UUID?) throws {
+        try requireIdle()
+        let i = try index(id)
+        guard catalog.movies[i].deletedAt == nil,
+              sceneID == nil || catalog.movies[i].activeScenes.contains(where: { $0.id == sceneID && !$0.missing }) else {
+            throw HomeMovieError.message("Choose an available scene for the cover.")
+        }
+        var next = catalog; next.movies[i].coverSceneID = sceneID
+        next.movies[i].revision += 1; try write(next)
     }
     func storageBytes() -> Int64 { catalog.movies.flatMap(\.scenes).reduce(0) { $0 + $1.bytes } }
     func availableBytes() throws -> Int64 {
