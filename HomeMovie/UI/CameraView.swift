@@ -640,6 +640,12 @@ struct CameraView: View {
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingDollyHelp = false } } }
         }.preferredColorScheme(.dark).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
     }
+    private func dollyMinimum(_ options: CameraOptions) -> CGFloat {
+        min(options.minimum, options.lenses.map(\.factor).min() ?? options.minimum)
+    }
+    private func dollyMaximum(_ options: CameraOptions) -> CGFloat {
+        max(options.maximum, options.lenses.map(\.factor).max() ?? options.maximum)
+    }
     private func smoothZoomBar(options: CameraOptions) -> some View {
         VStack(spacing: 4) {
             dollyEndpointSelector(options: options)
@@ -648,7 +654,7 @@ struct CameraView: View {
             HStack(spacing: 4) {
                 dollyStartDelayMenu
                 dollyDurationMenu.disabled(countdown != nil || activeDolly != nil)
-                if options.maximum * options.multiplier > 8 {
+                if dollyMaximum(options) * options.multiplier > 8 {
                     dollyExtendedMenu(options: options).disabled(countdown != nil || activeDolly != nil || awaitingDollyHold)
                 }
                 Spacer(minLength: 0)
@@ -670,14 +676,14 @@ struct CameraView: View {
             }.font(.caption)
         }.padding(.horizontal, 8).padding(.vertical, 4)
             .contentShape(Rectangle()).onTapGesture { }
-            .disabled(camera.state != .ready && camera.state != .recording || options.maximum <= options.minimum)
+            .disabled(camera.state != .ready && camera.state != .recording || dollyMaximum(options) <= dollyMinimum(options))
     }
     private func dollyLensStops(options: CameraOptions) -> [CGFloat] {
         // Familiar displayed zoom values, including digital stops beyond the lens range.
         // Keep the hardware ceiling in More rather than presenting it as a native lens.
         let displayed: [CGFloat] = [0.5, 1, 2, 4, 8]
         return displayed.map { $0 / options.multiplier }
-            .filter { $0 >= options.minimum && $0 <= options.maximum }
+            .filter { $0 >= dollyMinimum(options) && $0 <= dollyMaximum(options) }
     }
     private func chooseDollyLens(_ factor: CGFloat, options: CameraOptions) {
         guard countdown == nil, activeDolly == nil, !awaitingDollyHold else { return }
@@ -692,7 +698,7 @@ struct CameraView: View {
     private func setDollyEndpoint(_ factor: CGFloat, start: Bool) {
         guard activeDolly == nil, countdown == nil, !awaitingDollyHold, let options = camera.options else { return }
         if let preview = dollyEditor.edit(Double(factor), endpoint: start ? .start : .end,
-            minimum: Double(options.minimum), maximum: Double(options.maximum)) {
+            minimum: Double(dollyMinimum(options)), maximum: Double(dollyMaximum(options))) {
             camera.zoom(CGFloat(preview)); camera.beginSmoothZoom()
         }
     }
@@ -723,16 +729,16 @@ struct CameraView: View {
         GeometryReader { geometry in
             let width = max(1, geometry.size.width - 44)
             let start = preparedDollyStart ?? options.zoom
-            let end = preparedDollyTarget ?? options.maximum
-            let a = CGFloat(SmoothZoomFilter.position(Double(start), minimum: Double(options.minimum), maximum: Double(options.maximum)))
-            let b = CGFloat(SmoothZoomFilter.position(Double(end), minimum: Double(options.minimum), maximum: Double(options.maximum)))
+            let end = preparedDollyTarget ?? dollyMaximum(options)
+            let a = CGFloat(SmoothZoomFilter.position(Double(start), minimum: Double(dollyMinimum(options)), maximum: Double(dollyMaximum(options))))
+            let b = CGFloat(SmoothZoomFilter.position(Double(end), minimum: Double(dollyMinimum(options)), maximum: Double(dollyMaximum(options))))
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.3)).frame(height: 3).padding(.horizontal, 22)
                 Capsule().fill(.yellow).frame(width: max(2, abs(b - a) * width), height: 3)
                     .offset(x: 22 + min(a, b) * width)
                 ForEach(dollyLensStops(options: options), id: \.self) { factor in
                     Rectangle().fill(.white.opacity(0.5)).frame(width: 1, height: 8)
-                        .offset(x: 22 + CGFloat(SmoothZoomFilter.position(Double(factor), minimum: Double(options.minimum), maximum: Double(options.maximum))) * width)
+                        .offset(x: 22 + CGFloat(SmoothZoomFilter.position(Double(factor), minimum: Double(dollyMinimum(options)), maximum: Double(dollyMaximum(options)))) * width)
                 }
                 ForEach([true, false], id: \.self) { isStart in
                     Circle().fill((isStart ? DollyEndpoint.start : .end) == dollyEditor.selected ? Color.yellow : .white).frame(width: 22, height: 22)
@@ -745,7 +751,7 @@ struct CameraView: View {
                         .accessibilityAdjustableAction { direction in
                             let value = (isStart ? start : end) * CGFloat(pow(2, direction == .increment ? 0.1 : -0.1))
                             selectDollyEndpoint(isStart ? .start : .end)
-                            setDollyEndpoint(min(options.maximum, max(options.minimum, value)), start: isStart)
+                            setDollyEndpoint(min(dollyMaximum(options), max(dollyMinimum(options), value)), start: isStart)
                         }
                 }
                 if let editingStart = draggingDollyStart {
@@ -756,7 +762,7 @@ struct CameraView: View {
                 }
                 if activeDolly != nil {
                     Circle().fill(.yellow).frame(width: 6, height: 6)
-                        .offset(x: 19 + CGFloat(SmoothZoomFilter.position(Double(options.zoom), minimum: Double(options.minimum), maximum: Double(options.maximum))) * width, y: -16)
+                        .offset(x: 19 + CGFloat(SmoothZoomFilter.position(Double(options.zoom), minimum: Double(dollyMinimum(options)), maximum: Double(dollyMaximum(options)))) * width, y: -16)
                 }
             }.frame(height: 44).contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0)
@@ -775,7 +781,7 @@ struct CameraView: View {
                     if abs(value.translation.width) >= 6 { dollyEndpointMoved = true }
                     guard dollyEndpointMoved else { return }
                     let position = min(1, max(0, (value.location.x - 22) / width))
-                    let factor = options.minimum * CGFloat(pow(Double(options.maximum / options.minimum), Double(position)))
+                    let factor = dollyMinimum(options) * CGFloat(pow(Double(dollyMaximum(options) / dollyMinimum(options)), Double(position)))
                     setDollyEndpoint(factor, start: draggingDollyStart == true)
                     let stops = dollyLensStops(options: options)
                     let tick = stops.firstIndex { abs(log2(Double(factor / $0))) < 0.035 }
@@ -805,7 +811,7 @@ struct CameraView: View {
 
     private func dollyExtendedMenu(options: CameraOptions) -> some View {
             Menu {
-                ForEach(ExtendedZoomTargets.available(minimum: options.minimum, maximum: options.maximum,
+                ForEach(ExtendedZoomTargets.available(minimum: dollyMinimum(options), maximum: dollyMaximum(options),
                     multiplier: options.multiplier), id: \.self) { factor in
                     Button(zoomLabel(factor, multiplier: options.multiplier)) { chooseDollyLens(factor, options: options) }
                 }
