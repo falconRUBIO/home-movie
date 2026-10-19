@@ -33,6 +33,9 @@ final class SettingsSummaryTests: XCTestCase {
         try FileManager.default.createDirectory(at: root.appendingPathComponent("folder.mp4"), withIntermediateDirectories: true)
         XCTAssertEqual(SettingsStorage.exportBytes(in: root), 1024)
         XCTAssertNil(SettingsStorage.exportBytes(in: video), "A file in place of the directory must not report zero usage")
+        let directoryLink = root.appendingPathComponent("directory-link")
+        try FileManager.default.createSymbolicLink(at: directoryLink, withDestinationURL: root)
+        XCTAssertNil(SettingsStorage.exportBytes(in: directoryLink), "Do not follow a redirected cache directory")
     }
     private func scene(bytes: Int64) -> Scene {
         let id = UUID()

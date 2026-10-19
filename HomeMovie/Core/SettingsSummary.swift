@@ -28,6 +28,8 @@ struct SettingsStorage: Sendable {
     // not zero. Never follow a symbolic link while reporting cache storage.
     static func exportBytes(in directory: URL) -> Int64? {
         do {
+            let directoryValues = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard directoryValues.isDirectory == true, directoryValues.isSymbolicLink != true else { return nil }
             let files = try FileManager.default.contentsOfDirectory(at: directory,
                 includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey], options: [.skipsHiddenFiles])
             var total: Int64 = 0
