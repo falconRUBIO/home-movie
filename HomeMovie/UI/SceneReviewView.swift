@@ -206,6 +206,8 @@ struct SceneReviewView: View {
     let scene: Scene
     @StateObject private var preview = SceneReviewPreviewModel()
     @StateObject private var export = ExportModel()
+    @State private var history: SceneEditHistory?
+    @State private var showingCopyAdjustments = false
     @State private var start: Double
     @State private var end: Double
     @State private var adjustments: SceneAdjustments
@@ -244,6 +246,37 @@ struct SceneReviewView: View {
     }
     private var shownRecipe: SceneReviewRecipe {
         SceneReviewRecipe(adjustments: comparing ? .neutral : adjustments, effects: comparing ? .off : effects)
+    }
+    private var editState: SceneEditState {
+        SceneEditState(start: start, end: end, adjustments: adjustments, effects: effects)
+    }
+    private func editingChanged(_ active: Bool) {
+        if active { history?.begin(editState) } else { history?.end(editState) }
+    }
+    private func restoreEdit(_ state: SceneEditState) {
+        pickingWhiteBalance = false; comparing = false; error = nil; notice = nil
+        start = state.start; end = state.end
+        adjustments = state.adjustments; effects = state.effects
+        if adjustments.pushPull != 0 || adjustments.fade != 0 || adjustments.curve.isActive { advancedLight = true }
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+    private func undoEdit() {
+        history?.observe(editState)
+        if let state = history?.undo() { restoreEdit(state) }
+    }
+    private func redoEdit() {
+        history?.observe(editState)
+        if let state = history?.redo() { restoreEdit(state) }
+    }
+    private func pasteAdjustments() {
+        guard let clipboard = app.copiedSceneAdjustments, !busy else { return }
+        do {
+            let pasted = try clipboard.applying(to: adjustments)
+            pickingWhiteBalance = false; comparing = false
+            editingChanged(true); adjustments = pasted; editingChanged(false)
+            if pasted.pushPull != 0 || pasted.fade != 0 || pasted.curve.isActive { advancedLight = true }
+            UISelectionFeedbackGenerator().selectionChanged()
+        } catch { self.error = error.localizedDescription }
     }
     private var pendingEffects: FilmEffectsSettings? { effects != originalEffects ? effects : nil }
     private var visibleLightControls: [SceneLightControl] {
@@ -287,7 +320,7 @@ struct SceneReviewView: View {
             }
             .safeAreaInset(edge: .bottom) { photosFooter }
             .saveStatusToast($export.saveFeedback)
-            .navigationTitle("Review Scene").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Edit Scene").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -295,20 +328,41 @@ struct SceneReviewView: View {
                         else { preview.stop(); dismiss() }
                     }.disabled(busy)
                 }
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    Button("Undo", systemImage: "arrow.uturn.backward", action: undoEdit)
+                        .labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+                        .disabled(history?.canUndo != true || busy || preview.loading)
+                    Button("Redo", systemImage: "arrow.uturn.forward", action: redoEdit)
+                        .labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+                        .disabled(history?.canRedo != true || busy || preview.loading)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Button("Copy Adjustments", systemImage: "doc.on.doc") { pickingWhiteBalance = false; preview.player?.pause(); showingCopyAdjustments = true }
+                            .disabled(preview.loading)
+                        Button("Paste Adjustments", systemImage: "doc.on.clipboard", action: pasteAdjustments)
+                            .disabled(app.copiedSceneAdjustments == nil || preview.loading)
+                        Divider()
                         Button("Save to Photos", systemImage: "square.and.arrow.down") { saveClip() }
                             .disabled(preview.loading || preview.error != nil)
                         Button("Duplicate", systemImage: "plus.square.on.square") { duplicateScene() }
                         Divider()
                         Button("Delete Scene", systemImage: "trash", role: .destructive) { confirmRemove = true }
                     } label: { Image(systemName: "ellipsis.circle").frame(minWidth: 44, minHeight: 44) }
-                        .accessibilityLabel("Scene actions").disabled(busy)
+                        .accessibilityLabel("Scene actions").disabled(busy || history?.isGrouping == true)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { saveEditsAndClose() }.disabled(busy || preview.loading)
+                    Button("Save") { saveEditsAndClose() }.disabled(busy || preview.loading || history?.isGrouping == true)
                 }
             }
+            .sheet(isPresented: $showingCopyAdjustments) {
+                CopySceneAdjustmentsView(source: adjustments) { clipboard in
+                    app.copiedSceneAdjustments = clipboard
+                    notice = "Adjustments copied. Open another scene to paste."
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
+            }
+            .onChange(of: editState) { _, state in history?.observe(state) }
             .confirmationDialog("Discard changes?", isPresented: $confirmDiscard, titleVisibility: .visible) {
                 Button("Discard Changes", role: .destructive) { preview.stop(); dismiss() }
                 Button("Keep Editing", role: .cancel) { }
@@ -329,6 +383,7 @@ struct SceneReviewView: View {
                 guard let movie else { error = "This movie is unavailable."; return }
                 if !loadedEffects {
                     effects = movie.exportEffects; originalEffects = effects; loadedEffects = true
+                    history = SceneEditHistory(editState)
                 }
                 await preview.prepare(movie: movie, scene: scene, app: app)
                 if !Task.isCancelled {
@@ -355,7 +410,7 @@ struct SceneReviewView: View {
             }
             .onChange(of: adjustments) { _, _ in invalidateExport() }
             .onChange(of: effects) { _, _ in invalidateExport() }
-            .onChange(of: tool) { _, _ in pickingWhiteBalance = false; comparing = false; interactingControl = nil; UISelectionFeedbackGenerator().selectionChanged() }
+            .onChange(of: tool) { _, _ in editingChanged(false); pickingWhiteBalance = false; comparing = false; interactingControl = nil; UISelectionFeedbackGenerator().selectionChanged() }
             .onChange(of: export.running) { _, running in
                 guard !running, waitingForExport else { return }
                 waitingForExport = false
@@ -364,9 +419,9 @@ struct SceneReviewView: View {
                 else { export.saveFeedback = nil }
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase != .active { comparing = false; interactingControl = nil; preview.player?.pause() }
+                if phase != .active { editingChanged(false); comparing = false; interactingControl = nil; preview.player?.pause() }
             }
-            .onChange(of: busy) { _, value in if value { comparing = false; interactingControl = nil } }
+            .onChange(of: busy) { _, value in if value { editingChanged(false); pickingWhiteBalance = false; comparing = false; interactingControl = nil } }
         }
         .interactiveDismissDisabled(busy || hasUnsavedEdits)
         .onDisappear { preview.stop(); export.cancel() }
@@ -402,7 +457,7 @@ struct SceneReviewView: View {
                 }.padding(.horizontal, 16)
             }
             if tool == .fx {
-                Form { FilmEffectsControlSections(settings: $effects) }
+                Form { FilmEffectsControlSections(settings: $effects, editingChanged: editingChanged) }
                     .listStyle(.plain).listSectionSpacing(.compact)
                     .disabled(busy || comparing || preview.loading || preview.error != nil)
             } else {
@@ -454,7 +509,7 @@ struct SceneReviewView: View {
     }
     private var trimControls: some View {
         VStack(spacing: 12) {
-            TrimRangeControl(scene: scene, root: app.store.root, start: $start, end: $end, movie: movie)
+            TrimRangeControl(scene: scene, root: app.store.root, start: $start, end: $end, movie: movie, editingChanged: editingChanged)
                 .frame(height: 64).padding(.horizontal, 22).disabled(busy)
             HStack {
                 Text(durationLabel(CMTime(seconds: start, preferredTimescale: 600)))
@@ -561,6 +616,7 @@ struct SceneReviewView: View {
                     lightSlider(.pushPull)
                     lightSlider(.fade)
                     LightCurveEditor(curve: $adjustments.curve, editingChanged: { active in
+                        editingChanged(active)
                         interactingControl = active ? "Curve" : nil
                     }).disabled(busy || comparing)
                         .background { if interactingControl == "Curve" { Color.clear.homeGlass().allowsHitTesting(false) } }
@@ -595,7 +651,7 @@ struct SceneReviewView: View {
                     }
                     .accessibilityHidden(true)
             }.font(.subheadline)
-            HapticGlassSlider(value: value, range: range)
+            HapticGlassSlider(value: value, range: range, editingChanged: editingChanged)
                 .frame(minHeight: 44)
                 .accessibilityLabel(title)
                 .accessibilityValue(Text(value.wrappedValue * 100, format: .number.precision(.fractionLength(0))))
@@ -636,7 +692,9 @@ struct SceneReviewView: View {
             do {
                 let result = try await WhiteBalanceSampler.sample(url: url, time: time, point: point,
                     canvas: movie.format.canvas, logEncoded: (scene.profile ?? movie.captureProfile) == .appleLog)
+                editingChanged(true)
                 adjustments.warmth = result.warmth; adjustments.tint = result.tint
+                editingChanged(false)
                 UISelectionFeedbackGenerator().selectionChanged()
                 notice = "White balance set for this scene."
             } catch { self.error = error.localizedDescription }

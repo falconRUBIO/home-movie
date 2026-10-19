@@ -51,6 +51,8 @@ struct HapticGlassSlider: View {
     var range: ClosedRange<Double> = 0...1
     var step = 0.01
     var neutral = 0.0
+    var editingChanged: (Bool) -> Void = { _ in }
+    @State private var editing = false
     @State private var snap = AdjustmentDetent()
     @State private var feedback = AdjustmentFeedback()
     private var interaction: Binding<Double> {
@@ -65,6 +67,9 @@ struct HapticGlassSlider: View {
         // The native iOS 26 thumb supplies the same pressed Liquid Glass as FX.
         Slider(value: interaction, in: range, onEditingChanged: { active in
             if active { snap = AdjustmentDetent(); feedback.begin(value: value, step: step) }
-        })
+            editing = active; editingChanged(active)
+        }).onDisappear {
+            if editing { editing = false; editingChanged(false) }
+        }
     }
 }
