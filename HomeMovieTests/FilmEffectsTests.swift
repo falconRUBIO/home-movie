@@ -252,4 +252,41 @@ extension FilmEffectsTests {
         XCTAssertEqual(result[index], 0.04, accuracy: 0.002)
         XCTAssertEqual(result[index + 1], 0.04, accuracy: 0.002)
     }
+    func testSharpeningBoundsHighContrastEdgesWithoutTintingNeutralsOrFlatPatches() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 128, height: 64)
+        let dark = CIImage(color: CIColor(red: 0.02, green: 0.02, blue: 0.02)).cropped(to: bounds)
+        let light = CIImage(color: CIColor(red: 0.98, green: 0.98, blue: 0.98)).cropped(to: CGRect(x: 64, y: 0, width: 64, height: 64))
+        let source = light.composited(over: dark).cropped(to: bounds)
+        let renderer = FilmEffectsRenderer()
+        for amount in [0.1, 0.5, 1.0] {
+            var settings = FilmEffectsSettings.off; settings.sharpnessAmount = amount
+            let result = pixels(try renderer.render(source, settings: settings, time: .zero))
+            for i in stride(from: 0, to: result.count, by: 4) {
+                XCTAssertTrue(result[i].isFinite && result[i] >= 0 && result[i] <= 1)
+                XCTAssertEqual(result[i], result[i + 1], accuracy: 0.001)
+                XCTAssertEqual(result[i], result[i + 2], accuracy: 0.001)
+            }
+            XCTAssertEqual(result[(32 * 128 + 16) * 4], 0.02, accuracy: 0.001)
+            XCTAssertEqual(result[(32 * 128 + 112) * 4], 0.98, accuracy: 0.001)
+        }
+    }
+
+    func testSharpeningLimiterPreservesColoredEnhancementDirectionAndExactBypass() throws {
+        func image(_ rgb: [Float]) -> CIImage {
+            let rgba = rgb + [1]
+            return CIImage(bitmapData: rgba.withUnsafeBytes { Data($0) }, bytesPerRow: 16,
+                size: CGSize(width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+        }
+        let base = image([0.8, 0.5, 0.2]), sharp = image([1.2, 0.75, 0.3])
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "FilmEffects", withExtension: "metallib"))
+        let kernel = try CIColorKernel(functionName: "filmDetail", fromMetalLibraryData: Data(contentsOf: url))
+        let bounded = try XCTUnwrap(kernel.apply(extent: base.extent, arguments: [base, sharp]))
+        let p = pixels(bounded)
+        XCTAssertGreaterThan(p[0], 0.8); XCTAssertLessThan(p[0], 1)
+        XCTAssertEqual(p[0] / p[1], 1.6, accuracy: 0.003)
+        XCTAssertEqual(p[1] / p[2], 2.5, accuracy: 0.003)
+        let unchanged = try XCTUnwrap(kernel.apply(extent: base.extent, arguments: [base, base]))
+        for c in 0..<4 { XCTAssertEqual(pixels(unchanged)[c], pixels(base)[c], accuracy: 0.001) }
+    }
+
 }

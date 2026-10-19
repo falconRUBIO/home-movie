@@ -377,4 +377,31 @@ extension SceneAdjustmentsTests {
             }
         }
     }
+    func testStandardWhiteBalanceAlonePreservesBrightChannelRatiosInsideSDR() throws {
+        func linear(_ x: Double) -> Double { x < 0.081 ? x / 4.5 : pow((x + 0.099) / 1.099, 1 / 0.45) }
+        let original = [0.96, 0.89, 0.81]
+        for w in [-1.0, 0, 1] {
+            for t in [-1.0, 0, 1] where w != 0 || t != 0 {
+                var recipe = SceneAdjustments.neutral; recipe.warmth = w; recipe.tint = t
+                let result = sample(try recipe.applyingBalance(to: color(original[0], original[1], original[2]), logEncoded: false))
+                XCTAssertTrue(result.prefix(3).allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 1.0001 })
+                let gains = [exp2(2 * (0.22 * w + 0.13 * t)), exp2(2 * (0.025 * w - 0.16 * t)), exp2(2 * (-0.245 * w + 0.13 * t))]
+                let expected = zip(original, gains).map { linear($0.0) * $0.1 }
+                XCTAssertEqual(linear(Double(result[0])) / linear(Double(result[1])), expected[0] / expected[1], accuracy: 0.015)
+                XCTAssertEqual(linear(Double(result[2])) / linear(Double(result[1])), expected[2] / expected[1], accuracy: 0.015)
+            }
+        }
+    }
+    func testStandardWhiteBalanceApproachesNeutralContinuouslyAndPreservesLogOrdering() throws {
+        let source = color(0.96, 0.89, 0.81)
+        for amount in [-0.0001, 0.0001] {
+            var recipe = SceneAdjustments.neutral; recipe.warmth = amount
+            let result = sample(try recipe.applyingBalance(to: source, logEncoded: false))
+            for c in 0..<3 { XCTAssertEqual(result[c], sample(source)[c], accuracy: 0.002) }
+        }
+        var recipe = SceneAdjustments.neutral; recipe.warmth = 0.5
+        let log = sample(try recipe.applyingBalance(to: color(0.7, 0.7, 0.7), logEncoded: true))
+        XCTAssertGreaterThan(log[0], log[2], "Log balance must retain its source-encoded ordering")
+    }
+
 }

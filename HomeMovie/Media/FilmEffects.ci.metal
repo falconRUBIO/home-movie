@@ -148,11 +148,13 @@ extern "C" { namespace coreimage {
         if (logEncoded > 0.5) {
             rgb = float3(encodeAppleLog(rgb.r), encodeAppleLog(rgb.g), encodeAppleLog(rgb.b));
         } else {
-            // Standard is already display limited: soften positive exposure into
-            // the SDR ceiling instead of clipping a bright range to a flat white.
+            // Standard is display-referred. Exposure AND RGB balance can exceed
+            // SDR headroom. Compress the peak with one shared gain so channel
+            // ratios survive; the knee converges to white as controls approach zero.
             float peak = max(rgb.r, max(rgb.g, rgb.b));
-            float knee = 1.0 - 0.2 * (1.0 - exp2(-max(exposure, 0.0) * 2.0));
-            if (peak > knee && exposure > 0.0) {
+            float strength = max(max(exposure, 0.0), max(abs(warmth), abs(tint)));
+            float knee = 1.0 - 0.2 * (1.0 - exp2(-strength * 2.0));
+            if (peak > knee && strength > 0.0) {
                 float shoulder = knee + (1.0 - knee) * (1.0 - exp(-(peak - knee) / (1.0 - knee)));
                 rgb = (rgb / peak) * shoulder;
             }
@@ -307,6 +309,20 @@ extern "C" { namespace coreimage {
         // Retain a sharp base and avoid turning dark scenes into a milky wash.
         float blend = amount * (0.55 + 0.35 * smoothstep(0.08, 0.75, l));
         return float4(encode709(mix(base.rgb, soft.rgb, blend)), base.a);
+    }
+    float4 filmDetail(sample_t base, sample_t sharp) {
+        // A luminance sharpen can create negative/over-white edge excursions.
+        // Bound the enhancement vector smoothly, rather than clipping each
+        // channel independently or changing unsharpened pixels elsewhere.
+        float3 rgb = clamp(base.rgb, 0.0, 1.0);
+        float3 delta = sharp.rgb - rgb;
+        float ratio = 0.0;
+        for (int c = 0; c < 3; ++c) {
+            float room = delta[c] >= 0.0 ? 1.0 - rgb[c] : rgb[c];
+            ratio = max(ratio, abs(delta[c]) / max(room, 0.000001));
+        }
+        float gain = ratio > 0.0001 ? (1.0 - exp(-ratio)) / ratio : 1.0 - ratio * 0.5;
+        return float4(clamp(rgb + delta * gain, 0.0, 1.0), base.a);
     }
     float4 filmRolloff(sample_t input, float amount) {
         float3 rgb = decode709(input.rgb);
