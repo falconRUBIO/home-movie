@@ -597,6 +597,24 @@ actor ProjectStore {
         try write(next)
     }
     func storageBytes() -> Int64 { catalog.movies.flatMap(\.scenes).reduce(0) { $0 + $1.bytes } }
+    func settingsStorage() -> SettingsStorage {
+        var pending: Int64 = 0
+        var cleanupKnown = true
+        for id in catalog.pendingDeletionIDs ?? [] {
+            for folder in ["Originals", "Staging"] {
+                do {
+                    let values = try root.appendingPathComponent("\(folder)/\(id.uuidString).mov")
+                        .resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+                    if values.isRegularFile == true, values.isSymbolicLink != true { pending += Int64(values.fileSize ?? 0) }
+                } catch {
+                    let failure = error as NSError
+                    if failure.domain != NSCocoaErrorDomain || (failure.code != NSFileReadNoSuchFileError && failure.code != NSFileNoSuchFileError) { cleanupKnown = false }
+                }
+            }
+        }
+        return SettingsStorage(temporaryExportBytes: SettingsStorage.exportBytes(in: URL.cachesDirectory.appendingPathComponent("Exports", isDirectory: true)),
+            pendingCleanupBytes: cleanupKnown ? pending : nil, availableBytes: try? availableBytes())
+    }
     func availableBytes() throws -> Int64 {
         let values = try root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
         guard let capacity = values.volumeAvailableCapacityForImportantUsage ?? values.volumeAvailableCapacity.map(Int64.init) else {

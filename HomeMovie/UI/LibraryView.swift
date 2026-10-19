@@ -474,45 +474,96 @@ struct MovieSettingsView: View {
 struct SettingsView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("openLastMovie") private var openLastMovie = false
     @AppStorage("copyScenesToPhotos") private var copyScenesToPhotos = false
     @State private var backups = false
     @State private var recovery = false
+    @State private var storage: SettingsStorage?
+    private var summary: SettingsSummary { SettingsSummary(movies: app.movies) }
+    private func bytes(_ value: Int64?) -> String {
+        value.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Unavailable"
+    }
+    private func refreshStorage() async { storage = await app.store.settingsStorage() }
+    private var storageSection: some View {
+        Section {
+            LabeledContent("Active Footage", value: bytes(summary.activeBytes))
+            NavigationLink {
+                RecentlyDeletedView().environmentObject(app)
+            } label: {
+                LabeledContent("Recently Deleted", value: bytes(summary.deletedBytes))
+            }
+            if let storage {
+                LabeledContent("Temporary Exports", value: bytes(storage.temporaryExportBytes))
+                if storage.pendingCleanupBytes == nil || (storage.pendingCleanupBytes ?? 0) > 0 {
+                    LabeledContent("Pending Cleanup", value: bytes(storage.pendingCleanupBytes))
+                }
+                LabeledContent("Available on iPhone", value: bytes(storage.availableBytes))
+            } else { ProgressView("Checking storage…") }
+        } header: { Text("Storage") }
+        footer: { Text("Footage totals exclude missing files. Temporary exports can be recreated; available space is shared with other apps.") }
+    }
+    private var backupSection: some View {
+        Section {
+            Button("Backup & Restore", systemImage: "archivebox") { backups = true }
+            if let date = summary.latestFilesBackup {
+                LabeledContent("Latest Files Backup") { Text(date, format: .dateTime.month(.abbreviated).day().hour().minute()) }
+            } else { LabeledContent("Latest Files Backup", value: "Not yet saved") }
+            LabeledContent("Movies Needing Backup", value: "\(summary.moviesNeedingBackup)")
+            Toggle("Copy Original Scenes to Photos", isOn: $copyScenesToPhotos.withSelectionFeedback())
+                .onChange(of: copyScenesToPhotos) { _, enabled in
+                    if enabled { app.retryPhotosCopies() } else { app.stopPhotosRetries() }
+                }
+            if copyScenesToPhotos {
+                LabeledContent("Awaiting Photos Copy", value: "\(summary.pendingPhotosCopies)")
+                if summary.pendingPhotosCopies > 0 {
+                    Button("Retry Photos Copies") { app.retryPhotosCopies() }
+                }
+                if let status = app.photosCopyStatus { Text(status).font(.footnote).foregroundStyle(.secondary) }
+            }
+            Button("Recording Recovery", systemImage: "arrow.counterclockwise") { recovery = true }
+        } header: { Text("Backup & Recovery") }
+        footer: {
+            Text("Latest Files Backup may cover only part of your library. See Backup & Restore for each movie’s status. Photos copies use extra space and don’t preserve editable projects.")
+        }
+    }
+    private var helpSection: some View {
+        Section {
+            Link(destination: URL(string: "https://github.com/falconRUBIO/home-movie/issues")!) {
+                Label("Help & Contact", systemImage: "questionmark.circle")
+            }
+            NavigationLink("Diagnostics", destination: DiagnosticsView())
+            NavigationLink("Privacy", destination: PrivacyView())
+            Button("App Permissions", systemImage: "hand.raised") {
+                if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+            }
+        } header: { Text("Help & Privacy") }
+        footer: { Text("Help opens GitHub; posting requires an account. App Permissions opens iPhone Settings for camera, microphone, and Photos access.") }
+    }
     var body: some View {
         NavigationStack {
             Form {
+                Section("General") {
+                    Toggle("Open Last Movie", isOn: $openLastMovie.withSelectionFeedback())
+                }
+                storageSection
+                backupSection
+                helpSection
                 Section("About") {
                     LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                     LabeledContent("Build", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")
                 }
-                Section("Support") { NavigationLink("Diagnostics", destination: DiagnosticsView()) }
-                Section("Launch") { Toggle("Open last movie", isOn: $openLastMovie.withSelectionFeedback()) }
-                Section { NavigationLink("Privacy", destination: PrivacyView()) }
-                Section("Protection") {
-                    Toggle("Copy original scenes to Photos", isOn: $copyScenesToPhotos.withSelectionFeedback())
-                        .onChange(of: copyScenesToPhotos) { _, enabled in if enabled { app.retryPhotosCopies() } else { app.stopPhotosRetries() } }
-                    Text("Creates a separate Photos copy after each local save. Copies use extra storage. iCloud Photos syncing follows your Photos settings.").font(.footnote).foregroundStyle(.secondary)
-                    if copyScenesToPhotos { Button("Retry Pending Photos Copies") { app.retryPhotosCopies() } }
-                    if let status = app.photosCopyStatus { Text(status).font(.footnote).foregroundStyle(.secondary) }
-                    Button("Backup & Restore", systemImage: "archivebox") { backups = true }
-                    Button("Recording Recovery", systemImage: "arrow.counterclockwise") { recovery = true }
-                }
-                Section("Storage") {
-                    LabeledContent("Source footage", value: ByteCountFormatter.string(fromByteCount: app.storageBytes, countStyle: .file))
-                    Text("Projects stay on this iPhone. Deleting the app can delete your movies. Save finished videos to Photos or Files.").font(.footnote).foregroundStyle(.secondary)
-                    Text("A finished video does not preserve editable scene boundaries. Use Backup & Restore to save originals together with movie order and trims.").font(.footnote).foregroundStyle(.secondary)
-                }
-                Section {
-                    NavigationLink {
-                        RecentlyDeletedView().environmentObject(app)
-                    } label: { Label("Recently Deleted", systemImage: "trash") }
-                }
-
             }.navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+                .task { await app.refresh(); await refreshStorage() }
+                .onChange(of: app.movies) { _, _ in Task { await refreshStorage() } }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { Task { await app.refresh(); await refreshStorage() } }
+                }
         }
-        .sheet(isPresented: $backups) { BackupView() }
-        .sheet(isPresented: $recovery) { RecordingRecoveryView() }
+        .sheet(isPresented: $backups, onDismiss: { Task { await refreshStorage() } }) { BackupView() }
+        .sheet(isPresented: $recovery, onDismiss: { Task { await refreshStorage() } }) { RecordingRecoveryView() }
     }
 }
 
