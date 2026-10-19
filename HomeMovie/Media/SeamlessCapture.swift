@@ -112,8 +112,14 @@ final class ContinuousTakeWriter {
         }
         video.markAsFinished(); audio.markAsFinished()
         let priorFailure = failure
+        let recordedProfile = profile, canvas = size, url = writer.outputURL
         writer.finishWriting { [writer] in
-            completion(priorFailure ?? (writer.status == .completed ? nil : writer.error ?? HomeMovieError.message("The take could not be finished.")))
+            let error = priorFailure ?? (writer.status == .completed ? nil : writer.error ?? HomeMovieError.message("The take could not be finished."))
+            guard error == nil, recordedProfile == .appleLog else { completion(error); return }
+            Task {
+                do { try await LogPiPValidation.verifySavedFile(url: url, expectedCanvas: canvas); completion(nil) }
+                catch { completion(error) }
+            }
         }
     }
 }
@@ -265,22 +271,27 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             }
             if let format = square.first { return format }
         }
-        return formats.first {
+        return formats.filter {
             let size = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
-            return size.width == 1920 && size.height == 1080
-        }
+            return CameraCompatibility.isHD(width: size.width, height: size.height)
+        }.sorted {
+            let a = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
+            let b = CMVideoFormatDescriptionGetDimensions($1.formatDescription)
+            return Int64(a.width) * Int64(a.height) < Int64(b.width) * Int64(b.height)
+        }.first
     }
     private static func cameraPair(profile: CaptureProfile = .standard) -> (front: AVCaptureDevice, back: AVCaptureDevice)? {
         guard AVCaptureMultiCamSession.isMultiCamSupported else { return nil }
         let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInUltraWideCamera, .builtInWideAngleCamera, .builtInTrueDepthCamera], mediaType: .video, position: .unspecified)
         let pairs = discovery.supportedMultiCamDeviceSets.compactMap { set -> (front: AVCaptureDevice, back: AVCaptureDevice)? in
             guard let front = set.first(where: { $0.position == .front && captureFormat(for: $0, profile: profile) != nil }),
-                  let back = set.first(where: { $0.position == .back && $0.deviceType == .builtInWideAngleCamera && captureFormat(for: $0, profile: profile) != nil }) else { return nil }
+                  let back = set.filter({ $0.position == .back && captureFormat(for: $0, profile: profile) != nil })
+                    .sorted(by: { ($0.deviceType == .builtInWideAngleCamera ? 0 : 1) < ($1.deviceType == .builtInWideAngleCamera ? 0 : 1) }).first else { return nil }
             return (front, back)
         }
         return pairs.sorted {
-            let a = $0.front.deviceType == .builtInUltraWideCamera ? 0 : 1
-            let b = $1.front.deviceType == .builtInUltraWideCamera ? 0 : 1
+            let a = ($0.back.deviceType == .builtInWideAngleCamera ? 0 : 2) + ($0.front.deviceType == .builtInUltraWideCamera ? 0 : 1)
+            let b = ($1.back.deviceType == .builtInWideAngleCamera ? 0 : 2) + ($1.front.deviceType == .builtInUltraWideCamera ? 0 : 1)
             return a == b ? $0.front.uniqueID < $1.front.uniqueID : a < b
         }.first
     }
@@ -347,13 +358,14 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             session.addInputWithNoConnections(input); session.addOutputWithNoConnections(output)
             guard let port = input.ports.first(where: { $0.mediaType == .video }) else { throw HomeMovieError.message("Camera port unavailable.") }
             let pixelFormat = profile == .appleLog ? LogPiPColor.pixelFormat : kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-            guard output.availableVideoPixelFormatTypes.contains(pixelFormat) else { throw HomeMovieError.message("This camera cannot deliver the required dual-camera pixel format.") }
-            output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat]
             output.alwaysDiscardsLateVideoFrames = true
             output.setSampleBufferDelegate(self, queue: queue)
             let connection = AVCaptureConnection(inputPorts: [port], output: output)
             guard session.canAddConnection(connection) else { throw HomeMovieError.message("Camera connection unavailable.") }
             session.addConnection(connection)
+            // Query after connection so the output reports this camera's formats.
+            guard output.availableVideoPixelFormatTypes.contains(pixelFormat) else { throw HomeMovieError.message("This camera cannot deliver the required dual-camera pixel format.") }
+            output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat]
             connection.automaticallyAdjustsVideoMirroring = false
             if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
             if connection.isVideoRotationAngleSupported(0) { connection.videoRotationAngle = 0 }

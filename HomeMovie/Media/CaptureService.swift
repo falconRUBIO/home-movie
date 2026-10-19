@@ -110,8 +110,11 @@ enum CameraCompatibility {
     }
     static func supportsLog(_ format: AVCaptureDevice.Format) -> Bool {
         let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-        return format.supportedColorSpaces.contains(.appleLog) && size.width >= 1920 && size.height >= 1080 &&
+        return format.supportedColorSpaces.contains(.appleLog) && isHD(width: size.width, height: size.height) &&
             format.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 }
+    }
+    static func isHD(width: Int32, height: Int32) -> Bool {
+        max(width, height) >= 1920 && min(width, height) >= 1080
     }
 }
 struct CameraOptions: Sendable {

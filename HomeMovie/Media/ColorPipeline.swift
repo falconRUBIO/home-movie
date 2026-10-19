@@ -184,8 +184,9 @@ final class ColorInstruction: NSObject, AVVideoCompositionInstructionProtocol, @
         requiredSourceTrackIDs = [NSNumber(value: trackID)]
     }
     func applyingColor(to source: CIImage) throws -> CIImage {
-        let looked = try cube?.apply(to: source) ?? source
-        return try adjustments.apply(to: looked)
+        let balanced = try adjustments.applyingBalance(to: source, logEncoded: cube != nil)
+        let looked = try cube?.apply(to: balanced) ?? balanced
+        return try adjustments.applyingFinishing(to: looked)
     }
 }
 final class LogVideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {

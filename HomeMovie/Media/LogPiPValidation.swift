@@ -6,6 +6,20 @@ import CoreImage
 actor LogPiPValidation {
     static let shared = LogPiPValidation()
     private var validation: Task<Void, Error>?
+    static func verifySavedFile(url: URL, expectedCanvas: CGSize) async throws {
+        let info = try await MediaInspector.inspect(url)
+        guard info.profile == .appleLog, info.size == expectedCanvas else {
+            throw HomeMovieError.message("The saved Log PiP recording has invalid color or orientation metadata. Its original file has been kept for recovery.")
+        }
+        let asset = AVURLAsset(url: url)
+        guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+            throw HomeMovieError.message("The Log PiP recording has no video track.")
+        }
+        let descriptions = try await track.load(.formatDescriptions)
+        guard !descriptions.isEmpty, descriptions.allSatisfy(LogPiPColor.encodedTenBit) else {
+            throw HomeMovieError.message("The Log PiP encoder did not save 10-bit HEVC components. Its original file has been kept for recovery.")
+        }
+    }
     func check() async throws {
         if let validation { return try await validation.value }
         let job = Task { try await Self.validateEncoder() }

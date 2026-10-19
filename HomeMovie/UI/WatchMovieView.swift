@@ -66,7 +66,7 @@ struct WatchMovieView: View {
                     if movie.captureProfile == .appleLog {
                         ToolbarItem(placement: .topBarTrailing) {
                             Menu {
-                                Button { showOriginalLog.toggle() } label: {
+                                Button { UISelectionFeedbackGenerator().selectionChanged(); showOriginalLog.toggle() } label: {
                                     Label("Show Original", systemImage: showOriginalLog ? "checkmark" : "circle")
                                 }
                                 Divider()
@@ -174,6 +174,7 @@ struct WatchMovieView: View {
 
     private func selectLook(_ look: LUTReference?) {
         guard !changingLook else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
         changingLook = true; showOriginalLog = false
         Task {
             defer { changingLook = false }

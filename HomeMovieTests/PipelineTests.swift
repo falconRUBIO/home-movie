@@ -43,6 +43,34 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(OrientationPolicy.interfaceFormat(.unknown, observed: 0), .landscape)
     }
 
+    func testLogMovieFileRotationPreservesCameraCompensationForEveryCanvas() {
+        for format in MovieFormat.allCases {
+            for observed: CGFloat in [0, 90, 180, 270, 359.5, -90, 450] {
+                let expected = (observed.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+                XCTAssertEqual(format.recordingAngle(observed: observed, profile: .appleLog), expected)
+                XCTAssertEqual(format.recordingAngle(observed: observed, profile: .standard),
+                    format.recordingAngle(observed: observed))
+            }
+        }
+        // Native portrait selfie pixels must stay portrait when the coordinator
+        // reports zero. The old canvas-based 90° correction made them landscape.
+        for (format, native, observed) in [
+            (MovieFormat.portrait, CGSize(width: 1080, height: 1920), CGFloat(0)),
+            (.portrait, CGSize(width: 1080, height: 1920), CGFloat(180)),
+            (.portrait, CGSize(width: 1920, height: 1080), CGFloat(90)),
+            (.portrait, CGSize(width: 1920, height: 1080), CGFloat(270)),
+            (.landscape, CGSize(width: 1080, height: 1920), CGFloat(90)),
+            (.landscape, CGSize(width: 1920, height: 1080), CGFloat(0))
+        ] {
+            let angle = format.recordingAngle(observed: observed, profile: .appleLog)
+            let rect = CGRect(origin: .zero, size: native).applying(CGAffineTransform(rotationAngle: angle * .pi / 180))
+            XCTAssertEqual(rect.width, format.canvas.width, accuracy: 0.001)
+            XCTAssertEqual(rect.height, format.canvas.height, accuracy: 0.001)
+        }
+        XCTAssertEqual(MovieFormat.portrait.recordingAngle(observed: .nan, profile: .appleLog), 90)
+        XCTAssertEqual(MovieFormat.landscape.recordingAngle(observed: .infinity, profile: .appleLog), 0)
+    }
+
     @MainActor func testDuplicateSceneOwnsMediaPreservesEditsAndInsertsAfterOriginal() async throws {
         let store = try await makeStore()
         let project = try await store.create(name: "Duplicate", format: .landscape)
@@ -182,7 +210,8 @@ final class PipelineTests: XCTestCase {
         let bytes = try Data(contentsOf: originalURL)
         let lutURL = store.root.appendingPathComponent(LUTReference.filmica.path)
         let lutBytes = try Data(contentsOf: lutURL)
-        let recipe = SceneAdjustments(exposure: 0.1, shadows: 0.2, highlights: -0.3)
+        let recipe = SceneAdjustments(exposure: 0.1, shadows: 0.2, highlights: -0.3,
+            warmth: 0.15, tint: -0.1, contrast: 0.35, blackPoint: -0.2, whitePoint: -0.15, saturation: -0.4, vibrance: 0.5)
         try await store.editScene(movieID: project.id, sceneID: first.id,
             start: CMTime(seconds: 0.25, preferredTimescale: 600), end: CMTime(seconds: 1.75, preferredTimescale: 600), adjustments: recipe)
         let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
@@ -205,6 +234,16 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(export.duration.seconds, 1.5, accuracy: 0.0001)
         XCTAssertEqual((export.videoComposition.instructions.first as? ColorInstruction)?.adjustments, recipe)
         XCTAssertEqual(export.videoComposition.renderSize, movie.format.canvas)
+        let preview = try await MediaAssembler().build(movie: clip, root: store.root, forFilmEffectsPreview: true)
+        var frames: [Data] = []
+        for bundle in [watch, preview, export] {
+            let generator = AVAssetImageGenerator(asset: bundle.asset)
+            generator.videoComposition = bundle.videoComposition
+            generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+            let image = try await generator.image(at: CMTime(value: 15, timescale: 30)).image
+            frames.append(try XCTUnwrap(image.dataProvider?.data) as Data)
+        }
+        XCTAssertEqual(frames[0], frames[1]); XCTAssertEqual(frames[1], frames[2])
         let original = try await MediaAssembler().build(movie: movie, root: store.root, showOriginalLog: true)
         XCTAssertEqual((original.videoComposition.instructions.first as? ColorInstruction)?.adjustments, .neutral)
     }
@@ -354,7 +393,8 @@ final class PipelineTests: XCTestCase {
                 trimStart: MediaTime(seconds: 0), trimEnd: MediaTime(seconds: 0.4),
                 width: 3840, height: 2160, hasAudio: false, bytes: Int64(sourceBytes.count),
                 profile: .appleLog)]
-            movie.scenes[0].adjustments = SceneAdjustments(exposure: 0.2, shadows: 0.3, highlights: -0.3)
+            movie.scenes[0].adjustments = SceneAdjustments(exposure: 0.2, shadows: 0.3, highlights: -0.3,
+                warmth: 0.15, tint: -0.1, contrast: 0.35, blackPoint: -0.2, whitePoint: -0.15, saturation: -0.3, vibrance: 0.5)
             var effects = FilmEffectsSettings.off
             effects.grainEnabled = true; effects.grainAmount = 1; effects.grainTexture = .coarse16
             effects.halationEnabled = true; effects.halationAmount = 1; effects.halationSpread = 1
