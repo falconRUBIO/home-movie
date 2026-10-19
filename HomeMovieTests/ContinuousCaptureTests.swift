@@ -308,7 +308,7 @@ final class ContinuousCaptureTests: XCTestCase {
         XCTAssertTrue(CameraCompatibility.shouldPreparePiP(profile: .standard, storedPreference: true, requested: true, currentlyEnabled: false))
         XCTAssertTrue(CameraCompatibility.shouldPreparePiP(profile: .standard, storedPreference: true, requested: false, currentlyEnabled: true))
         XCTAssertFalse(CameraCompatibility.shouldPreparePiP(profile: .standard, storedPreference: false, requested: false, currentlyEnabled: true))
-        XCTAssertFalse(CameraCompatibility.shouldPreparePiP(profile: .appleLog, storedPreference: true, requested: true, currentlyEnabled: true))
+        XCTAssertTrue(CameraCompatibility.shouldPreparePiP(profile: .appleLog, storedPreference: true, requested: true, currentlyEnabled: true))
     }
 
     func testLogRecordingCannotUseSegmentedCameraFlip() {
@@ -327,8 +327,8 @@ final class ContinuousCaptureTests: XCTestCase {
                 otherCameraSupported: false, continuousFlipSupported: continuous))
         }
     }
-    func testPiPRequiresStandardEvenOnDualCameraHardware() {
-        XCTAssertFalse(CameraCompatibility.allowsPiP(profile: .appleLog, deviceSupported: true))
+    func testPiPAllowsEitherProfileOnlyWhenItsDeviceFormatsAreSupported() {
+        XCTAssertTrue(CameraCompatibility.allowsPiP(profile: .appleLog, deviceSupported: true))
         XCTAssertFalse(CameraCompatibility.allowsPiP(profile: .appleLog, deviceSupported: false))
         XCTAssertFalse(CameraCompatibility.allowsPiP(profile: .standard, deviceSupported: false))
         XCTAssertTrue(CameraCompatibility.allowsPiP(profile: .standard, deviceSupported: true))

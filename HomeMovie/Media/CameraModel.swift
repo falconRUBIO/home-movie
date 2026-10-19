@@ -127,6 +127,16 @@ struct RecordingFlipHandoff {
         let granted = await CaptureService.permissions()
         guard active, preparationID == requestID else { return }
         guard granted else { state = .denied; return }
+        if dualCamera, profile == .appleLog {
+            do { try await LogPiPValidation.shared.check() }
+            catch {
+                guard active, preparationID == requestID else { return }
+                ReliabilityDiagnostics.shared.record(.cameraFailed, error: error)
+                state = .failed; message = error.localizedDescription; pipSetupFailed = true
+                return
+            }
+            guard active, preparationID == requestID, !Task.isCancelled else { return }
+        }
         service.prepare(front: rememberedFront, profile: profile, dualCamera: dualCamera, pipLayout: layout, canvasFormat: canvasFormat)
     }
     func record(movieID: UUID, continuingAt elapsed: CMTime? = nil) {
@@ -136,7 +146,8 @@ struct RecordingFlipHandoff {
         let interfaceFormat = OrientationPolicy.shared.currentInterfaceFormat(observed: observed)
         let format = movie.recordingFormat ?? interfaceFormat
         let recordingFormat = options?.dualCameraPrepared == true ? format : interfaceFormat
-        let angle = recordingFormat.recordingAngle(observed: observed, profile: movie.captureProfile)
+        let angle = recordingFormat.recordingAngle(observed: observed, profile: movie.captureProfile,
+            composited: options?.dualCameraPrepared == true)
         // Keep the camera controls oriented to the phone; PiP's movie canvas is independent.
         takeFormat = OrientationPolicy.shared.currentInterfaceFormat(observed: observed)
         activeMovieID = movieID; elapsedBeforeSegment = elapsed ?? .zero

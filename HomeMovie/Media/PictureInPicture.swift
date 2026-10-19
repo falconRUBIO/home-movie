@@ -213,9 +213,10 @@ struct PiPFrameMatcher {
 enum PiPCompositor {
     // Both views are intentionally unmirrored in preview AND saved footage, so text stays readable.
     static func image(background: CVPixelBuffer, presenter: CVPixelBuffer?, canvas: CGSize,
-                      backgroundAngle: CGFloat, presenterAngle: CGFloat, presentation: PiPPresentation) -> CIImage {
+                      backgroundAngle: CGFloat, presenterAngle: CGFloat, presentation: PiPPresentation, profile: CaptureProfile = .standard) -> CIImage {
         let bounds = CGRect(origin: .zero, size: canvas)
-        let source = CIImage(cvPixelBuffer: background)
+        let imageOptions: [CIImageOption: Any] = profile == .appleLog ? [.colorSpace: NSNull()] : [:]
+        let source = CIImage(cvPixelBuffer: background, options: imageOptions)
         var result = source.transformed(by: LiveLookGeometry.transform(source: source.extent.size, target: canvas, angle: backgroundAngle, front: false)).cropped(to: bounds)
         guard presentation.opacity > 0, presentation.isPlaceable, let presenter, !presentation.rect.isEmpty else { return result }
         if presentation.composition != .inset {
@@ -224,7 +225,7 @@ enum PiPCompositor {
             func panel(_ buffer: CVPixelBuffer, unit: CGRect, angle: CGFloat, zoom: CGFloat) -> CIImage {
                 let rect = CGRect(x: unit.minX * canvas.width, y: (1 - unit.maxY) * canvas.height,
                                   width: unit.width * canvas.width, height: unit.height * canvas.height)
-                let image = CIImage(cvPixelBuffer: buffer)
+                let image = CIImage(cvPixelBuffer: buffer, options: imageOptions)
                 return image.transformed(by: LiveLookGeometry.transform(source: image.extent.size,
                         target: rect.size, angle: angle, front: false))
                     .transformed(by: CGAffineTransform(a: zoom, b: 0, c: 0, d: zoom,
@@ -244,7 +245,7 @@ enum PiPCompositor {
         let unit = presentation.rect
         let rect = CGRect(x: unit.minX * canvas.width, y: (1 - unit.maxY) * canvas.height,
             width: unit.width * canvas.width, height: unit.height * canvas.height)
-        let front = CIImage(cvPixelBuffer: presenter)
+        let front = CIImage(cvPixelBuffer: presenter, options: imageOptions)
         let zoom = PiPLayout.clampedZoom(presentation.zoom)
         let zoomTransform = CGAffineTransform(a: zoom, b: 0, c: 0, d: zoom,
             tx: rect.width * (1 - zoom) / 2, ty: rect.height * (1 - zoom) / 2)
@@ -267,7 +268,12 @@ final class PiPFrameRenderer {
         let scale = min(1, 960 / max(canvas.width, canvas.height))
         return CGSize(width: (canvas.width * scale).rounded(), height: (canvas.height * scale).rounded())
     }
-    private let context = CIContext(options: [.cacheIntermediates: false])
+    private let context: CIContext
+    private let profile: CaptureProfile
+    init(profile: CaptureProfile = .standard) {
+        self.profile = profile
+        context = CIContext(options: profile == .appleLog ? LogPiPColor.contextOptions() : [.cacheIntermediates: false])
+    }
     private var pool: CVPixelBufferPool?
     private var canvas = CGSize.zero
     func render(_ image: CIImage, canvas: CGSize) -> CVPixelBuffer? {
@@ -275,7 +281,7 @@ final class PiPFrameRenderer {
               canvas.width <= 4096, canvas.height <= 4096 else { return nil }
         if self.canvas != canvas || pool == nil {
             pool = nil; self.canvas = canvas
-            let attributes: [String: Any] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            let attributes: [String: Any] = [kCVPixelBufferPixelFormatTypeKey as String: profile == .appleLog ? LogPiPColor.pixelFormat : kCVPixelFormatType_32BGRA,
                 kCVPixelBufferWidthKey as String: Int(canvas.width), kCVPixelBufferHeightKey as String: Int(canvas.height),
                 kCVPixelBufferMetalCompatibilityKey as String: true, kCVPixelBufferIOSurfacePropertiesKey as String: [:]]
             guard CVPixelBufferPoolCreate(kCFAllocatorDefault, [kCVPixelBufferPoolMinimumBufferCountKey as String: 3] as CFDictionary,
@@ -286,7 +292,9 @@ final class PiPFrameRenderer {
         guard CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pool,
             [kCVPixelBufferPoolAllocationThresholdKey as String: 8] as CFDictionary, &buffer) == kCVReturnSuccess,
             let buffer else { return nil }
-        context.render(image, to: buffer, bounds: CGRect(origin: .zero, size: canvas), colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        if profile == .appleLog { LogPiPColor.attach(to: buffer) }
+        context.render(image, to: buffer, bounds: CGRect(origin: .zero, size: canvas), colorSpace: profile == .appleLog ? nil : CGColorSpace(name: CGColorSpace.sRGB))
+        if profile == .appleLog { LogPiPColor.attach(to: buffer) }
         return buffer
     }
 }

@@ -576,7 +576,10 @@ final class PictureInPictureTests: XCTestCase {
         let layout = PiPLayout(corner: .topLeft, size: .medium, orientation: .portrait, zoom: 1.5, composition: .sideBySide)
         try await store.setPiPLayout(movieID: movie.id, layout: layout)
         try await store.setDualCameraCapture(movieID: movie.id, enabled: true)
-        do { try await store.setDualCameraCapture(movieID: log.id, enabled: true); XCTFail("Log must not silently downgrade") } catch { }
+        try await store.setDualCameraCapture(movieID: log.id, enabled: true)
+        let withLogPiP = await store.snapshot()
+        XCTAssertEqual(withLogPiP.first { $0.id == log.id }?.captureProfile, .appleLog)
+        XCTAssertEqual(withLogPiP.first { $0.id == log.id }?.dualCameraCapture, true)
         // Project backups require recorded footage, not an empty movie catalog.
         let ticket = try await store.begin(movieID: movie.id, format: .landscape, profile: .standard)
         let writer = try ContinuousTakeWriter(url: try await store.url(ticket.staging), angle: 0)

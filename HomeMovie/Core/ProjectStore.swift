@@ -34,9 +34,6 @@ actor ProjectStore {
         var totalBytes: Int64 = 0
         for movie in value.movies {
             try movie.exportEffects.validate()
-            guard movie.dualCameraCapture != true || movie.captureProfile == .standard else {
-                throw HomeMovieError.message("Dual-camera preferences are incompatible with this movie’s recording profile.")
-            }
             if let look = movie.look {
                 guard movie.captureProfile == .appleLog, !look.name.isEmpty, look.name.count <= 80 else {
                     throw HomeMovieError.message("The movie’s look metadata is invalid.")
@@ -213,7 +210,6 @@ actor ProjectStore {
         var next = catalog
         next.movies[i].profile = profile == .standard ? nil : profile
         next.movies[i].look = selected
-        if profile == .appleLog { next.movies[i].dualCameraCapture = nil }
         guard next.movies[i] != movie else { return }
         next.movies[i].revision += 1
         try write(next)
@@ -290,9 +286,6 @@ actor ProjectStore {
     }
     func setDualCameraCapture(movieID: UUID, enabled: Bool) throws {
         try requireIdle(); let i = try index(movieID)
-        guard !enabled || catalog.movies[i].captureProfile == .standard else {
-            throw HomeMovieError.message("Picture-in-Picture uses a Standard SDR movie. Apple Log stays unchanged.")
-        }
         var next = catalog; next.movies[i].dualCameraCapture = enabled; next.movies[i].revision += 1; try write(next)
     }
     func rename(_ id: UUID, name: String) throws {

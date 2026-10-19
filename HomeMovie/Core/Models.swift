@@ -16,11 +16,13 @@ enum MovieFormat: String, Codable, CaseIterable, Identifiable, Sendable {
     var id: Self { self }
     var label: String { rawValue.capitalized }
     var aspect: CGFloat { self == .landscape ? 16 / 9 : 9 / 16 }
-    func recordingAngle(observed: CGFloat, profile: CaptureProfile) -> CGFloat {
+    func recordingAngle(observed: CGFloat, profile: CaptureProfile, composited: Bool = false) -> CGFloat {
         // MovieFileOutput writes a track transform relative to this camera's
         // native pixels. A portrait front sensor may need 0°, not 90°.
-        // Only the Standard compositor uses a conventional landscape canvas.
-        if profile == .appleLog, observed.isFinite {
+        // Compositors use a conventional landscape or portrait canvas.
+        // A composited take writes an upright pixel canvas; individual camera
+        // angles belong to its source frames, not the dimensions of that canvas.
+        if profile == .appleLog, !composited, observed.isFinite {
             return (observed.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
         }
         return recordingAngle(observed: observed)
