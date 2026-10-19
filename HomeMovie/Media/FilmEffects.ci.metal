@@ -119,6 +119,20 @@ extern "C" { namespace coreimage {
         return float4((wave - 0.5) * c + light, input.a);
     }
 
+    // Only extended-output custom LUTs use this display rendering transform.
+    // Compress the luminance shoulder, then fit chroma along a constant-hue ray.
+    // Bounded LUTs remain numerically unchanged, including the bundled Cinema look.
+    float4 lookDisplay(sample_t input) {
+        float l = max(luminance(input.rgb), 0.0);
+        float target = l > 0.85 ? 0.85 + 0.15 * (1.0 - exp(-(l - 0.85) / 0.15)) : l;
+        float3 rgb = l > 0.000001 ? input.rgb * (target / l) : float3(0.0);
+        return float4(fitChroma(rgb, target, 1.0), input.a);
+    }
+
+    float4 neutralSource(sample_t input, float logEncoded) {
+        float3 rgb = logEncoded > 0.5 ? float3(decodeAppleLog(input.r), decodeAppleLog(input.g), decodeAppleLog(input.b)) : decode709(input.rgb);
+        return float4(rgb, input.a);
+    }
     float4 sceneBalance(sample_t input, float exposure, float warmth, float tint, float logEncoded) {
         float3 rgb;
         if (logEncoded > 0.5) {

@@ -16,6 +16,13 @@ struct LUTReference: Codable, Equatable, Sendable {
     var displayName: String { id == Self.filmica.id ? "Cinema" : name }
     var path: String { "Looks/\(id.uuidString).json" }
 }
+enum LUTEncoding: String, Codable, Sendable { case appleLogRec2020, rec709 }
+struct LUTColorContract: Codable, Equatable, Sendable {
+    var input: LUTEncoding
+    var output: LUTEncoding = .rec709
+    static let logToDisplay = LUTColorContract(input: .appleLogRec2020)
+    static let displayLook = LUTColorContract(input: .rec709)
+}
 struct ColorCube: Codable, Sendable {
     let name: String
     let dimension: Int
@@ -23,7 +30,21 @@ struct ColorCube: Codable, Sendable {
     var minimum: [Float] = [0, 0, 0]
     var maximum: [Float] = [1, 1, 1]
     var sourceNotices: String? = nil
+    // Legacy stored looks were imported as Apple Log -> Rec.709.
+    var colorContract: LUTColorContract? = nil
+    var extendedOutput: Bool? = nil
+    var contract: LUTColorContract { colorContract ?? .logToDisplay }
+    mutating func identifyOutputRange() {
+        extendedOutput = rgba.withUnsafeBytes { bytes in
+            (0..<(rgba.count / 4)).contains { index in
+                guard index % 4 != 3 else { return false }
+                let v = bytes.loadUnaligned(fromByteOffset: index * 4, as: Float.self)
+                return v < 0 || v > 1
+            }
+        }
+    }
     func validate() throws {
+        guard contract.output == .rec709 else { throw HomeMovieError.message("Choose a look that outputs Rec.709 SDR.") }
         guard (2...65).contains(dimension), rgba.count == dimension * dimension * dimension * 16,
               !name.isEmpty, name.count <= 80, minimum.count == 3, maximum.count == 3,
               zip(minimum, maximum).allSatisfy({ $0.isFinite && $1.isFinite && $1 > $0 && ($1 - $0).isFinite && (1 / ($1 - $0)).isFinite }) else {
@@ -74,12 +95,17 @@ struct ColorCube: Codable, Sendable {
             rgba: rgb.withUnsafeBytes { Data($0) }, minimum: minimum, maximum: maximum)
         var documented = cube
         documented.sourceNotices = text.split(whereSeparator: \.isNewline).filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("#") || $0.trimmingCharacters(in: .whitespaces).hasPrefix("TITLE ") }.joined(separator: "\n")
-        try documented.validate(); return documented
+        documented.colorContract = .logToDisplay
+        try documented.validate(); documented.identifyOutputRange(); return documented
     }
     /// Bake a display-referred creative LUT after a Log-to-display conversion.
     /// Red is the fastest-changing axis in both .cube and CIColorCube data.
     func following(_ conversion: ColorCube) throws -> ColorCube {
         try validate(); try conversion.validate()
+        // The receiver is explicitly a display look; never normalize Log twice.
+        guard contract.input == .rec709, conversion.contract.output == .rec709 else {
+            throw HomeMovieError.message("This look’s input does not match the Log conversion output.")
+        }
         let count = conversion.dimension * conversion.dimension * conversion.dimension
         var output = [Float](); output.reserveCapacity(count * 4)
         rgba.withUnsafeBytes { creative in
@@ -114,6 +140,8 @@ struct ColorCube: Codable, Sendable {
         var result = ColorCube(name: name, dimension: conversion.dimension,
             rgba: output.withUnsafeBytes { Data($0) }, minimum: conversion.minimum, maximum: conversion.maximum)
         result.sourceNotices = sourceNotices
+        result.colorContract = conversion.contract
+        result.identifyOutputRange()
         try result.validate()
         return result
     }
@@ -124,7 +152,7 @@ struct ColorCube: Codable, Sendable {
         guard info.isRegularFile == true, info.isSymbolicLink != true, (info.fileSize ?? 0) <= 8_000_000 else {
             throw HomeMovieError.message("This movie’s look is unavailable. Choose another look.")
         }
-        let cube = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: url)); try cube.validate(); return cube
+        var cube = try JSONDecoder().decode(ColorCube.self, from: Data(contentsOf: url)); try cube.validate(); cube.identifyOutputRange(); return cube
     }
     static let filmica: Result<ColorCube, Error> = Result {
         guard let url = Bundle.main.url(forResource: "Filmica", withExtension: "json") else {
@@ -164,7 +192,20 @@ struct ColorCube: Codable, Sendable {
             "inputCubeDimension": dimension, "inputCubeData": rgba]), let output = filter.outputImage else {
             throw HomeMovieError.message("This look could not be rendered.")
         }
-        return output
+        guard extendedOutput == true else { return output }
+        return try Self.mapExtendedOutput(output)
+    }
+    private static let outputKernel: Result<CIColorKernel, Error> = Result {
+        guard let url = Bundle.main.url(forResource: "FilmEffects", withExtension: "metallib") else {
+            throw HomeMovieError.message("The look output transform could not load.")
+        }
+        return try CIColorKernel(functionName: "lookDisplay", fromMetalLibraryData: Data(contentsOf: url))
+    }
+    static func mapExtendedOutput(_ image: CIImage) throws -> CIImage {
+        guard let result = try outputKernel.get().apply(extent: image.extent, arguments: [image]) else {
+            throw HomeMovieError.message("The look output transform could not render.")
+        }
+        return result
     }
 }
 
@@ -184,7 +225,10 @@ final class ColorInstruction: NSObject, AVVideoCompositionInstructionProtocol, @
         requiredSourceTrackIDs = [NSNumber(value: trackID)]
     }
     func applyingColor(to source: CIImage) throws -> CIImage {
-        let balanced = try adjustments.applyingBalance(to: source, logEncoded: cube != nil)
+        guard cube == nil || cube?.contract.input == .appleLogRec2020 else {
+            throw HomeMovieError.message("This look must be converted for Apple Log before use.")
+        }
+        let balanced = try adjustments.applyingBalance(to: source, logEncoded: cube?.contract.input == .appleLogRec2020)
         let looked = try cube?.apply(to: balanced) ?? balanced
         return try adjustments.applyingFinishing(to: looked)
     }
@@ -192,13 +236,13 @@ final class ColorInstruction: NSObject, AVVideoCompositionInstructionProtocol, @
 final class LogVideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
     let sourcePixelBufferAttributes: [String: any Sendable]? = [kCVPixelBufferPixelFormatTypeKey as String:
         [kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVPixelFormatType_32BGRA]]
-    let requiredPixelBufferAttributesForRenderContext: [String: any Sendable] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+    let requiredPixelBufferAttributesForRenderContext: [String: any Sendable] = [kCVPixelBufferPixelFormatTypeKey as String: GradedMovieExporter.pixelFormat,
         kCVPixelBufferMetalCompatibilityKey as String: true]
     let supportsWideColorSourceFrames = true
     let supportsHDRSourceFrames = true
     let canConformColorOfSourceFrames = false
     private let queue = DispatchQueue(label: "HomeMovie.log-render", qos: .userInitiated, autoreleaseFrequency: .workItem)
-    private let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .cacheIntermediates: false])
+    private let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .workingFormat: CIFormat.RGBAh.rawValue, .cacheIntermediates: false])
     private let filmRenderer = FilmEffectsRenderer()
     private let cancellationLock = NSLock()
     private var generation = 0
@@ -229,11 +273,12 @@ final class LogVideoCompositor: NSObject, AVVideoCompositing, @unchecked Sendabl
                         image = try self.filmRenderer.render(image.cropped(to: content), settings: instruction.filmEffects, time: request.compositionTime, contentBounds: content)
                     }
                     image = image.composited(over: CIImage(color: .black).cropped(to: bounds)).cropped(to: bounds)
-                    self.context.render(image, to: destination, bounds: bounds, colorSpace: nil)
-                    guard self.currentGeneration() == started else { request.finishCancelledRequest(); return }
+                    CVBufferRemoveAttachment(destination, kCVImageBufferLogTransferFunctionKey)
                     CVBufferSetAttachment(destination, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
                     CVBufferSetAttachment(destination, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
                     CVBufferSetAttachment(destination, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
+                    self.context.render(image, to: destination, bounds: bounds, colorSpace: nil)
+                    guard self.currentGeneration() == started else { request.finishCancelledRequest(); return }
                     request.finish(withComposedVideoFrame: destination)
                 } catch { request.finish(with: error) }
             }

@@ -837,10 +837,7 @@ final class PipelineTests: XCTestCase {
         XCTAssertTrue(parameters.getVolumeRamp(for: CMTime(seconds: 2.998, preferredTimescale: 48000), startVolume: &start, endVolume: &end, timeRange: &range))
         XCTAssertEqual(start, 1); XCTAssertEqual(end, 0)
         let output = store.root.appendingPathComponent("smoothed.mp4")
-        let exporter = try XCTUnwrap(AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality))
-        exporter.videoComposition = bundle.videoComposition; exporter.audioMix = mix
-        do { try await exporter.export(to: output, as: .mp4) }
-        catch { XCTFail("Scene audio mix export failed: \(error)"); throw error }
+        try await GradedMovieExporter.export(bundle, to: output) { _ in }
         let info = try await MediaInspector.inspect(output)
         XCTAssertTrue(info.hasAudio); XCTAssertEqual(info.duration.seconds, 5, accuracy: 0.15)
     }
@@ -1863,7 +1860,8 @@ extension PipelineTests {
         1 1 1
         """, name: "Display Test")
         let standard = try ColorCube.appleStandard.get()
-        let combined = try identity.following(standard)
+        var display = identity; display.colorContract = .displayLook
+        let combined = try display.following(standard)
         XCTAssertEqual(combined.dimension, standard.dimension)
         XCTAssertEqual(combined.minimum, standard.minimum)
         XCTAssertEqual(combined.maximum, standard.maximum)
@@ -1904,7 +1902,8 @@ extension PipelineTests {
         for _ in 0..<8 { points.append(contentsOf: [0.5, 1, 1.5, 1]) }
         let conversion = ColorCube(name: "Test conversion", dimension: 2,
             rgba: points.withUnsafeBytes { Data($0) })
-        let combined = try look.following(conversion)
+        var display = look; display.colorContract = .displayLook
+        let combined = try display.following(conversion)
         combined.rgba.withUnsafeBytes { bytes in
             XCTAssertEqual(bytes.loadUnaligned(fromByteOffset: 0, as: Float.self), 0.75, accuracy: 0.000001)
             XCTAssertEqual(bytes.loadUnaligned(fromByteOffset: 4, as: Float.self), 0.50, accuracy: 0.000001)

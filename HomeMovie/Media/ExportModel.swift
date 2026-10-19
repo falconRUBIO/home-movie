@@ -53,7 +53,7 @@ import UIKit
         info.hasAudio == movie.activeScenes.contains(where: { $0.hasAudio })
     }
     static func cachePrefix(movie: Movie) -> String {
-        "\(movie.id)-r\(movie.revision)-audio2-light\(SceneAdjustments.engineVersion)-film\(FilmEffectsSettings.engineVersion)-\(movie.exportEffects.cacheIdentity)-"
+        "\(movie.id)-r\(movie.revision)-grade10v1-audio2-light\(SceneAdjustments.engineVersion)-film\(FilmEffectsSettings.engineVersion)-\(movie.exportEffects.cacheIdentity)-"
     }
     static func singleSceneMovie(movie: Movie, scene: Scene) throws -> Movie {
         guard movie.activeScenes.contains(where: { $0.id == scene.id }), scene.deletedAt == nil,
@@ -95,27 +95,34 @@ import UIKit
                         progress = 1; running = false; job = nil; return
                     }
                 }
-                try await app.store.requireSpace(bytes: Int64(min(seconds * 2_000_000, Double(Int64.max / 2))) + 300_000_000)
+                try await app.store.requireSpace(bytes: Int64(min(seconds * 4_000_000, Double(Int64.max / 2))) + 300_000_000)
                 guard ProcessInfo.processInfo.thermalState != .critical else {
                     throw HomeMovieError.message("Let your iPhone cool before exporting again.")
                 }
                 let bundle = try await app.assembler.build(movie: movie, root: app.store.root, filmEffects: movie.exportEffects)
                 try Task.checkCancellation()
-                guard let export = AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality), export.supportedFileTypes.contains(.mp4) else {
-                    throw HomeMovieError.message("MP4 export is not supported for this movie.")
-                }
-                session = export; export.videoComposition = bundle.videoComposition; export.audioMix = bundle.audioMix
-                export.shouldOptimizeForNetworkUse = true
                 let destination = directory.appendingPathComponent("\(prefix)\(UUID()).mp4")
                 output = destination
-                let progressTask = Task { [weak self] in
-                    for await state in export.states(updateInterval: 0.2) {
-                        if Task.isCancelled { break }
-                        if case .exporting(let progress) = state { self?.progress = progress.fractionCompleted }
+                let usesLog = movie.captureProfile == .appleLog || movie.activeScenes.contains { $0.profile == .appleLog }
+                if usesLog {
+                    try await GradedMovieExporter.export(bundle, to: destination) { [weak self] value in
+                        await self?.updateProgress(value)
                     }
+                } else {
+                    guard let export = AVAssetExportSession(asset: bundle.asset, presetName: AVAssetExportPresetHighestQuality), export.supportedFileTypes.contains(.mp4) else {
+                        throw HomeMovieError.message("MP4 export is not supported for this movie.")
+                    }
+                    session = export; export.videoComposition = bundle.videoComposition; export.audioMix = bundle.audioMix
+                    export.shouldOptimizeForNetworkUse = true
+                    let progressTask = Task { [weak self] in
+                        for await state in export.states(updateInterval: 0.2) {
+                            if Task.isCancelled { break }
+                            if case .exporting(let progress) = state { self?.progress = progress.fractionCompleted }
+                        }
+                    }
+                    defer { progressTask.cancel() }
+                    try await export.export(to: destination, as: .mp4)
                 }
-                defer { progressTask.cancel() }
-                try await export.export(to: destination, as: .mp4)
                 try Task.checkCancellation()
                 let info = try await MediaInspector.inspect(destination)
                 guard Self.matchesExport(info, movie: movie) else {
@@ -131,6 +138,7 @@ import UIKit
             session = nil; running = false; job = nil
         }
     }
+    private func updateProgress(_ value: Double) { progress = value }
     func cancel() { if running && notice == nil { notice = "Export canceled. Your original scenes are safe." }; session?.cancelExport(); job?.cancel() }
     func saveToPhotos() async {
         guard !savingPhotos else { return }

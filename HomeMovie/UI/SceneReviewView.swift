@@ -212,6 +212,8 @@ struct SceneReviewView: View {
     @State private var interactingControl: String?
     @State private var hslBand = HSLBand.red
     @State private var advancedLight = false
+    @State private var pickingWhiteBalance = false
+    @State private var samplingWhiteBalance = false
     @State private var savedScene: Scene
     @State private var effects = FilmEffectsSettings.off
     @State private var originalEffects = FilmEffectsSettings.off
@@ -235,7 +237,7 @@ struct SceneReviewView: View {
     }
     private var movie: Movie? { app.movie(movieID) }
     private var reviewAspect: CGFloat { movie?.format.aspect ?? (scene.width > scene.height ? 16 / 9 : 9 / 16) }
-    private var busy: Bool { saving || export.running || savingPhotos || waitingForExport }
+    private var busy: Bool { samplingWhiteBalance || saving || export.running || savingPhotos || waitingForExport }
     private var hasUnsavedEdits: Bool {
         editedScene.trimStart != savedScene.trimStart || editedScene.trimEnd != savedScene.trimEnd
             || adjustments != savedScene.lightAdjustments || effects != originalEffects
@@ -353,7 +355,7 @@ struct SceneReviewView: View {
             }
             .onChange(of: adjustments) { _, _ in invalidateExport() }
             .onChange(of: effects) { _, _ in invalidateExport() }
-            .onChange(of: tool) { _, _ in comparing = false; interactingControl = nil; UISelectionFeedbackGenerator().selectionChanged() }
+            .onChange(of: tool) { _, _ in pickingWhiteBalance = false; comparing = false; interactingControl = nil; UISelectionFeedbackGenerator().selectionChanged() }
             .onChange(of: export.running) { _, running in
                 guard !running, waitingForExport else { return }
                 waitingForExport = false
@@ -429,6 +431,21 @@ struct SceneReviewView: View {
             if preview.loading { ProgressView().tint(.white) }
         }
         .aspectRatio(reviewAspect, contentMode: .fit)
+        .overlay {
+            if pickingWhiteBalance {
+                GeometryReader { geometry in
+                    Color.clear.contentShape(Rectangle())
+                        .gesture(SpatialTapGesture().onEnded { tap in
+                            sampleWhiteBalance(at: CGPoint(x: tap.location.x / geometry.size.width, y: tap.location.y / geometry.size.height))
+                        })
+                        .overlay(alignment: .bottom) {
+                            Text("Tap a neutral gray area").font(.footnote.weight(.medium))
+                                .padding(10).background(.regularMaterial, in: Capsule()).padding(12)
+                                .allowsHitTesting(false)
+                        }
+                }
+            }
+        }
         .overlay(alignment: .topLeading) {
             if (scene.profile ?? movie?.captureProfile) == .appleLog {
                 LogLookBadge(lookName: movie?.lookName ?? "Apple Standard").padding(12)
@@ -527,6 +544,17 @@ struct SceneReviewView: View {
     private var lightControls: some View {
         LazyVStack(spacing: 4) {
             if tool == .light { LightHistogramView(histogram: preview.histogram) }
+            if tool == .color {
+                Button {
+                    preview.player?.pause()
+                    pickingWhiteBalance.toggle()
+                    UISelectionFeedbackGenerator().selectionChanged()
+                } label: {
+                    Label(pickingWhiteBalance ? "Cancel White Balance" : "White Balance", systemImage: "eyedropper")
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }.disabled(busy || comparing || adjustments.pipelineVersion < 2)
+                .accessibilityHint("Tap a neutral gray area in the preview to set Warmth and Tint before the look")
+            }
             ForEach(visibleLightControls.filter { $0 != .pushPull && $0 != .fade }) { control in lightSlider(control) }
             if tool == .light {
                 DisclosureGroup(isExpanded: $advancedLight.withSelectionFeedback()) {
@@ -597,6 +625,22 @@ struct SceneReviewView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }.padding(.horizontal, 20).padding(.vertical, 6).background(.bar)
+    }
+    private func sampleWhiteBalance(at point: CGPoint) {
+        guard pickingWhiteBalance, !busy, let movie else { return }
+        pickingWhiteBalance = false; samplingWhiteBalance = true; error = nil
+        let time = preview.player?.currentTime() ?? scene.trimStart.cmTime
+        let url = app.store.root.appendingPathComponent(scene.source)
+        Task {
+            defer { samplingWhiteBalance = false }
+            do {
+                let result = try await WhiteBalanceSampler.sample(url: url, time: time, point: point,
+                    canvas: movie.format.canvas, logEncoded: (scene.profile ?? movie.captureProfile) == .appleLog)
+                adjustments.warmth = result.warmth; adjustments.tint = result.tint
+                UISelectionFeedbackGenerator().selectionChanged()
+                notice = "White balance set for this scene."
+            } catch { self.error = error.localizedDescription }
+        }
     }
     private func invalidateExport() { export.invalidate(); notice = nil; error = nil }
     private func persistEdits() async throws {
