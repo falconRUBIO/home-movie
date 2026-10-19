@@ -231,6 +231,7 @@ struct SceneReviewView: View {
         _end = State(initialValue: scene.trimEnd.seconds)
         _adjustments = State(initialValue: scene.lightAdjustments)
         _savedScene = State(initialValue: scene)
+        _advancedLight = State(initialValue: scene.lightAdjustments.pushPull != 0 || scene.lightAdjustments.fade != 0 || scene.lightAdjustments.curve.isActive)
     }
     private var movie: Movie? { app.movie(movieID) }
     private var reviewAspect: CGFloat { movie?.format.aspect ?? (scene.width > scene.height ? 16 / 9 : 9 / 16) }
@@ -276,7 +277,7 @@ struct SceneReviewView: View {
                 } else {
                     VStack(spacing: 0) {
                         previewPanel.frame(maxWidth: .infinity)
-                            .frame(height: max(120, min(geometry.size.height * (dynamicTypeSize.isAccessibilitySize ? 0.46 : 0.70), geometry.size.width / reviewAspect)))
+                            .frame(height: max(120, min(geometry.size.height * (dynamicTypeSize.isAccessibilitySize ? 0.46 : 0.55), geometry.size.width / reviewAspect)))
                             .background(.black)
                         editingPanel.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -418,7 +419,7 @@ struct SceneReviewView: View {
         }
     }
     private var toolScopeLabel: some View {
-        Text(tool == .fx ? "All scenes · FX" : "This scene · \(tool.rawValue)")
+        Label(tool == .fx ? "Entire Movie" : "This Scene", systemImage: tool == .fx ? "film.stack" : "film")
             .font(.caption).foregroundStyle(.secondary)
     }
     private var previewPanel: some View {
@@ -453,14 +454,14 @@ struct SceneReviewView: View {
     }
     private var lightComparisonControls: some View {
         HStack(spacing: 12) {
-            Text(comparing ? "Before Edits" : "Hold to Compare")
+            Text(comparing ? "Look Only" : "Hold to Compare")
                 .foregroundStyle(comparing ? .primary : .secondary)
                 .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                 .onLongPressGesture(minimumDuration: 0, pressing: { pressing in
                     if !busy || !pressing { comparing = pressing }
                 }, perform: {})
                 .accessibilityElement().accessibilityAddTraits(.isButton)
-                .accessibilityLabel(comparing ? "Show adjusted" : "Compare before edits")
+                .accessibilityLabel(comparing ? "Show adjusted" : "Compare with selected look only")
                 .accessibilityAction { if !busy { comparing.toggle() } }
                 .accessibilityHint("Hold to compare without Light, Color, HSL, or FX edits; the selected look stays applied")
             Button("Reset") { resetTool() }
@@ -470,21 +471,13 @@ struct SceneReviewView: View {
     }
     private var hslControls: some View {
         VStack(spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(HSLBand.allCases) { band in
-                        Button {
-                            hslBand = band; interactingControl = nil
-                            UISelectionFeedbackGenerator().selectionChanged()
-                        } label: {
-                            Circle().fill(Color(hue: band.degrees / 360, saturation: 0.8, brightness: 0.95))
-                                .frame(width: 28, height: 28)
-                                .overlay { if hslBand == band { Circle().stroke(.primary, lineWidth: 2).padding(-4) } }
-                                .frame(width: 44, height: 44)
-                        }.buttonStyle(.plain).accessibilityLabel(band.name)
-                            .accessibilityAddTraits(hslBand == band ? [.isSelected] : [])
-                    }
-                }.padding(.horizontal, 4)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 0) {
+                    ForEach(HSLBand.allCases) { band in hslBandButton(band) }
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 4), spacing: 4) {
+                    ForEach(HSLBand.allCases) { band in hslBandButton(band) }
+                }
             }
             HStack {
                 Text(hslBand.name).font(.subheadline.weight(.semibold))
@@ -495,96 +488,96 @@ struct SceneReviewView: View {
                 }.font(.caption).frame(minHeight: 44)
                     .disabled(!adjustments.hsl[hslBand].isActive)
             }
-            hslRuler("Hue", symbol: "paintpalette", path: \.hue, detail: "Shifts the selected color toward neighboring colors.")
-            hslRuler("Saturation", symbol: "drop.fill", path: \.saturation, detail: "Mutes or enriches the selected color.")
-            hslRuler("Lightness", symbol: "sun.max", path: \.lightness, detail: "Darkens or brightens the selected color.")
+            hslSlider("Hue", symbol: "paintpalette", path: \.hue, detail: "Shifts the selected color toward neighboring colors.")
+            hslSlider("Saturation", symbol: "drop.fill", path: \.saturation, detail: "Mutes or enriches the selected color.")
+            hslSlider("Lightness", symbol: "sun.max", path: \.lightness, detail: "Darkens or brightens the selected color.")
         }.padding(.horizontal, 16)
             .disabled(busy || comparing || preview.loading || preview.error != nil)
     }
-    private func hslRuler(_ title: String, symbol: String, path: WritableKeyPath<HSLValues, Double>, detail: String) -> some View {
+    private func hslBandButton(_ band: HSLBand) -> some View {
+        Button {
+            hslBand = band; interactingControl = nil
+            UISelectionFeedbackGenerator().selectionChanged()
+        } label: {
+            Circle().fill(Color(hue: band.degrees / 360, saturation: 0.8, brightness: 0.95))
+                .frame(width: 26, height: 26)
+                .overlay { if hslBand == band { Circle().stroke(.primary, lineWidth: 2).padding(-4) } }
+                .overlay(alignment: .bottomTrailing) {
+                    if adjustments.hsl[band].isActive {
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 12, weight: .bold))
+                            .symbolRenderingMode(.palette).foregroundStyle(.primary, .background)
+                            .offset(x: 4, y: 4)
+                    }
+                }
+                .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityLabel(band.name)
+            .accessibilityValue(adjustments.hsl[band].isActive ? "Edited" : "Unchanged")
+            .accessibilityAddTraits(hslBand == band ? [.isSelected] : [])
+    }
+    private func hslSlider(_ title: String, symbol: String, path: WritableKeyPath<HSLValues, Double>, detail: String) -> some View {
         let band = hslBand
         let value = Binding(get: { adjustments.hsl[band][keyPath: path] }, set: { value in
             adjustments.hsl[band][keyPath: path] = value
             if !adjustments.isActive { adjustments = .neutral }
         })
-        return adjustmentRuler(title: title, symbol: symbol, detail: "\(band.name). \(detail)", value: value)
+        return adjustmentSlider(title: title, symbol: symbol, detail: "\(band.name). \(detail)", value: value)
             .id("\(band.rawValue)-\(title)")
     }
     private var lightControls: some View {
         LazyVStack(spacing: 4) {
             if tool == .light { LightHistogramView(histogram: preview.histogram) }
-            ForEach(visibleLightControls) { control in lightRuler(control) }
+            ForEach(visibleLightControls.filter { $0 != .pushPull && $0 != .fade }) { control in lightSlider(control) }
             if tool == .light {
                 DisclosureGroup(isExpanded: $advancedLight.withSelectionFeedback()) {
+                    lightSlider(.pushPull)
+                    lightSlider(.fade)
                     LightCurveEditor(curve: $adjustments.curve, editingChanged: { active in
                         interactingControl = active ? "Curve" : nil
                     }).disabled(busy || comparing)
+                        .background { if interactingControl == "Curve" { Color.clear.homeGlass().allowsHitTesting(false) } }
                 } label: {
-                    Label("Advanced · Curves", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                    Label("Advanced", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                         .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
                 }.tint(.primary).padding(.top, 8).disabled(busy || comparing)
             }
         }.padding(.horizontal, 16).disabled(preview.loading || preview.error != nil)
     }
-    private func lightRuler(_ control: SceneLightControl) -> some View {
+    private func lightSlider(_ control: SceneLightControl) -> some View {
         let value = Binding(get: { adjustments[keyPath: control.keyPath] },
             set: {
                 adjustments[keyPath: control.keyPath] = $0
                 if !adjustments.isActive { adjustments = .neutral }
             })
-        return adjustmentRuler(title: control.rawValue, symbol: control.symbol, detail: control.detail, value: value, range: control == .fade ? 0...1 : -1...1)
+        return adjustmentSlider(title: control.rawValue, symbol: control.symbol, detail: control.detail, value: value, range: control == .fade ? 0...1 : -1...1)
     }
-    private func adjustmentRuler(title: String, symbol: String, detail: String, value: Binding<Double>, range: ClosedRange<Double> = -1...1) -> some View {
-        return VStack(spacing: 0) {
+    private func adjustmentSlider(title: String, symbol: String, detail: String, value: Binding<Double>, range: ClosedRange<Double> = -1...1) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Image(systemName: symbol).frame(width: 20).accessibilityHidden(true)
                 Text(title).fontWeight(.semibold)
                 Spacer(minLength: 8)
                 Text(abs(value.wrappedValue) < 0.005 ? "0" : String(format: "%+.0f", value.wrappedValue * 100))
-                    .monospacedDigit().fontWeight(.semibold)
-                    .frame(minWidth: 44, minHeight: 24).contentShape(Rectangle())
-                    .onTapGesture(count: 2) { if !busy && !comparing { UISelectionFeedbackGenerator().selectionChanged(); value.wrappedValue = 0 } }
-                    .accessibilityLabel("\(title) value")
-                    .accessibilityAction(named: "Reset to Zero") { if !busy && !comparing { value.wrappedValue = 0 } }
-            }.font(.subheadline).frame(minHeight: 24).accessibilityHidden(true)
-            SceneAdjustmentRuler(value: value, range: range, editingChanged: { interacting in
-                interactingControl = interacting ? title : nil
-            })
-                .frame(height: 44).disabled(busy || comparing)
-                .overlay {
-                    Canvas { context, size in
-                        let center = size.width / 2
-                        let marker = CGRect(x: center - 1.5, y: 1, width: 3, height: 16)
-                        context.fill(Path(roundedRect: marker, cornerRadius: 1.5), with: .color(.orange))
-                        var pointer = Path()
-                        pointer.move(to: CGPoint(x: center, y: 20))
-                        pointer.addLine(to: CGPoint(x: center - 3, y: 25))
-                        pointer.addLine(to: CGPoint(x: center + 3, y: 25))
-                        pointer.closeSubpath()
-                        context.fill(pointer, with: .color(.primary))
-                    }.allowsHitTesting(false).accessibilityHidden(true)
-                }
-                .padding(.vertical, -4)
-                .accessibilityElement(children: .ignore)
+                    .monospacedDigit().foregroundStyle(.secondary)
+                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        guard !busy && !comparing else { return }
+                        value.wrappedValue = 0
+                        UISelectionFeedbackGenerator().selectionChanged()
+                    }
+                    .accessibilityHidden(true)
+            }.font(.subheadline)
+            HapticGlassSlider(value: value, range: range)
+                .frame(minHeight: 44)
                 .accessibilityLabel(title)
                 .accessibilityValue(Text(value.wrappedValue * 100, format: .number.precision(.fractionLength(0))))
                 .accessibilityHint(detail)
-                .accessibilityAdjustableAction { direction in
+                .accessibilityAction(named: "Reset to Zero") {
                     guard !busy && !comparing else { return }
+                    value.wrappedValue = 0
                     UISelectionFeedbackGenerator().selectionChanged()
-                    switch direction {
-                    case .increment: value.wrappedValue = min(range.upperBound, value.wrappedValue + 0.01)
-                    case .decrement: value.wrappedValue = max(range.lowerBound, value.wrappedValue - 0.01)
-                    @unknown default: break
-                    }
                 }
-                .accessibilityAction(named: "Reset to Zero") { if !busy && !comparing { value.wrappedValue = 0 } }
-        }
-        .background {
-            if interactingControl == title {
-                Color.clear.homeGlass().allowsHitTesting(false)
-            }
-        }
+        }.padding(.vertical, 4).disabled(busy || comparing)
     }
     private var photosFooter: some View {
         VStack(spacing: 6) {
@@ -666,137 +659,5 @@ struct SceneReviewView: View {
             if export.error == nil { notice = "Scene saved to Photos." }
             savingPhotos = false
         }
-    }
-}
-
-// A native horizontal scroll view preserves vertical scrolling between adjustment rows.
-private struct SceneAdjustmentRuler: UIViewRepresentable {
-    @Binding var value: Double
-    var range: ClosedRange<Double> = -1...1
-    var editingChanged: (Bool) -> Void
-    @Environment(\.isEnabled) private var enabled
-    func makeCoordinator() -> Coordinator { Coordinator(value: $value, editingChanged: editingChanged) }
-    func makeUIView(context: Context) -> SceneRulerScrollView {
-        let view = SceneRulerScrollView()
-        view.delegate = context.coordinator
-        return view
-    }
-    func updateUIView(_ view: SceneRulerScrollView, context: Context) {
-        context.coordinator.value = $value
-        context.coordinator.editingChanged = editingChanged
-        view.isScrollEnabled = enabled
-        view.configure(range: range)
-        view.apply(value)
-    }
-    static func dismantleUIView(_ view: SceneRulerScrollView, coordinator: Coordinator) {
-        view.delegate = nil; view.isScrollEnabled = false
-    }
-    @MainActor final class Coordinator: NSObject, UIScrollViewDelegate {
-        var value: Binding<Double>
-        var editingChanged: (Bool) -> Void
-        private var snap = AdjustmentDetent()
-        private let feedback = AdjustmentFeedback()
-        init(value: Binding<Double>, editingChanged: @escaping (Bool) -> Void) {
-            self.value = value; self.editingChanged = editingChanged
-        }
-        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-            snap = AdjustmentDetent(); feedback.begin(value: value.wrappedValue, step: 0.01); editingChanged(true)
-        }
-        func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            guard let view = scrollView as? SceneRulerScrollView, !view.applying,
-                  view.readyForInput, view.isDragging || view.isDecelerating else { return }
-            let next = snap.value(view.value(at: scrollView.contentOffset.x), neutral: 0, step: 0.01)
-            view.displayedValue = next
-            if value.wrappedValue != next {
-                feedback.changed(value: next, step: 0.01, neutral: 0)
-                value.wrappedValue = next
-            }
-        }
-        func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint,
-                                      targetContentOffset: UnsafeMutablePointer<CGPoint>) {
-            guard let view = scrollView as? SceneRulerScrollView else { return }
-            let projected = view.value(at: targetContentOffset.pointee.x)
-            targetContentOffset.pointee.x = view.offset(for: abs(projected) <= 0.02 ? 0 : projected)
-        }
-        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-            if !decelerate { (scrollView as? SceneRulerScrollView)?.apply(value.wrappedValue); editingChanged(false) }
-        }
-        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-            (scrollView as? SceneRulerScrollView)?.apply(value.wrappedValue); editingChanged(false)
-        }
-    }
-}
-private final class SceneRulerScrollView: UIScrollView {
-    private let ticks = SceneRulerTicks()
-    private let tickSpacing: CGFloat = 6
-    private var previousWidth: CGFloat = 0
-    private var range: ClosedRange<Double> = -1...1
-    var displayedValue = 0.0
-    var applying = false
-    var readyForInput: Bool { previousWidth > 0 && previousWidth == bounds.width }
-    init() {
-        super.init(frame: .zero)
-        showsHorizontalScrollIndicator = false; showsVerticalScrollIndicator = false
-        bounces = false; isDirectionalLockEnabled = true; decelerationRate = .fast
-        contentInsetAdjustmentBehavior = .never; semanticContentAttribute = .forceLeftToRight
-        backgroundColor = .clear; isAccessibilityElement = false
-        addSubview(ticks)
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func configure(range: ClosedRange<Double>) {
-        guard self.range != range else { return }
-        self.range = range; ticks.tickCount = Int((range.upperBound - range.lowerBound) * 100)
-        ticks.zeroIndex = Int(-range.lowerBound * 100); ticks.setNeedsDisplay()
-        setNeedsLayout(); layoutIfNeeded()
-    }
-    func value(at offset: CGFloat) -> Double {
-        let raw = Double((offset + bounds.width / 2) / (100 * tickSpacing)) + range.lowerBound
-        return min(range.upperBound, max(range.lowerBound, (raw * 100).rounded() / 100))
-    }
-    func offset(for value: Double) -> CGFloat {
-        CGFloat(min(range.upperBound, max(range.lowerBound, value)) - range.lowerBound) * 100 * tickSpacing - bounds.width / 2
-    }
-    func apply(_ value: Double) {
-        displayedValue = value
-        guard !isDragging, bounds.width > 0 else { return }
-        if isDecelerating, abs(self.value(at: contentOffset.x) - value) < 0.005 { return }
-        applying = true
-        setContentOffset(CGPoint(x: offset(for: value), y: 0), animated: false)
-        applying = false
-    }
-    override func layoutSubviews() {
-        let widthChanged = bounds.width != previousWidth
-        let previouslyApplying = applying
-        super.layoutSubviews()
-        applying = true
-        ticks.frame = CGRect(x: 0, y: 0, width: CGFloat(ticks.tickCount) * tickSpacing, height: bounds.height)
-        if contentSize != ticks.bounds.size { contentSize = ticks.bounds.size }
-        let half = bounds.width / 2
-        if contentInset.left != half || contentInset.right != half {
-            contentInset = UIEdgeInsets(top: 0, left: half, bottom: 0, right: half)
-        }
-        if widthChanged {
-            previousWidth = bounds.width
-            setContentOffset(CGPoint(x: offset(for: displayedValue), y: 0), animated: false)
-        }
-        applying = previouslyApplying
-    }
-}
-private final class SceneRulerTicks: UIView {
-    var tickCount = 200
-    var zeroIndex = 100
-    override init(frame: CGRect) { super.init(frame: frame); backgroundColor = .clear; isOpaque = false; isAccessibilityElement = false }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    override func draw(_ rect: CGRect) {
-        guard let context = UIGraphicsGetCurrentContext() else { return }
-        context.setStrokeColor(UIColor.secondaryLabel.withAlphaComponent(0.55).cgColor)
-        context.setLineWidth(1.5); context.setLineCap(.round)
-        for index in 0...tickCount {
-            let height: CGFloat = index == zeroIndex ? 14 : (index % 10 == 0 ? 11 : 6)
-            let x = CGFloat(index) * 6
-            context.move(to: CGPoint(x: x, y: 15 - height))
-            context.addLine(to: CGPoint(x: x, y: 15))
-        }
-        context.strokePath()
     }
 }

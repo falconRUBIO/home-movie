@@ -25,7 +25,7 @@ struct FilmEffectsControlSections: View {
     private var softnessControls: some View {
         Section {
             amountSlider("Optical Softness", value: effectAmount(\.softnessAmount, enabled: \.softnessEnabled), accessibilityLabel: "Optical Softness amount")
-        } footer: { Text("Gently softens fine detail for a less digital texture. Faces stay clear.") }
+        } footer: { Text("Gently softens fine detail for a less digital texture.") }
     }
     private var rolloffControls: some View {
         Section {
@@ -74,12 +74,23 @@ struct FilmEffectsControlSections: View {
     private func amountSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double> = 0...1, percent: Bool = true, accessibilityLabel: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(label)
+                Text(label).fontWeight(.semibold)
                 Spacer()
                 Text(percent ? "\(Int((value.wrappedValue * 100).rounded()))%" : String(format: "%.1f×", value.wrappedValue))
                     .monospacedDigit().foregroundStyle(.secondary)
-            }
-            HapticGlassSlider(value: value, range: range, neutral: percent ? 0 : 1).accessibilityLabel(accessibilityLabel ?? label)
+                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        value.wrappedValue = percent ? 0 : 1
+                        UISelectionFeedbackGenerator().selectionChanged()
+                    }
+                    .accessibilityHidden(true)
+            }.font(.subheadline)
+            HapticGlassSlider(value: value, range: range, neutral: percent ? 0 : 1)
+                .frame(minHeight: 44).accessibilityLabel(accessibilityLabel ?? label)
+                .accessibilityAction(named: "Reset Adjustment") {
+                    value.wrappedValue = percent ? 0 : 1
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
                 .accessibilityValue(percent ? "\(Int((value.wrappedValue * 100).rounded())) percent" : String(format: "%.1f times", value.wrappedValue))
         }.padding(.vertical, 4)
     }
