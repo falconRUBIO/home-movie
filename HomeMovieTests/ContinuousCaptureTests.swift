@@ -370,7 +370,7 @@ final class ContinuousCaptureTests: XCTestCase {
             sampleBufferOut: &sample), noErr)
         return try XCTUnwrap(sample)
     }
-    func testLogFlipUsesContinuousCaptureAndRequiresTenBitFormats() {
+    @MainActor func testLogFlipUsesContinuousCaptureAndRequiresTenBitFormats() {
         XCTAssertTrue(CameraCompatibility.allowsFlip(profile: .appleLog, recording: true,
             otherCameraSupported: true, continuousFlipSupported: true))
         XCTAssertFalse(CameraCompatibility.allowsFlip(profile: .appleLog, recording: true,
