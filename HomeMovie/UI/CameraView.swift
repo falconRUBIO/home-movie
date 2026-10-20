@@ -59,6 +59,7 @@ struct CameraView: View {
     @State private var addedSceneID: UUID?
     @State private var undoingTake = false
     @State private var smoothZoomOpen = false
+    @State private var dollyCollapsed = false
     @State private var lensControlHeight: CGFloat = 52
     @State private var previewControlRegions: [CGRect] = []
     @State private var smoothPosition = 0.0
@@ -246,7 +247,7 @@ struct CameraView: View {
             if !touching { finishDollyEndpointInteraction() }
         }
         .onChange(of: smoothZoomOpen) { _, open in
-            if !open { finishDollyEndpointInteraction() }
+            if !open { finishDollyEndpointInteraction(); dollyCollapsed = false }
         }
         .task(id: camera.options?.smoothMoving) { await finishDollyIfIdle() }
         .onChange(of: camera.options?.isPiPEnabled) { _, enabled in
@@ -402,7 +403,11 @@ struct CameraView: View {
         if let options = camera.options, !options.lenses.isEmpty {
             VStack(spacing: 0) {
                 if smoothZoomOpen {
-                    smoothZoomBar(options: options)
+                    if dollyCollapsed, let route = displayedDolly {
+                        compactDollyBar(options: options, route: route)
+                    } else {
+                        smoothZoomBar(options: options)
+                    }
                 }
                 ViewThatFits(in: .horizontal) {
                     lensButtons(options: options)
@@ -410,6 +415,7 @@ struct CameraView: View {
                         .scrollIndicators(.hidden).frame(height: dynamicTypeSize.isAccessibilitySize ? 64 : 44)
                 }.padding(4)
             }.dollyControlGlass().frame(maxWidth: 360)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: dollyCollapsed)
         }
     }
     private func lensButtons(options: CameraOptions) -> some View {
@@ -467,7 +473,8 @@ struct CameraView: View {
         // Keep both endpoints available for reversing or repeating the move.
     }
     private func lensButton(label: String, factor: CGFloat, options: CameraOptions) -> some View {
-        let value: CGFloat? = smoothZoomOpen ? (dollyEditor.selected == .start ? preparedDollyStart : preparedDollyTarget) : options.zoom
+        let editingEndpoint = smoothZoomOpen && !dollyCollapsed && activeDolly == nil
+        let value: CGFloat? = editingEndpoint ? (dollyEditor.selected == .start ? preparedDollyStart : preparedDollyTarget) : options.zoom
         let selected = value.map { abs(factor - $0) < 0.06 } ?? false
         return Button { selectLens(factor) } label: {
             Text(label).font(.caption.weight(.medium)).monospacedDigit()
@@ -477,7 +484,7 @@ struct CameraView: View {
         }.buttonStyle(DollyLensButtonStyle())
             .disabled(camera.switchingCamera || countdown != nil || smoothZoomOpen && (activeDolly != nil || awaitingDollyHold) || camera.state != .ready && camera.state != .recording)
             .accessibilityLabel("\(label) lens")
-            .accessibilityValue(selected ? (smoothZoomOpen ? "\(dollyEditor.selected.title) lens" : "Current lens") : "")
+            .accessibilityValue(selected ? (editingEndpoint ? "\(dollyEditor.selected.title) lens" : "Current lens") : "")
             .accessibilityHint(smoothZoomOpen ? "Set the selected \(dollyEditor.selected.title.lowercased()) point" : "Switch to this lens")
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -494,6 +501,7 @@ struct CameraView: View {
         manualZoomTargetShown = false
         guard smoothZoomOpen else { camera.zoom(factor); return }
         guard activeDolly == nil, !awaitingDollyHold else { return }
+        dollyCollapsed = false
         if let options = camera.options { chooseDollyLens(factor, options: options) }
     }
     private func toggleDollyPlayback() {
@@ -543,6 +551,7 @@ struct CameraView: View {
     private func beginDolly(to target: CGFloat, seconds: Int) {
         guard let options = camera.options else { return }
         activeDolly = DollyZoomRoute(start: Double(preparedDollyStart ?? options.zoom), destination: Double(target), seconds: seconds)
+        dollyCollapsed = activeDolly != nil
         camera.dollyZoom(to: target, seconds: seconds)
         if activeDolly != nil {
             UIAccessibility.post(notification: .announcement, argument: "Dolly to \(zoomLabel(target, multiplier: options.multiplier)), \(DollyZoomDuration.validated(seconds)) seconds")
@@ -644,6 +653,30 @@ struct CameraView: View {
     }
     private func dollyMaximum(_ options: CameraOptions) -> CGFloat {
         max(options.maximum, options.lenses.map(\.factor).max() ?? options.maximum)
+    }
+    private func compactDollyBar(options: CameraOptions, route: DollyZoomRoute) -> some View {
+        HStack(spacing: 10) {
+            Text(zoomLabel(options.zoom, multiplier: options.multiplier))
+                .font(.caption.monospacedDigit().weight(.medium))
+                .foregroundStyle(.yellow)
+                .frame(minWidth: 44)
+                .accessibilityLabel("Current zoom")
+            ProgressView(value: route.progress(at: Double(options.zoom)))
+                .progressViewStyle(.linear).tint(.yellow)
+                .accessibilityLabel("Dolly progress")
+            dollyPlaybackButton
+            if activeDolly == nil {
+                Button {
+                    dollyCollapsed = false
+                    UISelectionFeedbackGenerator().selectionChanged()
+                } label: {
+                    Image(systemName: "chevron.up").frame(width: 44, height: 44)
+                }.buttonStyle(DollyLensButtonStyle())
+                    .accessibilityLabel("Expand Dolly controls")
+                    .accessibilityHint("Edit Start and End points")
+            }
+        }.padding(.horizontal, 12).padding(.top, 4)
+            .contentShape(Rectangle()).onTapGesture { }
     }
     private func smoothZoomBar(options: CameraOptions) -> some View {
         VStack(spacing: 4) {
@@ -791,23 +824,7 @@ struct CameraView: View {
                     }
                 }.onEnded { _ in finishDollyEndpointInteraction() })
         }.frame(height: 44)
-        HStack(spacing: 0) {
-            ForEach(dollyLensStops(options: options), id: \.self) { factor in
-                let selected = abs(factor - (dollyEditor.selected == .start ? startValue(options) : endValue(options))) < 0.06
-                Button { chooseDollyLens(factor, options: options) } label: {
-                    Text(zoomLabel(factor, multiplier: options.multiplier))
-                        .font(.caption.monospacedDigit().weight(.medium))
-                        .foregroundStyle(selected ? .yellow : .white)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(selected ? Color.yellow.opacity(0.12) : .clear, in: Capsule())
-                }.buttonStyle(DollyLensButtonStyle())
-                    .accessibilityLabel("Set \(dollyEditor.selected.title.lowercased()) to \(zoomLabel(factor, multiplier: options.multiplier))")
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-        }.disabled(countdown != nil || activeDolly != nil || awaitingDollyHold)
     }
-    private func startValue(_ options: CameraOptions) -> CGFloat { preparedDollyStart ?? options.zoom }
-    private func endValue(_ options: CameraOptions) -> CGFloat { preparedDollyTarget ?? options.zoom }
 
     private func dollyExtendedMenu(options: CameraOptions) -> some View {
             Menu {
