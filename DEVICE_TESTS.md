@@ -196,3 +196,11 @@ Validate 1080p30 SDR on each supported iPhone; record model, iOS, camera formats
 - Exercise Smooth Zoom/manual drag/pinch, focus/exposure and torch with PiP, plus movie Film Effects export. Apple Log/LUT modes must be explicitly incompatible, never silently converted or passed through to the SDR presenter.
 - Simulate missing/late presenter samples and front-camera pressure/failure. Confirm rear timing/audio continue where the hardware permits; the inset fades away and a brief notice explains the issue. Test sustained recording, thermal pressure, backgrounding, calls, camera interruptions and low storage. Previously saved clips/journals remain intact; stopped takes never auto-resume from late callbacks.
 - Return to Ordinary Camera while idle and verify the original virtual-camera/optical lens behavior returns. Do not promise zero-delay capture, camera-mode parity or sustained thermal capability before recording these hardware results.
+
+
+### Log camera reuse after returning to the library
+
+- On a Log-capable iPhone, turn PiP off, open a Log movie, record and stop a short clip, return to the movie list, then immediately press +. Repeat ten times. Verify the new movie opens without termination, delivers preview frames, and records/playbacks successfully.
+- Repeat with new-movie defaults set to Standard and then Log, and with the outgoing camera set to front and rear.
+- Flip front/rear in both profiles after reopening; verify preview and recording still work.
+- Build 1271 diagnostics supplied on October 19 contain three identical SIGABRT stacks through AVFCapture. The stack is not symbolicated to a source line; the output-format negotiation fix needs this device reproduction before calling the crash resolved.
