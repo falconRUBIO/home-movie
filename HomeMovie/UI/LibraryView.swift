@@ -57,6 +57,24 @@ struct LibraryView: View {
             } catch { app.error = error.localizedDescription }
         }
     }
+    private var newMovieButton: some View {
+        Button { createMovie() } label: {
+            HStack(spacing: 10) {
+                if creating {
+                    ProgressView().tint(.white)
+                    Text("Creating…")
+                } else {
+                    Label("New Movie", systemImage: "plus")
+                }
+            }.font(.headline)
+                .frame(maxWidth: .infinity, minHeight: 56)
+        }.buttonStyle(.borderedProminent).tint(.blue)
+            .buttonBorderShape(.roundedRectangle(radius: 20))
+            .frame(maxWidth: 320)
+            .accessibilityLabel("New Movie")
+            .accessibilityHint("Creates a movie and opens the camera")
+            .disabled(!app.loaded || creating)
+    }
     private func thumbnailActionIcon(_ symbol: String) -> some View {
         Image(systemName: symbol).font(.system(size: 18, weight: .semibold))
             .foregroundStyle(.white).frame(width: 48, height: 48)
@@ -148,9 +166,7 @@ struct LibraryView: View {
                 } else if app.activeMovies.isEmpty {
                     ContentUnavailableView {
                         Label("Your home movie starts here", systemImage: "video")
-                    } description: { Text("Record a moment. Come back for the next.") } actions: {
-                        Button("Create Your First Movie") { createMovie() }.buttonStyle(.borderedProminent).disabled(creating)
-                    }
+                    } description: { Text("Record a moment. Come back for the next.") }
                 } else {
                     ScrollView {
                         LazyVGrid(columns: movieColumns, alignment: .leading, spacing: 24) {
@@ -170,17 +186,16 @@ struct LibraryView: View {
                         Button("Delete", systemImage: "trash", role: .destructive) { confirmingSelection = true }
                             .disabled(selected.isEmpty || deletingSelection).frame(minHeight: 44)
                     }.padding(.horizontal, 20).background(.bar)
+                } else if app.loaded {
+                    newMovieButton
+                        .padding(.horizontal, 24).padding(.vertical, 12)
+                        .frame(maxWidth: .infinity)
+                        .background(.bar)
                 }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    if !selecting {
-                    Button { createMovie() } label: {
-                        if creating { ProgressView().frame(width: 44, height: 44) }
-                        else { MovieControlIcon(systemName: "plus") }
-                    }
-                        .accessibilityLabel("New Movie").disabled(!app.loaded || creating)
-                    } else {
+                    if selecting {
                         Button(selected.count == app.activeMovies.count ? "Deselect All" : "Select All") {
                             selected = selected.count == app.activeMovies.count ? [] : Set(app.activeMovies.map(\.id))
                         }.disabled(deletingSelection)
