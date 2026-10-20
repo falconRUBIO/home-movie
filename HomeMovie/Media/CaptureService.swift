@@ -450,6 +450,9 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         if preparedForPiP { throw HomeMovieError.message("This device cannot sustain the selected 1080p, 30 fps front/rear camera format. Try the ordinary camera or a Standard movie.") }
         session.beginConfiguration(); defer { session.commitConfiguration() }
         guard session.canSetSessionPreset(.hd1920x1080) else { throw HomeMovieError.message("1080p recording is not available on this device.") }
+        // A reused output may still request the previous camera's 10-bit format.
+        // Release that request before changing inputs, presets or color spaces.
+        continuousVideo.videoSettings = [:]
         session.inputs.forEach { session.removeInput($0) }; session.outputs.forEach { session.removeOutput($0) }
         session.sessionPreset = configuredProfile == .appleLog ? .inputPriority : .hd1920x1080
         session.automaticallyConfiguresCaptureDeviceForWideColor = false
@@ -466,7 +469,6 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             throw HomeMovieError.message("Continuous camera recording is unavailable.")
         }
         session.addOutput(continuousVideo); session.addOutput(continuousAudio)
-        continuousVideo.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
         continuousVideo.alwaysDiscardsLateVideoFrames = true
         continuousVideo.setSampleBufferDelegate(self, queue: queue)
         continuousAudio.setSampleBufferDelegate(self, queue: queue)
@@ -476,6 +478,9 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         configured = true
     }
     private func configureFormat(_ camera: AVCaptureDevice) throws {
+        // Do not impose an 8-bit request while the reused device is still in Log.
+        // Negotiate the output only after the target format/color space is active.
+        continuousVideo.videoSettings = [:]
         try camera.lockForConfiguration(); defer { camera.unlockForConfiguration() }
         if configuredProfile == .appleLog {
             let formats = camera.formats.filter {
@@ -488,7 +493,6 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             guard let first = formats.first else { throw HomeMovieError.message("Apple Log is not available on this camera. Switch back to a supported rear camera.") }
             // Negotiate the sample output itself, not a MovieFileOutput codec.
             // The same 10-bit frames feed preview and the continuous Main10 writer.
-            continuousVideo.videoSettings = [:]
             let cached = validatedLogFormats[camera.uniqueID]
             let candidates = cached.flatMap { remembered in
                 formats.contains(where: { $0 == remembered }) ? [remembered] + formats.filter { $0 != remembered } : nil
@@ -534,6 +538,14 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             let available = continuousVideo.availableVideoPixelFormatTypes
             guard let pixelFormat = Self.logPixelFormat(in: available) else {
                 throw HomeMovieError.message("A high-quality live Log preview is unavailable on this camera.")
+            }
+            continuousVideo.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat]
+        } else {
+            let available = continuousVideo.availableVideoPixelFormatTypes
+            let preferred: [OSType] = [kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVPixelFormatType_32BGRA]
+            guard let pixelFormat = preferred.first(where: { available.contains($0) }) else {
+                throw HomeMovieError.message("A Standard camera output is unavailable. Try reopening the camera.")
             }
             continuousVideo.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: pixelFormat]
         }
@@ -991,10 +1003,12 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                 do {
                     self.session.beginConfiguration()
                     defer { self.session.commitConfiguration() }
+                    self.continuousVideo.videoSettings = [:]
                     try self.replaceInput(old, with: next)
                     self.videoInput = next; self.isFront = !oldFront
                     do { try self.configureFormat(camera); try self.ensureLogCaptureReady() }
                     catch {
+                        self.continuousVideo.videoSettings = [:]
                         try self.replaceInput(next, with: old)
                         self.videoInput = old; self.isFront = oldFront
                         try self.configureFormat(old.device)
