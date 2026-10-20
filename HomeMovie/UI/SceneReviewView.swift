@@ -391,9 +391,6 @@ struct SceneReviewView: View {
                     if scenePhase == .active, preview.error == nil { preview.player?.play() }
                 }
             }
-            .task(id: tool == .light && scenePhase == .active && !busy) {
-                await preview.monitorHistogram(enabled: tool == .light && scenePhase == .active && !busy)
-            }
             .task(id: shownRecipe) {
                 // Coalesce slider changes and abandon obsolete paused-frame seeks.
                 do { try await Task.sleep(for: .milliseconds(40)) } catch { return }
@@ -446,16 +443,6 @@ struct SceneReviewView: View {
     }
     private var editingPanel: some View {
         VStack(spacing: 0) {
-            if tool != .trim {
-                ViewThatFits(in: .horizontal) {
-                    HStack {
-                        toolScopeLabel
-                        Spacer(minLength: 8)
-                        lightComparisonControls
-                    }
-                    VStack(spacing: 0) { toolScopeLabel; lightComparisonControls }
-                }.padding(.horizontal, 16)
-            }
             if tool == .fx {
                 Form { FilmEffectsControlSections(settings: $effects, editingChanged: editingChanged) }
                     .listStyle(.plain).listSectionSpacing(.compact)
@@ -474,10 +461,6 @@ struct SceneReviewView: View {
                 Text(message).font(.footnote).foregroundStyle(.secondary).padding(.horizontal)
             }
         }
-    }
-    private var toolScopeLabel: some View {
-        Label(tool == .fx ? "Entire Movie" : "This Scene", systemImage: tool == .fx ? "film.stack" : "film")
-            .font(.caption).foregroundStyle(.secondary)
     }
     private var previewPanel: some View {
         ZStack {
@@ -523,23 +506,6 @@ struct SceneReviewView: View {
                 .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 25)
             Button("Reset Trim") { start = 0; end = scene.sourceDuration.seconds }.frame(minHeight: 44).disabled(busy)
         }
-    }
-    private var lightComparisonControls: some View {
-        HStack(spacing: 12) {
-            Text(comparing ? "Look Only" : "Hold to Compare")
-                .foregroundStyle(comparing ? .primary : .secondary)
-                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                .onLongPressGesture(minimumDuration: 0, pressing: { pressing in
-                    if !busy || !pressing { comparing = pressing }
-                }, perform: {})
-                .accessibilityElement().accessibilityAddTraits(.isButton)
-                .accessibilityLabel(comparing ? "Show adjusted" : "Compare with selected look only")
-                .accessibilityAction { if !busy { comparing.toggle() } }
-                .accessibilityHint("Hold to compare without Light, Color, HSL, or FX edits; the selected look stays applied")
-            Button("Reset") { resetTool() }
-                .frame(minWidth: 44, minHeight: 44).disabled(!canReset || busy || preview.loading)
-                .accessibilityLabel("Reset \(tool.rawValue)")
-        }.font(.subheadline).fixedSize(horizontal: true, vertical: false)
     }
     private var hslControls: some View {
         VStack(spacing: 8) {
@@ -598,7 +564,6 @@ struct SceneReviewView: View {
     }
     private var lightControls: some View {
         LazyVStack(spacing: 4) {
-            if tool == .light { LightHistogramView(histogram: preview.histogram) }
             if tool == .color {
                 Button {
                     preview.player?.pause()
