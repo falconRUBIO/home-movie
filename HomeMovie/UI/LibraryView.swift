@@ -374,6 +374,7 @@ struct MovieSettingsView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     let movie: Movie
+    @State private var originalLogPreview = UserDefaults.standard.bool(forKey: "originalLogPreview")
     @State private var profile: CaptureProfile
     @State private var selectedLook: LUTReference?
     @State private var supportsLog = false
@@ -406,6 +407,14 @@ struct MovieSettingsView: View {
                 }
                 if profile == .appleLog {
                     Section {
+                        Picker("Preview Look", selection: $originalLogPreview.withSelectionFeedback()) {
+                            Text("Cinema").tag(false)
+                            Text("Log").tag(true)
+                        }.pickerStyle(.segmented)
+                    } header: { Text("Live Preview") } footer: {
+                        Text("Cinema shows your selected look. Log shows the flat image. Recordings stay in Apple Log; playback and export use your selected look.")
+                    }
+                    Section {
                         Menu {
                             Button("Apple Standard") { UISelectionFeedbackGenerator().selectionChanged(); selectedLook = nil }
                             ForEach(looks, id: \.id) { look in
@@ -421,7 +430,7 @@ struct MovieSettingsView: View {
                         Button("Add Apple Log Look…", systemImage: "plus") { importingDisplayLook = false; importingLook = true }
                         Button("Add Rec.709 Look…", systemImage: "plus") { importingDisplayLook = true; importingLook = true }
                     } header: { Text("Cinema Look") } footer: {
-                        Text("Applied to preview, playback and export. Your Apple Log originals stay intact.")
+                        Text("Applied to playback, export and Cinema preview. Your Apple Log originals stay intact.")
                     }
                 }
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
@@ -439,6 +448,7 @@ struct MovieSettingsView: View {
                             do {
                                 try await app.store.setMovieRecordingSettings(movieID: movie.id,
                                     profile: profile, look: selectedLook)
+                                UserDefaults.standard.set(originalLogPreview, forKey: "originalLogPreview")
                                 await app.refresh(); dismiss()
                             } catch { problem = error.localizedDescription; saving = false }
                         }

@@ -47,10 +47,12 @@ struct LightCurveEditor: View {
     @State private var snap = AdjustmentDetent()
     @Environment(\.isEnabled) private var enabled
     private let inset: CGFloat = 22
-    private let names = ["Black", "Shadows", "Midtones", "Highlights", "White"]
+    private func name(_ index: Int) -> String {
+        index == 0 ? "Black" : index == curve.controlPoints.count - 1 ? "White" : "Point \(index)"
+    }
     private var caption: String {
-        guard let dragging else { return "Drag points to shape brightness." }
-        return "\(names[dragging]) · \(Int((curve.levels[dragging] * 100).rounded()))"
+        guard let dragging, curve.controlPoints.indices.contains(dragging) else { return "Tap the curve to add a point. Drag to adjust." }
+        return "\(name(dragging)) · \(Int((curve.controlPoints[dragging].y * 100).rounded()))"
     }
     var body: some View {
         VStack(spacing: 8) {
@@ -72,8 +74,24 @@ struct LightCurveEditor: View {
     private func graph(width: CGFloat, height: CGFloat) -> some View {
         ZStack {
             Canvas { context, _ in draw(&context, width: width, height: height) }
-                .allowsHitTesting(false).accessibilityHidden(true)
-            ForEach(1...3, id: \.self) { index in handle(index, width: width, height: height) }
+                .contentShape(Rectangle())
+                .gesture(SpatialTapGesture().onEnded { tap in
+                    let x = Double((tap.location.x - inset) / width)
+                    guard (0...1).contains(x) else { return }
+                    let y = curve.output(at: x)
+                    guard abs(tap.location.y - (inset + CGFloat(1 - y) * height)) <= 24 else { return }
+                    editingChanged(true)
+                    if curve.add(at: x, y: y) != nil { UISelectionFeedbackGenerator().selectionChanged() }
+                    editingChanged(false)
+                })
+                .accessibilityLabel("Curve")
+                .accessibilityAction(named: "Add Point") {
+                    let points = curve.controlPoints
+                    let gap = (0..<(points.count - 1)).max { points[$0 + 1].x - points[$0].x < points[$1 + 1].x - points[$1].x } ?? 0
+                    let x = (points[gap].x + points[gap + 1].x) / 2
+                    editingChanged(true); curve.add(at: x, y: curve.output(at: x)); editingChanged(false)
+                }
+            ForEach(curve.controlPoints.indices, id: \.self) { index in handle(index, width: width, height: height) }
         }.coordinateSpace(name: "lightCurve")
     }
     private func draw(_ context: inout GraphicsContext, width: CGFloat, height: CGFloat) {
@@ -100,41 +118,53 @@ struct LightCurveEditor: View {
     }
     private func handle(_ index: Int, width: CGFloat, height: CGFloat) -> some View {
         let diameter: CGFloat = dragging == index ? 16 : 12
-        let point = CGPoint(x: inset + CGFloat(index) * width / 4, y: inset + CGFloat(1 - curve.levels[index]) * height)
+        let value = curve.controlPoints[index]
+        let point = CGPoint(x: inset + CGFloat(value.x) * width, y: inset + CGFloat(1 - value.y) * height)
         return Circle().fill(.background).overlay { Circle().stroke(.orange, lineWidth: 2) }
             .frame(width: diameter, height: diameter)
             .frame(width: 44, height: 44).contentShape(Rectangle()).position(point)
-            .gesture(drag(index, height: height))
+            .gesture(drag(index, width: width, height: height))
+            .contextMenu {
+                if index > 0 && index < curve.controlPoints.count - 1 {
+                    Button("Delete Point", systemImage: "minus.circle", role: .destructive) {
+                        editingChanged(true); curve.removePoint(index); editingChanged(false)
+                        UISelectionFeedbackGenerator().selectionChanged()
+                    }
+                }
+            }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(names[index]) curve point")
-            .accessibilityValue("\(Int((curve.levels[index] * 100).rounded())) percent")
+            .accessibilityLabel("\(name(index)) curve point")
+            .accessibilityValue("\(Int((curve.controlPoints[index].y * 100).rounded())) percent")
             .accessibilityAdjustableAction { direction in
                 switch direction {
-                case .increment: curve.move(index, to: curve.levels[index] + 0.01)
-                case .decrement: curve.move(index, to: curve.levels[index] - 0.01)
+                case .increment: curve.movePoint(index, x: value.x, y: value.y + 0.01)
+                case .decrement: curve.movePoint(index, x: value.x, y: value.y - 0.01)
                 @unknown default: return
                 }
                 UISelectionFeedbackGenerator().selectionChanged()
             }
-            .accessibilityAction(named: "Reset Point") { curve.move(index, to: Double(index) / 4) }
+            .accessibilityAction(named: "Move Left") { curve.movePoint(index, x: value.x - 0.01, y: value.y) }
+            .accessibilityAction(named: "Move Right") { curve.movePoint(index, x: value.x + 0.01, y: value.y) }
+            .accessibilityAction(named: "Reset Point") { curve.movePoint(index, x: value.x, y: value.x) }
     }
-    private func drag(_ index: Int, height: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .named("lightCurve"))
-            .onChanged { gesture in move(index, y: gesture.location.y, height: height) }
+    private func drag(_ index: Int, width: CGFloat, height: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .named("lightCurve"))
+            .onChanged { gesture in move(index, x: gesture.location.x, y: gesture.location.y, width: width, height: height) }
             .onEnded { _ in endEditing() }
     }
-    private func move(_ index: Int, y: CGFloat, height: CGFloat) {
+    private func move(_ index: Int, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {
         if dragging != index {
             dragging = index; snap = AdjustmentDetent()
-            feedback.begin(value: curve.levels[index], step: 0.01); editingChanged(true)
+            feedback.begin(value: curve.controlPoints[index].y, step: 0.01); editingChanged(true)
         }
         let normalized = (y - inset) / height
         let raw = 1.0 - Double(normalized)
-        let neutral = Double(index) / 4.0
+        let input = min(1, max(0, Double((x - inset) / width)))
+        let neutral = input
         let quantized = (raw * 100.0).rounded() / 100.0
         let level = snap.value(quantized, neutral: neutral, step: 0.01)
-        curve.move(index, to: level)
-        feedback.changed(value: curve.levels[index], step: 0.01, neutral: neutral)
+        curve.movePoint(index, x: input, y: level)
+        feedback.changed(value: curve.controlPoints[index].y, step: 0.01, neutral: neutral)
     }
     private func endEditing() { dragging = nil; editingChanged(false) }
 }

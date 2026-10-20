@@ -72,6 +72,42 @@ final class LightToolsTests: XCTestCase {
         XCTAssertLessThan(constrained.shadows, constrained.midtones)
         XCTAssertGreaterThan(constrained.highlights, constrained.midtones)
     }
+    func testFreeformCurveEndpointsPersistenceAndRendering() throws {
+        var curve = LightCurve.neutral
+        XCTAssertEqual(curve.controlPoints.count, 2)
+        XCTAssertEqual(curve.add(at: 0.32, y: 0.55), 1)
+        curve.movePoint(0, x: 0.1, y: 0.12)
+        curve.movePoint(2, x: 0.9, y: 0.85)
+        try curve.validate()
+        XCTAssertEqual(curve.output(at: 0), 0.12, accuracy: 0.00001)
+        XCTAssertEqual(curve.output(at: 1), 0.85, accuracy: 0.00001)
+        XCTAssertEqual(curve.output(at: 0.32), 0.55, accuracy: 0.00001)
+        XCTAssertEqual(try JSONDecoder().decode(LightCurve.self, from: JSONEncoder().encode(curve)), curve)
+        for level in [0.0, 0.1, 0.2, 0.32, 0.6, 0.9, 1.0] {
+            XCTAssertEqual(Double(pixel(try curve.apply(to: gray(level), fade: 0))[0]), curve.output(at: level), accuracy: 0.001)
+        }
+        curve.removePoint(0); XCTAssertEqual(curve.controlPoints.count, 3)
+        curve.removePoint(1); XCTAssertEqual(curve.controlPoints.count, 2)
+        curve.movePoint(0, x: 0.2, y: 0.2)
+        curve.movePoint(1, x: 0.8, y: 0.8)
+        XCTAssertTrue(curve.isActive, "Moved diagonal endpoints still change clipped black and white levels")
+        try curve.validate()
+    }
+    func testLegacyCurveDecodingAndFreeformCrossingProtection() throws {
+        let data = Data(#"{"shadows":0.1,"midtones":0.6,"highlights":0.9}"#.utf8)
+        let legacy = try JSONDecoder().decode(LightCurve.self, from: data)
+        XCTAssertEqual(legacy, LightCurve(shadows: 0.1, midtones: 0.6, highlights: 0.9))
+        XCTAssertEqual(legacy.controlPoints.count, 5)
+        var curve = LightCurve.neutral
+        curve.add(at: 0.4, y: 0.7)
+        curve.movePoint(1, x: 2, y: -1)
+        try curve.validate()
+        XCTAssertLessThan(curve.controlPoints[1].x, curve.controlPoints[2].x)
+        for i in 0...100 { XCTAssertTrue((0...1).contains(curve.output(at: Double(i) / 100))) }
+        var invalid = curve
+        invalid.points = [.init(x: 0.5, y: 0), .init(x: 0.5, y: 1)]
+        XCTAssertThrowsError(try invalid.validate())
+    }
     func testHistogramCountsLimitsAndHonorsPaddedRowsAndAlpha() throws {
         var buffer: CVPixelBuffer?
         XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 4, 2, kCVPixelFormatType_32BGRA, nil, &buffer), kCVReturnSuccess)

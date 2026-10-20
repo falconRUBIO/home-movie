@@ -49,7 +49,7 @@ struct CameraView: View {
     @State private var pinchBase: CGFloat?
     @State private var lastZoomAt = Date.distantPast
     @State private var liveCube: ColorCube?
-    @State private var liveOriginal = false
+    @AppStorage("originalLogPreview") private var liveOriginal = false
     @State private var liveLookStatus = LiveLookStatus.inactive
     @State private var manualZoomTargetShown = false
     @State private var looks: [LUTReference] = []
@@ -158,7 +158,6 @@ struct CameraView: View {
     private var configuredCamera: some View {
         cameraSurface
         .task(id: movieID) {
-            liveOriginal = false
             updateZoomSettings()
             await prepareCamera()
             guard !Task.isCancelled, movie?.captureProfile == .appleLog else { return }
@@ -187,7 +186,7 @@ struct CameraView: View {
                     if let url = urls.first {
                         let look = try await app.store.importLook(from: url, displayReferred: importingDisplayLook)
                         try await app.store.setLook(movieID: movieID, look: look)
-                        liveOriginal = false; looks = await app.store.availableLooks(); await app.refresh()
+                        looks = await app.store.availableLooks(); await app.refresh()
                     }
                 } catch { camera.message = error.localizedDescription }
                 await prepareCamera()
@@ -1082,7 +1081,7 @@ struct CameraView: View {
     private func changeLiveLook(_ look: LUTReference?) {
         guard !changingLook else { return }
         UISelectionFeedbackGenerator().selectionChanged()
-        changingLook = true; liveOriginal = false
+        changingLook = true
         Task {
             defer { changingLook = false }
             await app.run { try await app.store.setLook(movieID: movieID, look: look) }

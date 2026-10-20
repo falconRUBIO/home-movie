@@ -67,16 +67,22 @@ float particles(float2 p, float size, uint seed, uint salt) {
 }
 
 extern "C" { namespace coreimage {
-    float4 sceneTone(sample_t input, float4 levels, float4 slopes, float lastSlope, float fade) {
+    float4 sceneTone(sample_t input, float4 p0, float4 p1, float4 p2, float4 p3, float4 p4, float4 p5, float4 p6, float4 p7, float4 p8, float4 p9, float4 p10, float4 p11, float4 p12, float4 p13, float4 p14, float4 p15, float count, float fade) {
+        float4 points[16] = {p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15};
         float3 rgb = clamp(input.rgb, 0.0, 1.0);
         float l = clamp(luminance(rgb), 0.0, 1.0);
-        int i = min(3, int(l * 4.0));
-        float t = l * 4.0 - float(i), t2 = t * t, t3 = t2 * t;
-        float nextLevel = i == 3 ? 1.0 : levels[i + 1];
-        float nextSlope = i == 3 ? lastSlope : slopes[i + 1];
-        float target = (2.0 * t3 - 3.0 * t2 + 1.0) * levels[i]
-            + (t3 - 2.0 * t2 + t) * slopes[i] * 0.25
-            + (-2.0 * t3 + 3.0 * t2) * nextLevel + (t3 - t2) * nextSlope * 0.25;
+        int n = int(count);
+        float target = l <= points[0].x ? points[0].y : points[n - 1].y;
+        for (int i = 0; i < n - 1; ++i) {
+            float4 a = points[i], b = points[i + 1];
+            if (l > a.x && l < b.x) {
+                float h = b.x - a.x, t = (l - a.x) / h;
+                float t2 = t * t, t3 = t2 * t;
+                target = (2.0 * t3 - 3.0 * t2 + 1.0) * a.y
+                    + (t3 - 2.0 * t2 + t) * a.z * h
+                    + (-2.0 * t3 + 3.0 * t2) * b.y + (t3 - t2) * b.z * h;
+            } else if (l == a.x) { target = a.y; }
+        }
         // Fade is an output pedestal, unlike Black Point's shadow threshold.
         // White stays fixed; adjacent tones keep their ordering and headroom.
         target = mix(clamp(target, 0.0, 1.0), 1.0, fade * 0.22);
