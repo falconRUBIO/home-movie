@@ -511,6 +511,14 @@ struct SettingsView: View {
         value.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Unavailable"
     }
     private func refreshStorage() async { storage = await app.store.settingsStorage() }
+    private var supportURL: URL {
+        var components = URLComponents(string: "https://github.com/falconRUBIO/home-movie/issues/new")!
+        components.queryItems = [
+            URLQueryItem(name: "title", value: "Home Movie support request"),
+            URLQueryItem(name: "body", value: "How can we help?\n\n\nIf something went wrong, what happened and what did you expect?\n\n\nPlease do not include private footage or sensitive diagnostics. This request is public.")
+        ]
+        return components.url!
+    }
     private var storageSection: some View {
         Section {
             LabeledContent("Active Footage", value: bytes(summary.activeBytes))
@@ -555,16 +563,16 @@ struct SettingsView: View {
     }
     private var helpSection: some View {
         Section {
-            Link(destination: URL(string: "https://github.com/falconRUBIO/home-movie/issues")!) {
-                Label("Help & Contact", systemImage: "questionmark.circle")
-            }
+            Link(destination: supportURL) {
+                Label("Contact Support", systemImage: "bubble.left.and.bubble.right")
+            }.accessibilityHint("Opens a new support request on GitHub. A GitHub account is required and requests are public.")
             NavigationLink("Diagnostics", destination: DiagnosticsView())
             NavigationLink("Privacy", destination: PrivacyView())
             Button("App Permissions", systemImage: "hand.raised") {
                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
             }
         } header: { Text("Help & Privacy") }
-        footer: { Text("Help opens GitHub; posting requires an account. App Permissions opens iPhone Settings for camera, microphone, and Photos access.") }
+        footer: { Text("Contact Support opens a new request to the developer on GitHub. A GitHub account is required; requests are public, so do not include private footage or sensitive diagnostics. App Permissions opens iPhone Settings for camera, microphone, and Photos access.") }
     }
     var body: some View {
         NavigationStack {
