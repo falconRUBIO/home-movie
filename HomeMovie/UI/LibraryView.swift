@@ -511,14 +511,7 @@ struct SettingsView: View {
         value.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Unavailable"
     }
     private func refreshStorage() async { storage = await app.store.settingsStorage() }
-    private var supportURL: URL {
-        var components = URLComponents(string: "https://github.com/falconRUBIO/home-movie/issues/new")!
-        components.queryItems = [
-            URLQueryItem(name: "title", value: "Home Movie support request"),
-            URLQueryItem(name: "body", value: "How can we help?\n\n\nIf something went wrong, what happened and what did you expect?\n\n\nPlease do not include private footage or sensitive diagnostics. This request is public.")
-        ]
-        return components.url!
-    }
+    private var supportURL: URL { URL(string: "https://home-movie-support.falcon-craft-4475.chatgpt.site/")! }
     private var storageSection: some View {
         Section {
             LabeledContent("Active Footage", value: bytes(summary.activeBytes))
@@ -565,14 +558,14 @@ struct SettingsView: View {
         Section {
             Link(destination: supportURL) {
                 Label("Contact Support", systemImage: "bubble.left.and.bubble.right")
-            }.accessibilityHint("Opens a new support request on GitHub. A GitHub account is required and requests are public.")
+            }.accessibilityHint("Opens the public support page with email contact information.")
             NavigationLink("Diagnostics", destination: DiagnosticsView())
             NavigationLink("Privacy", destination: PrivacyView())
             Button("App Permissions", systemImage: "hand.raised") {
                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
             }
         } header: { Text("Help & Privacy") }
-        footer: { Text("Contact Support opens a new request to the developer on GitHub. A GitHub account is required; requests are public, so do not include private footage or sensitive diagnostics. App Permissions opens iPhone Settings for camera, microphone, and Photos access.") }
+        footer: { Text("Contact Support opens our public help page. Tap Email Home Movie Support there, or copy the contact address into your email service. App Permissions opens iPhone Settings for camera, microphone, and Photos access.") }
     }
     var body: some View {
         NavigationStack {
@@ -605,7 +598,7 @@ struct PrivacyView: View {
     var body: some View {
         List {
             Section {
-                Link("Privacy Policy", destination: URL(string: "https://github.com/falconRUBIO/home-movie/blob/main/docs/Privacy-Policy.md")!)
+                Link("Privacy Policy", destination: URL(string: "https://home-movie-support.falcon-craft-4475.chatgpt.site/privacy/")!)
             }
             Section("Your movies") {
                 Text("Home Movie keeps recordings and edit information on this iPhone. It has no account system, advertising, or analytics service, and does not upload your movies to a developer server.")
