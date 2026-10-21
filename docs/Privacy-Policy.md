@@ -1,12 +1,12 @@
-# Home Movie Privacy Policy
+# HOME MOVIE CLIPS Privacy Policy
 
 Effective October 21, 2026.
 
-Home Movie is provided by the developer of the [home-movie project](https://github.com/falconRUBIO/home-movie). This policy covers the Home Movie iPhone app.
+HOME MOVIE CLIPS is provided by the developer of the [home-movie project](https://github.com/falconRUBIO/home-movie). This policy covers the HOME MOVIE CLIPS iPhone app.
 
 ## Recordings and projects
 
-Video, audio, thumbnails, imported looks, editing settings, and project information are stored on your device. Home Movie has no account system, advertising, tracking, or third-party analytics service. It does not send your recordings or project information to a developer server.
+Video, audio, thumbnails, imported looks, editing settings, and project information are stored on your device. HOME MOVIE CLIPS has no account system, advertising, tracking, or third-party analytics service. It does not send your recordings or project information to a developer server.
 
 ## Permissions
 

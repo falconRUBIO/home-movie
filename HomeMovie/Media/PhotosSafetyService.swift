@@ -16,7 +16,7 @@ enum PhotosVideoWriter {
             receipt.set(request?.placeholderForCreatedAsset?.localIdentifier)
         }
         guard let identifier = receipt.get(), !identifier.isEmpty else {
-            throw HomeMovieError.message("Photos did not confirm a saved video. Your original stays in Home Movie; try again or save to Files.")
+            throw HomeMovieError.message("Photos did not confirm a saved video. Your original stays in HOME MOVIE CLIPS; try again or save to Files.")
         }
         return identifier
     }
@@ -33,7 +33,7 @@ actor PhotosSafetyService {
         let current = await store.snapshot().flatMap(\.scenes).first { $0.id == scene.id }
         guard let current, current.photosAssetID == nil, !copying.contains(scene.id) else { return }
         copying.insert(scene.id); defer { copying.remove(scene.id) }
-        guard await authorize() else { throw HomeMovieError.message("Photos copy is not enabled by permission. The scene remains saved in Home Movie.") }
+        guard await authorize() else { throw HomeMovieError.message("Photos copy is not enabled by permission. The scene remains saved in HOME MOVIE CLIPS.") }
         try Task.checkCancellation()
         let source = try await store.url(scene.source)
         let identifier = try await PhotosVideoWriter.write(source)

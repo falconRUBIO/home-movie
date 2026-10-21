@@ -109,7 +109,7 @@ actor ProjectStore {
         if fm.fileExists(atPath: path.path) {
             // A damaged or newer manifest must never be overwritten by an empty catalog.
             let decoded = try JSONDecoder().decode(Catalog.self, from: Data(contentsOf: path))
-            guard decoded.schemaVersion == 1 else { throw HomeMovieError.message("This project uses a newer version of Home Movie.") }
+            guard decoded.schemaVersion == 1 else { throw HomeMovieError.message("This project uses a newer version of HOME MOVIE CLIPS.") }
             try validate(decoded)
             catalog = decoded
         } else { try write(catalog) }
@@ -120,7 +120,7 @@ actor ProjectStore {
         }
         if migrated.movies != catalog.movies { try write(migrated) }
         var notices: [String] = []
-        if finishPermanentDeletions() > 0 { notices.append("Some deleted files could not be removed yet. Home Movie will retry when reopened.") }
+        if finishPermanentDeletions() > 0 { notices.append("Some deleted files could not be removed yet. HOME MOVIE CLIPS will retry when reopened.") }
         let deleting = Set(catalog.pendingDeletionIDs ?? [])
         let journalFiles = try fm.contentsOfDirectory(at: root.appendingPathComponent("Journal"), includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" }
         var pending: [(URL, CaptureTicket)] = []
@@ -636,7 +636,7 @@ actor ProjectStore {
     func endMaintenance() { maintenance = false }
     func catalogSnapshot() -> Catalog { catalog }
     func validateBackupCatalog(_ value: Catalog) throws {
-        guard value.schemaVersion == 1 else { throw HomeMovieError.message("This backup requires a newer version of Home Movie.") }
+        guard value.schemaVersion == 1 else { throw HomeMovieError.message("This backup requires a newer version of HOME MOVIE CLIPS.") }
         try validate(value)
     }
     private func preserveCatalog() throws {
