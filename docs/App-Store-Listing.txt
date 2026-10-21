@@ -1,0 +1,55 @@
+HOME MOVIE — APP STORE LISTING
+
+APP NAME
+Home Movie
+
+SUBTITLE
+Your life, scene by scene
+
+PROMOTIONAL TEXT
+Turn everyday moments into a movie that keeps growing. Record a scene, come back for the next, and make something worth watching together.
+
+DESCRIPTION
+Some moments deserve more than a place in your camera roll.
+
+Home Movie brings them together. Start a movie for a family trip, a weekend, a new chapter, or everyday life. Record a scene, put your phone away, and come back for the next. Each new take becomes part of the same movie, ready to watch and share.
+
+KEEP THE STORY GOING
+Create separate movies for the things you want to remember. Add scenes over time and watch your story grow without piecing everything together afterward.
+
+STAY IN THE MOMENT
+A familiar camera experience keeps recording simple. Tap to focus, adjust exposure, and switch between available lenses. Use Smooth Zoom to set a start and end point for a gradual camera move.
+
+BE PART OF THE STORY
+Picture-in-Picture lets you record with the front and rear cameras together on compatible iPhones. Adjust the inset's size, position, and orientation for travel commentary, home tours, and everyday reactions.
+
+MAKE IT FEEL LIKE YOU
+Trim scenes and adjust light and color. Shape the image with exposure, shadows, highlights, and film effects, including grain, bloom, and halation. Record in Standard, or choose Apple Log on supported cameras for more flexibility when editing.
+
+WATCH IT COME TOGETHER
+Play your movie as one continuous story. Save a finished movie or an edited scene to Photos, or export a movie to Files and other destinations through the share sheet.
+
+KEEP YOUR MEMORIES CLOSE
+Your projects and original recordings stay on your iPhone. Create project backups in Files and restore them later. No account is required to record, edit, or watch your movies.
+
+Start with one scene. Keep coming back.
+
+Apple Log, Picture-in-Picture, camera switching, and available lenses depend on your iPhone and recording configuration. Back up projects outside the app to keep an additional copy of your footage.
+
+KEYWORDS
+video,camera,recorder,family,memories,diary,journal,travel,film,clips,zoom,pip,editor,vlog
+
+PRIMARY CATEGORY
+Photo & Video
+
+SUPPORT URL
+https://github.com/falconRUBIO/home-movie/issues
+
+PRIVACY POLICY URL
+https://github.com/falconRUBIO/home-movie/blob/main/docs/Privacy-Policy.md
+
+PRIVATE SUBMISSION NOTES — DO NOT PASTE INTO DESCRIPTION
+Listing assets do not submit the app or update the icon embedded in the build. After choosing the final icon, include it in the app's asset catalog and upload a build containing it.
+Supply screenshots from the final app, complete App Store Connect metadata, and verify hardware-dependent claims against the submitted build.
+The repository's release checklist still records physical-device acceptance tests as not run and original LUT redistribution permission as unconfirmed. Resolve those before submission. Renaming third-party LUT data does not establish distribution rights.
+Do not invent copyright ownership, a support email address, privacy answers, or licensing confirmations; use the developer's verified details.
