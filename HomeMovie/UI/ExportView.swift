@@ -16,7 +16,7 @@ struct ExportView: View {
                     Section {
                         ProgressView(value: export.progress) { Text("Exporting…") } currentValueLabel: { Text(export.progress, format: .percent.precision(.fractionLength(0))) }
                         Button("Cancel Export", role: .destructive) { export.cancel() }
-                    } footer: { Text("Keep Home Movie open while exporting.") }
+                    } footer: { Text("Keep HOME MOVIE CLIPS open while exporting.") }
                 } else if export.exportedURL != nil {
                     Section {
                         Label("Movie Ready", systemImage: "checkmark.circle.fill").foregroundStyle(.green)

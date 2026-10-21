@@ -49,7 +49,7 @@ actor BackupService {
     }
     nonisolated private func packageRoot(_ url: URL) throws {
         let info = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-        guard info.isDirectory == true, info.isSymbolicLink != true else { throw HomeMovieError.message("Choose a Home Movie backup document.") }
+        guard info.isDirectory == true, info.isSymbolicLink != true else { throw HomeMovieError.message("Choose a HOME MOVIE CLIPS backup document.") }
         let originals = try url.appendingPathComponent("Originals").resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard originals.isDirectory == true, originals.isSymbolicLink != true else { throw HomeMovieError.message("The backup's Originals folder is invalid.") }
     }
@@ -78,7 +78,7 @@ actor BackupService {
         let scenes = snapshot.movies.flatMap(\.scenes)
         guard !scenes.isEmpty else { await store.endMaintenance(); throw HomeMovieError.message("Record a scene before making a project backup.") }
         let folder = store.root.appendingPathComponent("OutgoingBackups", isDirectory: true)
-        let package = folder.appendingPathComponent("Home Movie-\(UUID()).homemovie", isDirectory: true)
+        let package = folder.appendingPathComponent("HOME MOVIE CLIPS-\(UUID()).homemovie", isDirectory: true)
         do {
             try await store.validateBackupCatalog(snapshot)
             let references = Dictionary(snapshot.movies.compactMap { $0.look }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
