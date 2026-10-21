@@ -1,6 +1,6 @@
 # Home Movie Privacy Policy
 
-Effective October 19, 2026.
+Effective October 21, 2026.
 
 Home Movie is provided by the developer of the [home-movie project](https://github.com/falconRUBIO/home-movie). This policy covers the Home Movie iPhone app.
 
@@ -26,4 +26,8 @@ Projects remain locally until you delete them. Recently Deleted retains footage 
 
 ## Contact and changes
 
-For privacy questions, use [Home Movie support](https://github.com/falconRUBIO/home-movie/issues). GitHub is a separate service with its own privacy policy. Issues are public: do not post private recordings or diagnostic reports containing sensitive information. This document will be updated when the app's privacy practices change.
+For privacy questions, use the email contact on our [support page](https://home-movie-support.falcon-craft-4475.chatgpt.site/). If you email support, the information you choose to send and your email address are used to respond to your request. Email is handled by email service providers. Please avoid sending sensitive recordings or diagnostics unless needed; you can request deletion of support correspondence by email. This document will be updated when the app's privacy practices change.
+
+## Support website
+
+This website provides support and privacy information without requiring an account. We do not add advertising or analytics scripts. The hosting provider processes requests needed to deliver the pages. Contact links open your email app; this website does not submit a support form or automatically send diagnostics.

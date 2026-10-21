@@ -43,10 +43,10 @@ PRIMARY CATEGORY
 Photo & Video
 
 SUPPORT URL
-https://github.com/falconRUBIO/home-movie/issues
+https://home-movie-support.falcon-craft-4475.chatgpt.site/
 
 PRIVACY POLICY URL
-https://github.com/falconRUBIO/home-movie/blob/main/docs/Privacy-Policy.md
+https://home-movie-support.falcon-craft-4475.chatgpt.site/privacy/
 
 PRIVATE SUBMISSION NOTES — DO NOT PASTE INTO DESCRIPTION
 Listing assets do not submit the app or update the icon embedded in the build. After choosing the final icon, include it in the app's asset catalog and upload a build containing it.
