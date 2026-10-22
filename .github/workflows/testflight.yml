@@ -1,4 +1,4 @@
-name: Upload internal TestFlight beta
+name: Upload TestFlight or App Store candidate
 
 on:
   workflow_dispatch:
@@ -7,10 +7,10 @@ on:
         description: Internal beta or an App Store-capable candidate (not an App Store submission)
         type: choice
         required: true
-        default: internal
+        default: app-store-candidate
         options:
-          - internal
           - app-store-candidate
+          - internal
 
 permissions:
   contents: read
@@ -81,7 +81,7 @@ jobs:
           xcode-project build-ipa --project HomeMovie.xcodeproj --scheme HomeMovie --disable-xcpretty 2>&1 | tee build/archive.log
           python3 scripts/release_check.py --ipa build/ios/ipa/*.ipa
           python3 scripts/package_symbols.py
-          app-store-connect publish --path 'build/ios/ipa/*.ipa' --enable-package-validation
+          app-store-connect publish --path 'build/ios/ipa/*.ipa' --altool-retries 3 --altool-retry-wait 30
       - name: Package test results
         if: always()
         run: |

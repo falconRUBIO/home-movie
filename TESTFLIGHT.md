@@ -1,6 +1,6 @@
-# Internal TestFlight beta through GitHub
+# Build and upload HOME MOVIE CLIPS through GitHub
 
-App Store Connect name: **HOME MOVIES APP**. Registered bundle identifier: `com.falconcraft.homemovie`.
+App Store Connect name: **HOME MOVIE CLIPS**. Registered bundle identifier: `com.falconcraft.homemovie`.
 
 ## Signing setup
 
@@ -25,20 +25,22 @@ Paste the clipboard directly into the `CERTIFICATE_PRIVATE_KEY` GitHub secret an
 
 ## Start the upload
 
-1. Open [Upload internal TestFlight beta](https://github.com/falconRUBIO/home-movie/actions/workflows/testflight.yml).
-2. Click **Run workflow**, select **main**, then **Run workflow**.
-3. The workflow checks all four secrets, runs all simulator tests, installs pinned standalone signing tools, creates/fetches the matching Apple distribution certificate and App Store provisioning profile, builds the signed IPA, validates it, and uploads to Apple. It uses GitHub's Mac runner; no Codemagic account or queue is involved. Apple agreements and API access must be active. It fails rather than revoking existing certificates if Apple's certificate quota blocks creation.
-4. After Apple processing, open App Store Connect → **HOME MOVIES APP** → **TestFlight**. Answer any compliance questions accurately. Create an internal group, add your own eligible App Store Connect user, and assign the build.
+1. Open [Upload TestFlight or App Store candidate](https://github.com/falconRUBIO/home-movie/actions/workflows/testflight.yml).
+2. Click **Run workflow**, select **main**, and keep **distribution: app-store-candidate** for an App Store submission build. Choose **internal** only for a beta that must never be submitted to the App Store. Click **Run workflow**.
+3. The workflow checks all four secrets, runs all simulator tests, installs pinned standalone signing tools, creates/fetches the matching Apple distribution certificate and App Store provisioning profile, builds the signed IPA, runs the local archive checks, and uploads to Apple. Apple's upload service validates the package. It uses GitHub's Mac runner; no Codemagic account or queue is involved. Apple agreements and API access must be active. It fails rather than revoking existing certificates if Apple's certificate quota blocks creation.
+4. After Apple processing, open App Store Connect → **HOME MOVIE CLIPS** → **TestFlight**. Answer any compliance questions accurately. Create an internal group, add your own eligible App Store Connect user, and assign the build.
 5. Install Apple's **TestFlight** app on your iPhone, accept the invitation, and install the beta.
 6. Run the physical-device scenarios in `DEVICE_TESTS.md`. Simulator tests do not establish camera, microphone, lens, interruption, or real-device performance behavior.
 
-This workflow is manual and restricted to `main`. It rechecks tests on the exact revision being uploaded. It creates an internal-only archive and does not submit external beta review or a public App Store release. API credentials are supplied only to the signing step, and no private-key or certificate files are uploaded as artifacts. Build logs and zipped test results are retained for 14 days.
+This workflow is manual and restricted to `main`. It rechecks tests on the exact revision being uploaded. It defaults to an App Store-capable candidate; the optional internal choice creates an internal-only archive. Neither choice submits external beta review or a public App Store release. API credentials are supplied only to the signing step, and no private-key or certificate files are uploaded as artifacts. Build logs and zipped test results are retained for 14 days.
 
 Build numbers use `1000 + 10 × workflow run number + attempt`, allowing a rerun to use a fresh number. If other upload systems later use larger build numbers, adjust this offset before uploading.
 
-## Current evidence
+## Upload validation behavior
 
-[GitHub Actions run 1](https://github.com/falconRUBIO/home-movie/actions/runs/38166745629) passed all 13 simulator tests for commit `b684eb8`. The signed TestFlight workflow is configured but has not run; no IPA has been uploaded yet.
+The publish command uses Codemagic's default upload path. The optional separate `--enable-package-validation` preflight is omitted: with the installed CLI, Apple's validation output can report an earlier transient ERROR and then VERIFY SUCCEEDED, while the wrapper still aborts before upload. Local archive checks and Apple's actual upload validation remain enabled. Authentication and timeout retries use the CLI's supported bounded retry options; persistent service errors still fail the job.
+
+An archived or exported IPA is not proof of a successful upload. Look for upload success and confirm the build appears in App Store Connect after processing. A failed run should not be treated as a submitted app.
 
 ## References
 
