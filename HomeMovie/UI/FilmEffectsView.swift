@@ -5,6 +5,7 @@ import UIKit
 struct FilmEffectsControlSections: View {
     @Binding var settings: FilmEffectsSettings
     var editingChanged: (Bool) -> Void = { _ in }
+    var compact = false
     @State private var showGrainDetails = false
     @State private var showHalationDetails = false
     @State private var showBloomDetails = false
@@ -73,7 +74,7 @@ struct FilmEffectsControlSections: View {
         })
     }
     private func amountSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double> = 0...1, percent: Bool = true, accessibilityLabel: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: compact ? 0 : 6) {
             HStack {
                 Text(label).fontWeight(.semibold)
                 Spacer()
@@ -93,6 +94,6 @@ struct FilmEffectsControlSections: View {
                     UISelectionFeedbackGenerator().selectionChanged()
                 }
                 .accessibilityValue(percent ? "\(Int((value.wrappedValue * 100).rounded())) percent" : String(format: "%.1f times", value.wrappedValue))
-        }.padding(.vertical, 4)
+        }.padding(.vertical, compact ? 0 : 4)
     }
 }

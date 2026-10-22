@@ -208,6 +208,7 @@ struct SceneReviewView: View {
     @StateObject private var export = ExportModel()
     @State private var history: SceneEditHistory?
     @State private var showingCopyAdjustments = false
+    @State private var showingFullscreenPreview = false
     @State private var start: Double
     @State private var end: Double
     @State private var adjustments: SceneAdjustments
@@ -305,20 +306,22 @@ struct SceneReviewView: View {
             GeometryReader { geometry in
                 if geometry.size.width > geometry.size.height {
                     HStack(spacing: 0) {
-                        previewPanel.frame(width: geometry.size.width * 0.64, height: geometry.size.height)
+                        previewPanel.frame(width: geometry.size.width * 0.68, height: geometry.size.height)
                             .background(.black)
                         editingPanel.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 } else {
                     VStack(spacing: 0) {
                         previewPanel.frame(maxWidth: .infinity)
-                            .frame(height: max(120, min(geometry.size.height * (dynamicTypeSize.isAccessibilitySize ? 0.46 : 0.55), geometry.size.width / reviewAspect)))
+                            .frame(height: max(120, min(geometry.size.width / reviewAspect,
+                                min(geometry.size.height * (dynamicTypeSize.isAccessibilitySize ? 0.52 : 0.68),
+                                    geometry.size.height - (dynamicTypeSize.isAccessibilitySize ? 240 : 180)))))
                             .background(.black)
                         editingPanel.frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
             }
-            .safeAreaInset(edge: .bottom) { photosFooter }
+            .safeAreaInset(edge: .bottom) { editorFooter }
             .saveStatusToast($export.saveFeedback)
             .navigationTitle("Edit Scene").navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -343,7 +346,8 @@ struct SceneReviewView: View {
                         Button("Paste Adjustments", systemImage: "doc.on.clipboard", action: pasteAdjustments)
                             .disabled(app.copiedSceneAdjustments == nil || preview.loading)
                         Divider()
-                        Button("Save to Photos", systemImage: "square.and.arrow.down") { saveClip() }
+                        Button("Save Edited Clip to Photos", systemImage: "square.and.arrow.down") { saveClip() }
+                            .accessibilityHint("Saves only this trimmed clip with its current look and adjustments")
                             .disabled(preview.loading || preview.error != nil)
                         Button("Duplicate", systemImage: "plus.square.on.square") { duplicateScene() }
                         Divider()
@@ -352,8 +356,11 @@ struct SceneReviewView: View {
                         .accessibilityLabel("Scene actions").disabled(busy || history?.isGrouping == true)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { saveEditsAndClose() }.disabled(busy || preview.loading || history?.isGrouping == true)
+                    Button("Done") { saveEditsAndClose() }.disabled(busy || preview.loading || history?.isGrouping == true)
                 }
+            }
+            .fullScreenCover(isPresented: $showingFullscreenPreview) {
+                if let player = preview.player { SceneFullscreenPreview(player: player) }
             }
             .sheet(isPresented: $showingCopyAdjustments) {
                 CopySceneAdjustmentsView(source: adjustments) { clipboard in
@@ -380,6 +387,9 @@ struct SceneReviewView: View {
                 }
             } message: { Text("Restore it later from Settings. Its original file will be kept.") }
             .task {
+                // A fullscreen presentation can restart this task on return.
+                // Keep the edited player and its current playback position.
+                guard preview.player == nil else { return }
                 guard let movie else { error = "This movie is unavailable."; return }
                 if !loadedEffects {
                     effects = movie.exportEffects; originalEffects = effects; loadedEffects = true
@@ -421,16 +431,18 @@ struct SceneReviewView: View {
             .onChange(of: busy) { _, value in if value { editingChanged(false); pickingWhiteBalance = false; comparing = false; interactingControl = nil } }
         }
         .interactiveDismissDisabled(busy || hasUnsavedEdits)
-        .onDisappear { preview.stop(); export.cancel() }
+        .onDisappear {
+            if !showingFullscreenPreview { preview.stop(); export.cancel() }
+        }
     }
     private var reviewToolPicker: some View {
         HStack(spacing: 0) {
             ForEach(SceneReviewTool.allCases) { item in
                 Button { tool = item } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: item.symbol).font(.title3)
+                    VStack(spacing: 3) {
+                        Image(systemName: item.symbol).font(.system(size: 18))
                         Text(item.rawValue).font(.caption.weight(.semibold))
-                    }.frame(maxWidth: .infinity, minHeight: 52)
+                    }.frame(maxWidth: .infinity, minHeight: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -444,12 +456,12 @@ struct SceneReviewView: View {
     private var editingPanel: some View {
         VStack(spacing: 0) {
             if tool == .fx {
-                Form { FilmEffectsControlSections(settings: $effects, editingChanged: editingChanged) }
+                Form { FilmEffectsControlSections(settings: $effects, editingChanged: editingChanged, compact: true) }
                     .listStyle(.plain).listSectionSpacing(.compact)
                     .disabled(busy || comparing || preview.loading || preview.error != nil)
             } else {
                 ScrollView {
-                    VStack(spacing: 12) {
+                    VStack(spacing: 4) {
                         if tool == .trim { trimControls } else if tool == .hsl { hslControls } else { lightControls }
                     }.padding(.bottom, 8)
                 }.id(tool)
@@ -465,7 +477,22 @@ struct SceneReviewView: View {
     private var previewPanel: some View {
         ZStack {
             Color.black
-            if let player = preview.player { VideoPlayer(player: player) }
+            if let player = preview.player {
+                SceneReviewPlayer(player: showingFullscreenPreview ? nil : player, showsControls: false)
+                Button { showingFullscreenPreview = true } label: {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .overlay(alignment: .bottomTrailing) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.white).frame(width: 44, height: 44)
+                                .background(.black.opacity(0.45), in: Circle()).padding(8)
+                        }
+                }.buttonStyle(.plain)
+                    .accessibilityLabel("Expand Video Preview")
+                    .accessibilityHint("Opens fullscreen playback with native video controls. Close it to continue editing.")
+                    .disabled(busy || preview.loading || preview.error != nil || pickingWhiteBalance)
+            }
             if preview.loading { ProgressView().tint(.white) }
         }
         .aspectRatio(reviewAspect, contentMode: .fit)
@@ -601,7 +628,7 @@ struct SceneReviewView: View {
         return adjustmentSlider(title: control.rawValue, symbol: control.symbol, detail: control.detail, value: value, range: control == .fade ? 0...1 : -1...1)
     }
     private func adjustmentSlider(title: String, symbol: String, detail: String, value: Binding<Double>, range: ClosedRange<Double> = -1...1) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: symbol).frame(width: 20).accessibilityHidden(true)
                 Text(title).fontWeight(.semibold)
@@ -626,26 +653,16 @@ struct SceneReviewView: View {
                     value.wrappedValue = 0
                     UISelectionFeedbackGenerator().selectionChanged()
                 }
-        }.padding(.vertical, 4).disabled(busy || comparing)
+        }.padding(.vertical, 2).disabled(busy || comparing)
     }
-    private var photosFooter: some View {
-        VStack(spacing: 6) {
+    private var editorFooter: some View {
+        VStack(spacing: 4) {
             reviewToolPicker
             if export.running {
-                ProgressView(value: export.progress) { Text("Preparing Scene…") }
-                Button("Cancel") { export.cancel() }.frame(minHeight: 44)
-            } else {
-                Button { saveClip() } label: {
-                    HStack {
-                        if savingPhotos || waitingForExport { ProgressView() }
-                        Label(savingPhotos ? "Saving…" : "Save to Photos", systemImage: "square.and.arrow.down")
-                    }.frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
-                    .disabled(busy || preview.loading || preview.error != nil || movie == nil)
-                Text("This scene only · Current look, Light, Color, HSL, and FX")
-                    .font(.caption).foregroundStyle(.secondary)
+                ProgressView(value: export.progress) { Text("Preparing Edited Clip…") }
+                Button("Cancel Export") { export.cancel() }.frame(minHeight: 44)
             }
-        }.padding(.horizontal, 20).padding(.vertical, 6).background(.bar)
+        }.padding(.horizontal, 8).padding(.vertical, 4).background(.bar)
     }
     private func sampleWhiteBalance(at point: CGPoint) {
         guard pickingWhiteBalance, !busy, let movie else { return }
@@ -726,5 +743,40 @@ struct SceneReviewView: View {
             if export.error == nil { notice = "Scene saved to Photos." }
             savingPhotos = false
         }
+    }
+}
+
+
+// Share the exact edited player and playback position between both sizes.
+// Detach the embedded surface while the fullscreen controller owns the player.
+private struct SceneReviewPlayer: UIViewControllerRepresentable {
+    let player: AVPlayer?
+    let showsControls: Bool
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.videoGravity = .resizeAspect
+        controller.showsPlaybackControls = showsControls
+        controller.player = player
+        return controller
+    }
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        if controller.player !== player { controller.player = player }
+        controller.showsPlaybackControls = showsControls
+    }
+}
+
+private struct SceneFullscreenPreview: View {
+    @Environment(\.dismiss) private var dismiss
+    let player: AVPlayer
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            SceneReviewPlayer(player: player, showsControls: true).ignoresSafeArea()
+            Button("Done") { dismiss() }
+                .font(.headline).foregroundStyle(.white)
+                .padding(.horizontal, 18).frame(minHeight: 44)
+                .background(.ultraThinMaterial, in: Capsule()).padding(16)
+                .accessibilityLabel("Close Fullscreen Preview")
+        }.preferredColorScheme(.dark)
     }
 }
