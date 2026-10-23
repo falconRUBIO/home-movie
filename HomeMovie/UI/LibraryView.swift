@@ -59,22 +59,17 @@ struct LibraryView: View {
     }
     private var newMovieButton: some View {
         Button { createMovie() } label: {
-            HStack(spacing: 8) {
-                Group {
-                    if creating {
-                        ProgressView().tint(.white)
-                    } else {
-                        Image(systemName: "plus").font(.headline.weight(.semibold))
-                    }
+            Group {
+                if creating {
+                    ProgressView().tint(.white)
+                } else {
+                    Image(systemName: "plus")
+                        .font(.system(size: 24, weight: .semibold))
                 }
-                .frame(width: 20, height: 20)
-                Text("Home").font(.headline)
             }
-            // The native large button style supplies the outer padding.
-            .frame(minWidth: 104, minHeight: 28)
-            .padding(.horizontal, 8)
+            .frame(width: 24, height: 24)
         }.buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
+            .buttonBorderShape(.circle)
             .tint(.blue)
             .controlSize(.large)
             .accessibilityLabel(creating ? "Creating Movie" : "New Movie")
