@@ -60,15 +60,19 @@ struct LibraryView: View {
     private var newMovieButton: some View {
         Button { createMovie() } label: {
             HStack(spacing: 8) {
-                if creating {
-                    ProgressView().tint(.white)
-                } else {
-                    Image(systemName: "plus").font(.headline.weight(.semibold))
+                Group {
+                    if creating {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "plus").font(.headline.weight(.semibold))
+                    }
                 }
+                .frame(width: 20, height: 20)
                 Text("Home").font(.headline)
             }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 44)
+            // The native large button style supplies the outer padding.
+            .frame(minWidth: 104, minHeight: 28)
+            .padding(.horizontal, 8)
         }.buttonStyle(.borderedProminent)
             .buttonBorderShape(.capsule)
             .tint(.blue)
