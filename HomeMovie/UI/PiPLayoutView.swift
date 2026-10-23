@@ -299,6 +299,7 @@ struct PiPCompositionPreview: UIViewRepresentable {
     var liveFrames: LiveFrames? = nil
     var paused = false
     var sourceFront = false
+    var falseColor = false
     var profile: CaptureProfile = .standard
     var cube: ColorCube? = nil
     var onStatus: ((LiveLookStatus) -> Void)? = nil
@@ -320,6 +321,7 @@ struct PiPCompositionPreview: UIViewRepresentable {
         context.coordinator?.obstacles = obstacles
         context.coordinator?.live = liveFrames
         context.coordinator?.sourceFront = sourceFront
+        context.coordinator?.falseColor = falseColor && profile == .appleLog
         context.coordinator?.profile = profile; context.coordinator?.cube = cube
         context.coordinator?.onStatus = onStatus
         (view.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: profile == .appleLog ? CGColorSpace.itur_709 : CGColorSpace.sRGB)
@@ -344,6 +346,8 @@ final class PiPMetalView: MTKView {
     private let context: CIContext
     private var rendering = false
     var sourceFront = false
+    var falseColor = false { didSet { if oldValue != falseColor { presentationID = UUID() } } }
+    private var presentationID = UUID()
     var profile: CaptureProfile = .standard
     var cube: ColorCube?
     var onStatus: ((LiveLookStatus) -> Void)?
@@ -364,6 +368,16 @@ final class PiPMetalView: MTKView {
         PiPCompositor.image(background: background, presenter: presenter, canvas: canvas,
             backgroundAngle: backgroundAngle, presenterAngle: presenterAngle, presentation: presentation, profile: profile)
     }
+    func monitoringImage(background: CVPixelBuffer, presenter: CVPixelBuffer?, canvas: CGSize,
+                         backgroundAngle: CGFloat, presenterAngle: CGFloat, presentation: PiPPresentation) throws -> CIImage {
+        if falseColor && profile == .appleLog {
+            return try FalseColorPreview.image(background: background, presenter: presenter, canvas: canvas,
+                backgroundAngle: backgroundAngle, presenterAngle: presenterAngle, presentation: presentation)
+        }
+        let composed = image(background: background, presenter: presenter, canvas: canvas,
+            backgroundAngle: backgroundAngle, presenterAngle: presenterAngle, presentation: presentation)
+        return profile == .appleLog ? try LiveLookRenderer.viewingImage(composed, cube: cube) : composed
+    }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { }
     func draw(in view: MTKView) {
         (view as? PiPMetalView)?.resizeDrawable()
@@ -373,28 +387,29 @@ final class PiPMetalView: MTKView {
               let drawable = view.currentDrawable, let command = queue.makeCommandBuffer() else { return }
         let presenter = front?.snapshot()
         let canvas = CGSize(width: drawable.texture.width, height: drawable.texture.height)
-        var image = image(background: background.buffer, presenter: live != nil ? liveSource?.pip?.presenter : presenter?.buffer,
-            canvas: canvas,
-            backgroundAngle: liveSource?.pip?.backgroundAngle ?? (live != nil ? background.angle ?? 90 :
-                (MovieFormat.captureFormat(angle: background.angle ?? 90) ?? .portrait).recordingAngle(observed: background.angle ?? 90)),
-            presenterAngle: liveSource?.pip?.presenterAngle ??
-                (MovieFormat.captureFormat(angle: presenter?.angle ?? 90) ?? .portrait).recordingAngle(observed: presenter?.angle ?? 90),
-            presentation: live != nil ? (liveSource?.pip?.presentation ?? PiPPresentation()) :
-                PiPPresentation(composition: layout.composition, splitSwapped: layout.splitSwapped, rect: PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero,
-                    opacity: 1, enabled: true, corner: layout.corner, zoom: layout.framingZoom))
-        if live != nil, sourceFront, liveSource?.pip == nil {
-            image = image.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: canvas.width, ty: 0))
-        }
-        let destination = CIRenderDestination(mtlTexture: drawable.texture, commandBuffer: command)
-        destination.isFlipped = true; destination.colorSpace = profile == .appleLog ? nil : CGColorSpace(name: CGColorSpace.sRGB)
         do {
-            if profile == .appleLog { image = try LiveLookRenderer.viewingImage(image, cube: cube) }
+            var image = try monitoringImage(background: background.buffer, presenter: live != nil ? liveSource?.pip?.presenter : presenter?.buffer,
+                canvas: canvas,
+                backgroundAngle: liveSource?.pip?.backgroundAngle ?? (live != nil ? background.angle ?? 90 :
+                    (MovieFormat.captureFormat(angle: background.angle ?? 90) ?? .portrait).recordingAngle(observed: background.angle ?? 90)),
+                presenterAngle: liveSource?.pip?.presenterAngle ??
+                    (MovieFormat.captureFormat(angle: presenter?.angle ?? 90) ?? .portrait).recordingAngle(observed: presenter?.angle ?? 90),
+                presentation: live != nil ? (liveSource?.pip?.presentation ?? PiPPresentation()) :
+                    PiPPresentation(composition: layout.composition, splitSwapped: layout.splitSwapped, rect: PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero,
+                        opacity: 1, enabled: true, corner: layout.corner, zoom: layout.framingZoom))
+            if live != nil, sourceFront, liveSource?.pip == nil {
+                image = image.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: canvas.width, ty: 0))
+            }
+            let destination = CIRenderDestination(mtlTexture: drawable.texture, commandBuffer: command)
+            destination.isFlipped = true; destination.colorSpace = profile == .appleLog ? nil : CGColorSpace(name: CGColorSpace.sRGB)
             _ = try (profile == .appleLog ? logContext : context).startTask(toRender: image, to: destination)
             rendering = true
+            let presentationID = self.presentationID
             command.addCompletedHandler { [weak self, background, presenter, liveSource] buffer in
                 withExtendedLifetime((background, presenter, liveSource)) { }
                 Task { @MainActor in
                     self?.rendering = false
+                    guard self?.presentationID == presentationID else { return }
                     self?.onStatus?(buffer.status == .completed ? .ready : .unavailable)
                 }
             }
