@@ -59,19 +59,20 @@ struct LibraryView: View {
     }
     private var newMovieButton: some View {
         Button { createMovie() } label: {
-            Group {
+            HStack(spacing: 8) {
                 if creating {
                     ProgressView().tint(.white)
                 } else {
-                    Image(systemName: "plus")
-                        .font(.system(size: 22, weight: .semibold))
+                    Image(systemName: "plus").font(.headline.weight(.semibold))
                 }
+                Text("Home").font(.headline)
             }
-            .foregroundStyle(.white)
-            .frame(width: 44, height: 44)
-            .background(.blue, in: Circle())
-            .contentShape(Circle())
-        }.buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+        }.buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .tint(.blue)
+            .controlSize(.large)
             .accessibilityLabel(creating ? "Creating Movie" : "New Movie")
             .accessibilityHint("Creates a movie and opens the camera")
             .disabled(!app.loaded || creating)
@@ -187,6 +188,12 @@ struct LibraryView: View {
                         Button("Delete", systemImage: "trash", role: .destructive) { confirmingSelection = true }
                             .disabled(selected.isEmpty || deletingSelection).frame(minHeight: 44)
                     }.padding(.horizontal, 20).background(.bar)
+                } else {
+                    newMovieButton
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
                 }
             }
             .toolbar {
@@ -216,9 +223,6 @@ struct LibraryView: View {
                         } label: { MovieControlIcon(systemName: "ellipsis.circle") }
                             .accessibilityLabel("Library options").disabled(!app.loaded || app.activeMovies.isEmpty)
                     }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if !selecting { newMovieButton }
                 }
             }
             .onChange(of: app.activeMovies.map(\.id)) { _, ids in selected.formIntersection(ids) }
