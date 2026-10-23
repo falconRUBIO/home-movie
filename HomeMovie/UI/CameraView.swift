@@ -730,11 +730,15 @@ struct CameraView: View {
     private func setDollyEndpoint(_ factor: CGFloat, start: Bool) {
         guard activeDolly == nil, countdown == nil, !awaitingDollyHold, let options = camera.options else { return }
         if let preview = dollyEditor.edit(Double(factor), endpoint: start ? .start : .end,
-            minimum: Double(dollyMinimum(options)), maximum: Double(dollyMaximum(options))) {
+            minimum: Double(dollyMinimum(options)), maximum: Double(dollyMaximum(options)),
+            isScrubbing: draggingDollyStart != nil && dollyEndpointMoved) {
             camera.zoom(CGFloat(preview)); camera.beginSmoothZoom()
         }
     }
     private func finishDollyEndpointInteraction() {
+        if let start = dollyEditor.finishScrubbing(), activeDolly == nil, countdown == nil {
+            camera.zoom(CGFloat(start)); camera.beginSmoothZoom()
+        }
         draggingDollyStart = nil; dollyEndpointMoved = false; dollyHapticTick = nil
     }
     private func dollyEndpointSelector(options: CameraOptions) -> some View {

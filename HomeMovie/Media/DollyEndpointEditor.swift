@@ -6,11 +6,12 @@ enum DollyEndpoint: String, CaseIterable, Identifiable {
     var title: String { self == .start ? "Start" : "End" }
 }
 
-/// Selection never moves the camera. Only an explicit edit to Start requests a preview.
+/// Selection never moves the camera. Scrubbing previews either point; End returns to Start on release.
 struct DollyEndpointEditor {
     var start: Double?
     var end: Double?
     var selected: DollyEndpoint = .end
+    var endPreviewActive = false
 
     mutating func selectNearest(position: Double, startPosition: Double, endPosition: Double) {
         guard position.isFinite, startPosition.isFinite, endPosition.isFinite else { return }
@@ -19,13 +20,22 @@ struct DollyEndpointEditor {
         // Overlapping/equidistant markers keep the explicitly selected endpoint.
     }
     @discardableResult mutating func edit(_ factor: Double, endpoint: DollyEndpoint,
-                                           minimum: Double, maximum: Double) -> Double? {
+                                           minimum: Double, maximum: Double, isScrubbing: Bool = false) -> Double? {
         guard factor.isFinite, factor > 0, minimum.isFinite, maximum.isFinite,
               minimum > 0, maximum >= minimum else { return nil }
         selected = endpoint
         let value = min(maximum, max(minimum, factor))
         if endpoint == .start { start = value; return value }
         end = value
+        if isScrubbing {
+            endPreviewActive = true
+            return value
+        }
         return nil
+    }
+    mutating func finishScrubbing() -> Double? {
+        guard endPreviewActive else { return nil }
+        endPreviewActive = false
+        return start
     }
 }
