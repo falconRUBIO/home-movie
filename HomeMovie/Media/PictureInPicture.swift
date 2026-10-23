@@ -214,18 +214,24 @@ enum PiPCompositor {
     // Both views are intentionally unmirrored in preview AND saved footage, so text stays readable.
     static func image(background: CVPixelBuffer, presenter: CVPixelBuffer?, canvas: CGSize,
                       backgroundAngle: CGFloat, presenterAngle: CGFloat, presentation: PiPPresentation, profile: CaptureProfile = .standard) -> CIImage {
-        let bounds = CGRect(origin: .zero, size: canvas)
         let imageOptions: [CIImageOption: Any] = profile == .appleLog ? [.colorSpace: NSNull()] : [:]
-        let source = CIImage(cvPixelBuffer: background, options: imageOptions)
+        return image(background: CIImage(cvPixelBuffer: background, options: imageOptions),
+            presenter: presenter.map { CIImage(cvPixelBuffer: $0, options: imageOptions) }, canvas: canvas,
+            backgroundAngle: backgroundAngle, presenterAngle: presenterAngle, presentation: presentation)
+    }
+    // Display tools can transform each source before composition without touching writer buffers.
+    static func image(background: CIImage, presenter: CIImage?, canvas: CGSize,
+                      backgroundAngle: CGFloat, presenterAngle: CGFloat, presentation: PiPPresentation) -> CIImage {
+        let bounds = CGRect(origin: .zero, size: canvas)
+        let source = background
         var result = source.transformed(by: LiveLookGeometry.transform(source: source.extent.size, target: canvas, angle: backgroundAngle, front: false)).cropped(to: bounds)
         guard presentation.opacity > 0, presentation.isPlaceable, let presenter, !presentation.rect.isEmpty else { return result }
         if presentation.composition != .inset {
             let frontUnit = presentation.composition.presenterRect(swapped: presentation.splitSwapped) ?? presentation.rect
             let rearUnit = presentation.composition.presenterRect(swapped: !presentation.splitSwapped) ?? .zero
-            func panel(_ buffer: CVPixelBuffer, unit: CGRect, angle: CGFloat, zoom: CGFloat) -> CIImage {
+            func panel(_ image: CIImage, unit: CGRect, angle: CGFloat, zoom: CGFloat) -> CIImage {
                 let rect = CGRect(x: unit.minX * canvas.width, y: (1 - unit.maxY) * canvas.height,
                                   width: unit.width * canvas.width, height: unit.height * canvas.height)
-                let image = CIImage(cvPixelBuffer: buffer, options: imageOptions)
                 return image.transformed(by: LiveLookGeometry.transform(source: image.extent.size,
                         target: rect.size, angle: angle, front: false))
                     .transformed(by: CGAffineTransform(a: zoom, b: 0, c: 0, d: zoom,
@@ -245,7 +251,7 @@ enum PiPCompositor {
         let unit = presentation.rect
         let rect = CGRect(x: unit.minX * canvas.width, y: (1 - unit.maxY) * canvas.height,
             width: unit.width * canvas.width, height: unit.height * canvas.height)
-        let front = CIImage(cvPixelBuffer: presenter, options: imageOptions)
+        let front = presenter
         let zoom = PiPLayout.clampedZoom(presentation.zoom)
         let zoomTransform = CGAffineTransform(a: zoom, b: 0, c: 0, d: zoom,
             tx: rect.width * (1 - zoom) / 2, ty: rect.height * (1 - zoom) / 2)
