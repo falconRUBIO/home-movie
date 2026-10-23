@@ -199,6 +199,9 @@ struct CameraView: View {
             cancelCountdown()
         }
         .onChange(of: dollyStartDelaySeconds) { _, _ in cancelCountdown() }
+        .onChange(of: falseColorEnabled) { _, enabled in
+            if enabled, movie?.captureProfile == .appleLog { liveLookStatus = .preparing }
+        }
         .onChange(of: liveLookStatus) { _, status in
             if showsFalseColor, status == .unavailable {
                 falseColorEnabled = false

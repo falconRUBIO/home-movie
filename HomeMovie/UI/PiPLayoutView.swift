@@ -324,7 +324,7 @@ struct PiPCompositionPreview: UIViewRepresentable {
         context.coordinator?.falseColor = falseColor && profile == .appleLog
         context.coordinator?.profile = profile; context.coordinator?.cube = cube
         context.coordinator?.onStatus = onStatus
-        (view.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: profile == .appleLog ? CGColorSpace.itur_709 : CGColorSpace.sRGB)
+        (view.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: profile == .appleLog && !falseColor ? CGColorSpace.itur_709 : CGColorSpace.sRGB)
         view.isPaused = paused
         (view as? PiPMetalView)?.resizeDrawable()
     }
