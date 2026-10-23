@@ -58,6 +58,13 @@ final class FalseColorTests: XCTestCase {
         CVBufferRemoveAttachment(buffer, kCVImageBufferLogTransferFunctionKey)
         XCTAssertThrowsError(try FalseColorPreview.image(buffer))
     }
+    func testHiddenPresenterDoesNotInvalidateTheVisibleExposureMap() throws {
+        let rear = try neutral(0), hidden = try neutral(0)
+        CVBufferRemoveAttachment(hidden, kCVImageBufferLogTransferFunctionKey)
+        let image = try FalseColorPreview.image(background: rear, presenter: hidden, canvas: CGSize(width: 64, height: 64),
+            backgroundAngle: 0, presenterAngle: 0, presentation: PiPPresentation())
+        assertColor(sample(image), [0.1, 0.8, 0.2, 1])
+    }
     @MainActor func testToggleBypassesLUTAndRestoresItWithoutChangingSource() throws {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let renderer = try XCTUnwrap(LiveLookRenderer(device: device))
@@ -92,6 +99,8 @@ final class FalseColorTests: XCTestCase {
                 let mapped = try renderer.monitoringImage(background: rear, presenter: front, canvas: CGSize(width: 128, height: 128),
                     backgroundAngle: 0, presenterAngle: 90, presentation: presentation)
                 assertColor(sample(mapped, x: point.x.rounded(), y: point.y.rounded()), [1, 0.08, 0.03, 1])
+                let rearUnit = composition == .inset ? CGRect(x: 0, y: 0, width: 0.4, height: 0.4) : try XCTUnwrap(composition.presenterRect(swapped: !swapped))
+                assertColor(sample(mapped, x: (rearUnit.midX * 128).rounded(), y: ((1 - rearUnit.midY) * 128).rounded()), [0.1, 0.8, 0.2, 1])
                 let clean = PiPCompositor.image(background: rear, presenter: front, canvas: CGSize(width: 128, height: 128),
                     backgroundAngle: 0, presenterAngle: 90, presentation: presentation, profile: .appleLog)
                 let pixel = sample(clean, x: point.x.rounded(), y: point.y.rounded())

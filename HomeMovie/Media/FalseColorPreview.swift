@@ -31,7 +31,8 @@ enum FalseColorPreview {
                       backgroundAngle: CGFloat, presenterAngle: CGFloat,
                       presentation: PiPPresentation) throws -> CIImage {
         let rear = try image(background)
-        let front = try presenter.map { try image($0) }
+        let visiblePresenter = presentation.opacity > 0 && presentation.isPlaceable && !presentation.rect.isEmpty
+        let front = try (visiblePresenter ? presenter : nil).map { try image($0) }
         return PiPCompositor.image(background: rear, presenter: front, canvas: canvas,
             backgroundAngle: backgroundAngle, presenterAngle: presenterAngle, presentation: presentation)
     }
