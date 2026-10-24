@@ -5,6 +5,7 @@ import UIKit
 enum CameraState: Equatable {
     case preparing, ready, starting, recording, finalizing, denied, interrupted, failed
     var canStopTake: Bool { self == .starting || self == .recording }
+    var ownsTakeOrientation: Bool { [.starting, .recording, .finalizing].contains(self) }
     var showsLiveLook: Bool { [.ready, .starting, .recording, .finalizing].contains(self) }
 }
 
@@ -59,6 +60,7 @@ struct RecordingFlipHandoff {
     let service = CaptureService()
     @Published var state: CameraState = .preparing
     @Published private(set) var switchingCamera = false
+    @Published private(set) var switchingFormat: MovieFormat?
     @Published var options: CameraOptions?
     @Published var elapsed = CMTime.zero
     @Published var message: String?
@@ -88,6 +90,17 @@ struct RecordingFlipHandoff {
     @AppStorage("frontCamera") var rememberedFront = false
     var busy: Bool { switchingCamera || recordingFlip != nil || [.starting, .recording, .finalizing].contains(state) }
     var recordingSessionActive: Bool { state.canStopTake || recordingFlip != nil }
+    var activeTakeOrientation: MovieFormat? {
+        state.ownsTakeOrientation || recordingFlip != nil ? takeFormat : nil
+    }
+    var canFlipCamera: Bool {
+        guard active, !switchingCamera, recordingFlip == nil, state == .ready || state == .recording,
+              let options, !options.isPiPEnabled,
+              !options.dualCameraPrepared || pipPresentation.opacity <= 0.01,
+              state != .recording || options.canFlipWhileRecording else { return false }
+        return CameraCompatibility.allowsFlip(profile: options.profile, recording: state == .recording,
+            otherCameraSupported: options.canFlip, continuousFlipSupported: options.canFlipWhileRecording)
+    }
 
     init(app: AppModel) {
         self.app = app
@@ -121,7 +134,7 @@ struct RecordingFlipHandoff {
         ReliabilityDiagnostics.shared.record(.cameraRequested)
         preparationConfiguration = configuration
         let requestID = UUID(); preparationID = requestID
-        if preferencesMovieID != movieID { pipPresentation = PiPPresentation() }
+        if preferencesMovieID != movieID || !dualCamera { pipPresentation = PiPPresentation() }
         preferencesMovieID = movieID; pipLayout = layout; pipSetupFailed = false; enablePiPWhenReady = enablePiP
         active = true; state = .preparing; message = nil; interruption = nil; hasRecoverableTake = false
         let granted = await CaptureService.permissions()
@@ -191,7 +204,7 @@ struct RecordingFlipHandoff {
         state = .finalizing; timer?.invalidate(); beginBackgroundTime(); service.stop()
     }
     func suspend() {
-        switchingCamera = false
+        switchingCamera = false; switchingFormat = nil
         recordingFlip = nil
         active = false; startCancelled = true; preparationID = UUID()
         if busy { beginBackgroundTime(); state = .finalizing; timer?.invalidate() }
@@ -239,20 +252,12 @@ struct RecordingFlipHandoff {
     }
     func toggleTorch() { if active, !switchingCamera, [.ready, .recording].contains(state) { service.toggleTorch() } }
     func flip() {
-        guard active, !switchingCamera, recordingFlip == nil, let options, options.isPiPEnabled != true, pipPresentation.opacity == 0 else { return }
-        guard CameraCompatibility.allowsFlip(profile: options.profile, recording: state == .recording,
-            otherCameraSupported: options.canFlip, continuousFlipSupported: options.canFlipWhileRecording) else {
-            if options.profile == .appleLog {
-                message = state == .recording ? CameraCompatibility.logRecordingFlipExplanation : CameraCompatibility.logCameraExplanation
-            }
-            return
-        }
-        if state == .recording {
-            guard options.canFlipWhileRecording else {
-                message = "Stop recording before switching cameras in this mode."; return
-            }
-            switchingCamera = true; service.flip()
-        } else if state == .ready { switchingCamera = true; service.flip() }
+        guard canFlipCamera, let options else { return }
+        // A switch is busy, but it is not a take. Preserve the current interface,
+        // never the previous recording's stale portrait/landscape lock.
+        let format = OrientationPolicy.shared.currentInterfaceFormat(observed: options.angle)
+        switchingFormat = format; switchingCamera = true
+        service.flip(previewFormat: format)
     }
     func togglePiP() {
         guard active, !switchingCamera, state == .ready || state == .recording, options?.piPAvailable == true else { return }
@@ -277,12 +282,13 @@ struct RecordingFlipHandoff {
         case .ready(let options):
             if state == .preparing { ReliabilityDiagnostics.shared.record(.cameraReady) }
             self.options = options; rememberedFront = options.isFront
+            if !options.dualCameraPrepared { pipPresentation = PiPPresentation() }
             if (state == .preparing || state == .ready), recordingFlip == nil, active, interruption == nil { state = .ready }
             if enablePiPWhenReady, options.piPAvailable, active, state == .ready {
                 enablePiPWhenReady = false; service.setPiPEnabled(true)
             }
         case .cameraChanged(let options):
-            let wasSwitching = switchingCamera; switchingCamera = false
+            let wasSwitching = switchingCamera; switchingCamera = false; switchingFormat = nil
             self.options = options; rememberedFront = options.isFront
             guard active, interruption == nil else { recordingFlip = nil; state = .interrupted; return }
             // A live input change must not reset the writer, timer or Record state.
@@ -340,13 +346,13 @@ struct RecordingFlipHandoff {
             }
         case .interrupted(let text):
             ReliabilityDiagnostics.shared.record(.cameraInterrupted)
-            switchingCamera = false
+            switchingCamera = false; switchingFormat = nil
             recordingFlip = nil
             interruption = text; message = text; startCancelled = true
             if busy { state = .finalizing; beginBackgroundTime() } else { state = .interrupted }
         case .failed(let text):
             ReliabilityDiagnostics.shared.record(.cameraFailed)
-            switchingCamera = false
+            switchingCamera = false; switchingFormat = nil
             recordingFlip = nil
             message = text
             if busy { interruption = text; stop() } else { state = .failed }

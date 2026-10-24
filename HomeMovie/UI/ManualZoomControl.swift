@@ -254,7 +254,7 @@ private final class ZoomWheelView: UIView {
                 let labelFrame = CGRect(x: position.x - size.width / 2, y: position.y - size.height / 2,
                     width: size.width, height: size.height)
                 let actions = CGRect(x: bounds.width - reservedTrailingWidth, y: bounds.height - 52,
-                    width: reservedTrailingWidth, height: 52).insetBy(dx: -4, dy: -4)
+                    width: reservedTrailingWidth, height: 52).insetBy(dx: -4, dy: 0)
                 guard !labelFrame.intersects(actions) else { return }
                 #if DEBUG
                 renderedLabelFrames.append(labelFrame)
