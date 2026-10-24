@@ -74,20 +74,25 @@ import UIKit
         view.handlePan(state: .began, translation: -48)
         XCTAssertFalse(view.isDialVisible)
     }
-    func testNativeDialRenderingAttachments() {
+    func testNativeDialRenderingAttachmentsAndActionClearance() {
         for width: CGFloat in [300, 360] {
-            let view = ZoomDialControlView(frame: CGRect(x: 0, y: 0, width: width, height: 104))
-            configure(view)
-            view.handlePan(state: .began, translation: -48)
-            view.subviews.forEach { $0.layer.displayIfNeeded() }
-            let image = UIGraphicsImageRenderer(size: view.bounds.size).image { context in
-                view.layer.render(in: context.cgContext)
+            for zoom: CGFloat in [0.5, 2, 4, 8, 24] {
+                let view = ZoomDialControlView(frame: CGRect(x: 0, y: 0, width: width, height: 104))
+                configure(view, zoom: zoom)
+                view.handlePan(state: .began, translation: 0)
+                view.subviews.forEach { $0.layer.displayIfNeeded() }
+                let image = UIGraphicsImageRenderer(size: view.bounds.size).image { context in
+                    view.layer.render(in: context.cgContext)
+                }
+                let actions = CGRect(x: width - 100, y: 52, width: 100, height: 52)
+                XCTAssertFalse(view.renderedLabelFrames.isEmpty)
+                XCTAssertTrue(view.renderedLabelFrames.allSatisfy { !$0.intersects(actions) })
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "ZoomDial-\(Int(width))-\(zoom)x-during-first-drag"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                view.cancelInput()
             }
-            let attachment = XCTAttachment(image: image)
-            attachment.name = "ZoomDial-\(Int(width))-during-first-drag"
-            attachment.lifetime = .keepAlways
-            add(attachment)
-            view.cancelInput()
         }
     }
 

@@ -47,6 +47,9 @@ final class ZoomDialControlView: UIView, UIGestureRecognizerDelegate {
     var dialFrame: CGRect { wheel.frame }
     var lensFrame: CGRect { stack.frame }
     var displayedZoom: Double { wheel.zoom }
+    #if DEBUG
+    var renderedLabelFrames: [CGRect] { wheel.renderedLabelFrames }
+    #endif
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -117,6 +120,7 @@ final class ZoomDialControlView: UIView, UIGestureRecognizerDelegate {
         }
         wheel.minimum = Double(minimum); wheel.maximum = Double(maximum)
         wheel.multiplier = Double(multiplier); wheel.stops = factors.map(Double.init)
+        wheel.reservedTrailingWidth = reservedTrailingWidth
         if drag == nil && !isDialVisible { wheel.zoom = Double(zoom) }
         wheel.setNeedsDisplay(); setNeedsLayout()
         accessibilityCustomActions = [
@@ -212,9 +216,16 @@ final class ZoomDialControlView: UIView, UIGestureRecognizerDelegate {
 private final class ZoomWheelView: UIView {
     var zoom = 1.0, minimum = 1.0, maximum = 24.0, multiplier = 1.0
     var stops: [Double] = []
+    var reservedTrailingWidth: CGFloat = 100
+    #if DEBUG
+    private(set) var renderedLabelFrames: [CGRect] = []
+    #endif
     override init(frame: CGRect) { super.init(frame: frame); isOpaque = false; backgroundColor = .clear }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func draw(_ rect: CGRect) {
+        #if DEBUG
+        renderedLabelFrames = []
+        #endif
         guard let context = UIGraphicsGetCurrentContext(), zoom.isFinite, zoom > 0,
               minimum > 0, maximum.isFinite, maximum > minimum else { return }
         let radius: CGFloat = 154
@@ -240,7 +251,15 @@ private final class ZoomWheelView: UIView {
                 let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
                     .foregroundColor: UIColor.white.withAlphaComponent(alpha)]
                 let size = value.size(withAttributes: attrs), position = point(factor, radius: radius - 27)
-                value.draw(at: CGPoint(x: position.x - size.width / 2, y: position.y - size.height / 2), withAttributes: attrs)
+                let labelFrame = CGRect(x: position.x - size.width / 2, y: position.y - size.height / 2,
+                    width: size.width, height: size.height)
+                let actions = CGRect(x: bounds.width - reservedTrailingWidth, y: bounds.height - 52,
+                    width: reservedTrailingWidth, height: 52).insetBy(dx: -4, dy: -4)
+                guard !labelFrame.intersects(actions) else { return }
+                #if DEBUG
+                renderedLabelFrames.append(labelFrame)
+                #endif
+                value.draw(in: labelFrame, withAttributes: attrs)
             }
         }
         let count = min(240, Int(ceil(log2(maximum / minimum) * 12)))
