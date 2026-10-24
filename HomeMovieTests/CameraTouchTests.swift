@@ -65,16 +65,16 @@ final class CameraTouchTests: XCTestCase {
     func testManualDialMovesScaleWithFingerAndUsesProportionalTravel() {
         XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: 0, minimum: 0.5, maximum: 24), 1, accuracy: 0.00001)
         // Higher marks sit to the right; dragging the wheel left brings them to center.
-        XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: -120, minimum: 0.5, maximum: 24), 2, accuracy: 0.00001)
-        XCTAssertEqual(ManualZoomScale.factor(start: 8, translation: -120, minimum: 0.5, maximum: 24), 16, accuracy: 0.00001)
-        XCTAssertEqual(ManualZoomScale.factor(start: 8, translation: 120, minimum: 0.5, maximum: 24), 4, accuracy: 0.00001)
+        XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: -48, minimum: 0.5, maximum: 24), 2, accuracy: 0.00001)
+        XCTAssertEqual(ManualZoomScale.factor(start: 8, translation: -48, minimum: 0.5, maximum: 24), 16, accuracy: 0.00001)
+        XCTAssertEqual(ManualZoomScale.factor(start: 8, translation: 48, minimum: 0.5, maximum: 24), 4, accuracy: 0.00001)
     }
     func testManualDialClampsAtActiveDeviceLimitsAndReverses() {
         let end = ManualZoomScale.factor(start: 2, translation: -67, minimum: 0.5, maximum: 24)
         XCTAssertEqual(ManualZoomScale.factor(start: end, translation: 67, minimum: 0.5, maximum: 24), 2, accuracy: 0.00001)
         XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: -10000, minimum: 0.5, maximum: 24), 24, accuracy: 0.00001)
         XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: 10000, minimum: 0.5, maximum: 24), 0.5, accuracy: 0.00001)
-        XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: -120, minimum: 1, maximum: 1), 1)
+        XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: -48, minimum: 1, maximum: 1), 1)
     }
     func testManualDialRejectsInvalidInputAndDisplaysDeviceMultiplier() {
         XCTAssertEqual(ManualZoomScale.factor(start: .nan, translation: 2, minimum: 0.5, maximum: 24), 0.5)
