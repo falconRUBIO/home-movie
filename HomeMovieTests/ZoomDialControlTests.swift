@@ -72,6 +72,23 @@ import UIKit
         view.handlePan(state: .began, translation: -48)
         XCTAssertFalse(view.isDialVisible)
     }
+    func testNativeDialRenderingAttachments() {
+        for width: CGFloat in [300, 360] {
+            let view = ZoomDialControlView(frame: CGRect(x: 0, y: 0, width: width, height: 104))
+            configure(view)
+            view.handlePan(state: .began, translation: -48)
+            view.subviews.forEach { $0.layer.displayIfNeeded() }
+            let image = UIGraphicsImageRenderer(size: view.bounds.size).image { context in
+                view.layer.render(in: context.cgContext)
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "ZoomDial-\(Int(width))-during-first-drag"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            view.cancelInput()
+        }
+    }
+
     func testCompactTravelAndImmediateReversalAtBothRangeLimits() {
         var drag = ManualZoomDrag(start: 1)
         XCTAssertEqual(drag.update(translation: -144, minimum: 0.5, maximum: 24), 8, accuracy: 0.00001)
