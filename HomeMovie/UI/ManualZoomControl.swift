@@ -117,7 +117,7 @@ final class ZoomDialControlView: UIView, UIGestureRecognizerDelegate {
         }
         wheel.minimum = Double(minimum); wheel.maximum = Double(maximum)
         wheel.multiplier = Double(multiplier); wheel.stops = factors.map(Double.init)
-        if drag == nil { wheel.zoom = Double(zoom) }
+        if drag == nil && !isDialVisible { wheel.zoom = Double(zoom) }
         wheel.setNeedsDisplay(); setNeedsLayout()
         accessibilityCustomActions = [
             UIAccessibilityCustomAction(name: "Zoom in") { [weak self] _ in self?.adjust(1); return true },

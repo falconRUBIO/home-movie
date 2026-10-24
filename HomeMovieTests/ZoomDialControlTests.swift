@@ -35,6 +35,8 @@ import UIKit
         XCTAssertEqual(view.displayedZoom, 2, accuracy: 0.00001)
         view.handlePan(state: .ended, translation: -48)
         XCTAssertTrue(view.isDialVisible)
+        configure(view, zoom: 1.5)
+        XCTAssertEqual(view.displayedZoom, 2, accuracy: 0.00001)
         view.cancelInput()
     }
     func testDialIsCenteredAndFitsWithoutAnOffsetOrLayoutChange() {
