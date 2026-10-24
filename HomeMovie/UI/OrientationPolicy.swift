@@ -82,9 +82,10 @@ import UIKit
 }
 struct MovieOrientation: UIViewControllerRepresentable {
     let format: MovieFormat?
+    var onInterfaceChange: (UIInterfaceOrientation) -> Void = { _ in }
     func makeUIViewController(context: Context) -> MovieOrientationController { MovieOrientationController() }
     func updateUIViewController(_ controller: MovieOrientationController, context: Context) {
-        controller.format = format; controller.apply()
+        controller.format = format; controller.onInterfaceChange = onInterfaceChange; controller.apply()
     }
     static func dismantleUIViewController(_ controller: MovieOrientationController, coordinator: ()) {
         OrientationPolicy.shared.release(owner: controller.identity, scene: controller.view.window?.windowScene)
@@ -94,6 +95,13 @@ struct MovieOrientation: UIViewControllerRepresentable {
     let identity = UUID()
     var format: MovieFormat?
     private weak var lastScene: UIWindowScene?
+    var onInterfaceChange: (UIInterfaceOrientation) -> Void = { _ in }
+    private var lastReportedOrientation = UIInterfaceOrientation.unknown
+    override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); apply() }
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.apply() }
+    }
     override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); apply() }
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
@@ -102,6 +110,12 @@ struct MovieOrientation: UIViewControllerRepresentable {
     func apply() {
         guard let scene = view.window?.windowScene, scene.activationState == .foregroundActive else { return }
         lastScene = scene
+        let orientation = scene.interfaceOrientation
+        if orientation != .unknown, orientation != lastReportedOrientation {
+            lastReportedOrientation = orientation
+            let notify = onInterfaceChange
+            DispatchQueue.main.async { notify(orientation) }
+        }
         OrientationPolicy.shared.apply(owner: identity, format: format, scene: scene)
     }
 }

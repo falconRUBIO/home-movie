@@ -4,7 +4,7 @@ Reference: user-provided screenshots IMG_5913 (MOVIE ROLL) and IMG_5915 (Apple C
 
 ## Layout
 
-Landscape now extends to top, bottom and trailing screen edges while retaining the leading hardware safe area. Ordinary preview fills the remaining viewport beside one 96-point rail; it is not fitted inside another letterboxed rectangle. Explicit PiP movie canvases still fit their selected aspect. Portrait behavior retains its footer/aspect layout.
+Landscape now extends to the top, bottom and home-button-side edge while retaining the hardware-cutout safe area. The rail and Record placement mirror in the opposite landscape orientation, using the actual UIWindowScene orientation rather than a camera sensor angle. Ordinary preview fills the remaining viewport beside one 96-point rail; it is not fitted inside another letterboxed rectangle. Explicit PiP movie canvases still fit their selected aspect. Portrait behavior retains its footer/aspect layout.
 
 The landscape rail places Flip at top, a compact Watch Movie/play control and runtime in the center, and recent-clip review at bottom. Saved/Undo feedback sits above the thumbnail. The Record control remains over the right edge of the live view. Camera-preview identity is stable across layout/orientation updates.
 

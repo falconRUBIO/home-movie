@@ -92,6 +92,12 @@ struct CameraView: View {
     @State private var showingPiPCompatibility = false
     @State private var viewfinderSize = CGSize.zero
     @State private var interfaceFormat = MovieFormat.portrait
+    @State private var interfaceOrientation = UIInterfaceOrientation.portrait
+    private var landscapeControlsOnLeading: Bool { interfaceOrientation == .landscapeLeft }
+    private var landscapeBleedEdges: Edge.Set {
+        guard interfaceFormat == .landscape else { return [] }
+        return landscapeControlsOnLeading ? [.top, .bottom, .leading] : [.top, .bottom, .trailing]
+    }
     @State private var pipDragStart: CGPoint?
     @State private var lastPiPDragPoint: CGPoint?
     @State private var pipConfiguring = false
@@ -123,12 +129,12 @@ struct CameraView: View {
                 let footerHeight: CGFloat = dynamicTypeSize.isAccessibilitySize ? 100 : 64
                 let canvasFormat: MovieFormat? = camera.options?.dualCameraPrepared == true ? pipCanvasFormat : nil
                 let layout = CameraViewportLayout(size: geometry.size, landscape: landscape,
-                    portraitFooter: footerHeight, canvasAspect: canvasFormat?.aspect)
+                    controlsOnLeading: landscapeControlsOnLeading, portraitFooter: footerHeight, canvasAspect: canvasFormat?.aspect)
                 // Keep one viewfinder/UIViewRepresentable identity across rotation.
                 // Switching between HStack/VStack branches destroys and reattaches the
                 // native preview connection (and the Cinema Metal surface).
                 ZStack(alignment: .topLeading) {
-                    viewfinder(movie: movie, landscape: landscape)
+                    viewfinder(movie: movie, landscape: landscape, controlsOnLeading: landscapeControlsOnLeading)
                         .frame(width: layout.preview.width, height: layout.preview.height)
                         .position(x: layout.preview.midX, y: layout.preview.midY)
                     reviewControls(movie: movie, landscape: landscape).disabled(countdown != nil)
@@ -146,8 +152,9 @@ struct CameraView: View {
             interfaceFormat = format
             syncPiPCanvas()
         }
-        .ignoresSafeArea(.container, edges: interfaceFormat == .landscape ? [.top, .bottom, .trailing] : [])
-        .background(MovieOrientation(format: activeTakeFormat ?? camera.switchingFormat).frame(width: 0, height: 0))
+        .ignoresSafeArea(.container, edges: landscapeBleedEdges)
+        .background(MovieOrientation(format: activeTakeFormat ?? camera.switchingFormat,
+            onInterfaceChange: { interfaceOrientation = $0 }).frame(width: 0, height: 0))
         .background(.black).foregroundStyle(.white)
         .toolbar(.hidden, for: .navigationBar).navigationBarBackButtonHidden()
         .preferredColorScheme(.dark)
@@ -351,7 +358,7 @@ struct CameraView: View {
             } else { Color.clear.frame(width: 44, height: 44) }
         }.disabled(countdown != nil)
     }
-    private func viewfinder(movie: Movie, landscape: Bool) -> some View {
+    private func viewfinder(movie: Movie, landscape: Bool, controlsOnLeading: Bool) -> some View {
         ZStack {
             preview().zIndex(0)
             VStack(spacing: 4) {
@@ -369,12 +376,13 @@ struct CameraView: View {
                         Color.clear.preference(key: DollyControlHeightKey.self, value: proxy.size.height)
                     }
                 }.onPreferenceChange(DollyControlHeightKey.self) { lensControlHeight = $0 }
-                    .padding(.leading, landscape && smoothZoomOpen ? 100 : 12)
-                    .padding(.trailing, landscape ? 100 : 12)
+                    .padding(.leading, landscape && (smoothZoomOpen || controlsOnLeading) ? 100 : 12)
+                    .padding(.trailing, landscape && (smoothZoomOpen || !controlsOnLeading) ? 100 : 12)
                     .padding(.bottom, landscape ? 10 : 116)
             }
-            .overlay(alignment: landscape ? .trailing : .bottom) {
-                recordControl.cameraControlRegion().zIndex(3).padding(landscape ? .trailing : .bottom, 16)
+            .overlay(alignment: landscape ? (controlsOnLeading ? .leading : .trailing) : .bottom) {
+                recordControl.cameraControlRegion().zIndex(3)
+                    .padding(landscape ? (controlsOnLeading ? .leading : .trailing) : .bottom, 16)
             }
             .coordinateSpace(name: "cameraViewfinder")
             .onPreferenceChange(CameraControlRegionsKey.self) { previewControlRegions = $0; updatePiPObstacles() }

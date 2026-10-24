@@ -1,16 +1,18 @@
 import Foundation
 import CoreGraphics
 
-/// Geometry inside the leading-safe camera viewport. Landscape consumes the full
-/// screen height and trailing edge; the notch remains outside this coordinate space.
+/// Geometry inside the cutout-safe camera viewport. Landscape consumes full
+/// height and the home-button-side edge; the notch stays outside this coordinate space.
 struct CameraViewportLayout {
     let preview: CGRect
     let controls: CGRect
-    init(size: CGSize, landscape: Bool, portraitFooter: CGFloat = 64, canvasAspect: CGFloat? = nil) {
+    init(size: CGSize, landscape: Bool, controlsOnLeading: Bool = false,
+         portraitFooter: CGFloat = 64, canvasAspect: CGFloat? = nil) {
         let width = max(1, size.width), height = max(1, size.height)
         let rail: CGFloat = landscape ? min(96, width * 0.2) : 0
         let footer = landscape ? 0 : min(portraitFooter, height * 0.25)
-        let available = CGRect(x: 0, y: 0, width: width - rail, height: height - footer)
+        let available = CGRect(x: landscape && controlsOnLeading ? rail : 0, y: 0,
+            width: width - rail, height: height - footer)
         if landscape && canvasAspect == nil {
             preview = available // Same fill behavior as the native landscape camera.
         } else {
@@ -18,10 +20,10 @@ struct CameraViewportLayout {
             let validRatio = ratio.isFinite && ratio > 0 ? ratio : 1
             let fittedWidth = min(available.width, available.height * validRatio)
             let fittedHeight = fittedWidth / validRatio
-            preview = CGRect(x: (available.width - fittedWidth) / 2, y: (available.height - fittedHeight) / 2,
+            preview = CGRect(x: available.minX + (available.width - fittedWidth) / 2, y: (available.height - fittedHeight) / 2,
                 width: fittedWidth, height: fittedHeight)
         }
-        controls = landscape ? CGRect(x: width - rail, y: 0, width: rail, height: height) :
+        controls = landscape ? CGRect(x: controlsOnLeading ? 0 : width - rail, y: 0, width: rail, height: height) :
             CGRect(x: 0, y: height - footer, width: width, height: footer)
     }
 }

@@ -17,6 +17,19 @@ final class LandscapeCameraTests: XCTestCase {
             XCTAssertEqual(layout.controls.height, size.height)
         }
     }
+    func testOppositeLandscapeKeepsPreviewAndControlsOutsideTheNotchSide() {
+        let size = CGSize(width: 794, height: 393)
+        let layout = CameraViewportLayout(size: size, landscape: true, controlsOnLeading: true)
+        XCTAssertEqual(layout.controls.minX, 0)
+        XCTAssertEqual(layout.controls.width, 96)
+        XCTAssertEqual(layout.preview.minX, layout.controls.maxX)
+        XCTAssertEqual(layout.preview.maxX, size.width)
+        XCTAssertEqual(layout.preview.height, size.height)
+        let pip = CameraViewportLayout(size: size, landscape: true, controlsOnLeading: true, canvasAspect: 9.0 / 16.0)
+        XCTAssertGreaterThanOrEqual(pip.preview.minX, pip.controls.maxX)
+        XCTAssertLessThanOrEqual(pip.preview.maxX, size.width)
+    }
+
     func testPortraitAndExplicitPiPCanvasKeepTheirExistingAspect() {
         let portrait = CameraViewportLayout(size: CGSize(width: 390, height: 760), landscape: false)
         XCTAssertEqual(portrait.controls.height, 64)
@@ -50,6 +63,17 @@ final class LandscapeCameraTests: XCTestCase {
         XCTAssertEqual(camera.activeTakeOrientation, .landscape)
         camera.state = .ready
         XCTAssertNil(camera.activeTakeOrientation)
+        camera.takeFormat = .portrait
+        camera.options = CameraOptions(lenses: [], zoom: 1, minimum: 1, maximum: 8, multiplier: 1,
+            isFront: false, angle: 0, profile: .standard, canMeter: false, canLock: false,
+            focusLocked: false, exposureBias: 0, minimumExposureBias: -2, maximumExposureBias: 2,
+            canFlip: true, hasTorch: false, torchOn: false, canStayOnLens: false,
+            smoothMoving: false, recordingFormat: "Standard")
+        camera.flip()
+        XCTAssertTrue(camera.busy)
+        XCTAssertTrue(camera.switchingCamera)
+        XCTAssertNil(camera.activeTakeOrientation)
+        XCTAssertNotNil(camera.switchingFormat)
     }
     @MainActor func testLandscapeLockPreservesCurrentSideAndUnlockAllowsBoth() {
         XCTAssertEqual(OrientationPolicy.orientationMask(format: .landscape, current: .landscapeLeft), .landscapeLeft)
