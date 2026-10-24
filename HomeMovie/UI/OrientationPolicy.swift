@@ -97,18 +97,19 @@ struct MovieOrientation: UIViewControllerRepresentable {
     private weak var lastScene: UIWindowScene?
     var onInterfaceChange: (UIInterfaceOrientation) -> Void = { _ in }
     private var lastReportedOrientation = UIInterfaceOrientation.unknown
+    private var appeared = false
     override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); apply() }
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
         coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.apply() }
     }
-    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); apply() }
+    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); appeared = true; apply() }
     override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
+        super.viewDidDisappear(animated); appeared = false
         OrientationPolicy.shared.release(owner: identity, scene: lastScene ?? view.window?.windowScene)
     }
     func apply() {
-        guard let scene = view.window?.windowScene, scene.activationState == .foregroundActive else { return }
+        guard appeared, let scene = view.window?.windowScene, scene.activationState == .foregroundActive else { return }
         lastScene = scene
         let orientation = scene.interfaceOrientation
         if orientation != .unknown, orientation != lastReportedOrientation {
