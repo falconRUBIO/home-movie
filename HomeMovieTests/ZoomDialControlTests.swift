@@ -86,6 +86,7 @@ import UIKit
                 }
                 let actions = CGRect(x: width - 100, y: 52, width: 100, height: 52)
                 XCTAssertFalse(view.renderedLabelFrames.isEmpty)
+                if zoom == 0.5 { XCTAssertGreaterThanOrEqual(view.renderedLabelFrames.count, 2) }
                 XCTAssertTrue(view.renderedLabelFrames.allSatisfy { !$0.intersects(actions) })
                 let attachment = XCTAttachment(image: image)
                 attachment.name = "ZoomDial-\(Int(width))-\(zoom)x-during-first-drag"

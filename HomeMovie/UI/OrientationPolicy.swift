@@ -7,14 +7,36 @@ import UIKit
     private var owner: UUID?
     private weak var currentScene: UIWindowScene?
     func apply(owner: UUID, format: MovieFormat?, scene: UIWindowScene) {
-        let next: UIInterfaceOrientationMask = format == .portrait ? .portrait : format == .landscape ? .landscape : .allButUpsideDown
+        let next = Self.orientationMask(format: format, current: scene.interfaceOrientation)
         guard self.owner != owner || mask != next else { return }
         self.owner = owner; mask = next; currentScene = scene
         scene.windows.forEach { window in
             window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
             window.rootViewController?.presentedViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
         }
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: next)) { _ in }
+        // Lock in place when the current side already matches. On unlock, retain
+        // the existing auto-rotation request so a take/page can resume following the phone.
+        if format == nil || !Self.contains(next, orientation: scene.interfaceOrientation) {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: next)) { _ in }
+        }
+    }
+    static func orientationMask(format: MovieFormat?, current: UIInterfaceOrientation) -> UIInterfaceOrientationMask {
+        guard let format else { return .allButUpsideDown }
+        if format == .portrait { return .portrait }
+        switch current {
+        case .landscapeLeft: return .landscapeLeft
+        case .landscapeRight: return .landscapeRight
+        default: return .landscape
+        }
+    }
+    static func contains(_ mask: UIInterfaceOrientationMask, orientation: UIInterfaceOrientation) -> Bool {
+        switch orientation {
+        case .portrait: return mask.contains(.portrait)
+        case .portraitUpsideDown: return mask.contains(.portraitUpsideDown)
+        case .landscapeLeft: return mask.contains(.landscapeLeft)
+        case .landscapeRight: return mask.contains(.landscapeRight)
+        default: return false
+        }
     }
     // A camera's sensor compensation angle describes video pixels, not the
     // orientation of the interface the user is currently looking at.
@@ -41,6 +63,7 @@ import UIKit
         guard self.owner == owner else { return }
         self.owner = nil; mask = .allButUpsideDown
         scene?.windows.forEach { $0.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations() }
+        // Real navigation dismissal resumes the app's ordinary auto-rotation.
         scene?.requestGeometryUpdate(.iOS(interfaceOrientations: .allButUpsideDown)) { _ in }
     }
 }

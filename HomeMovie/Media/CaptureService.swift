@@ -196,6 +196,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private lazy var continuousAudio = AVCaptureAudioDataOutput()
     private let continuousCopies = CaptureFrameCopy()
     private var previewHandoff: CameraPreviewHandoff?
+    private var previewHandoffFormat: MovieFormat?
     private var previewHandoffAnnounced = true
     private var validatedLogFormats: [String: AVCaptureDevice.Format] = [:]
     private var knownDevices: [String: AVCaptureDevice] = [:]
@@ -272,7 +273,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             self.queue.async {
                 self.stopSmoothZoomOnQueue(); self.requestStop(); self.turnOffTorch(); self.configured = false
                 self.knownDevices.removeAll(); self.knownVideoInputs.removeAll(); self.validatedLogFormats.removeAll()
-                self.previewHandoff = nil; self.previewHandoffAnnounced = true
+                self.previewHandoff = nil; self.previewHandoffFormat = nil; self.previewHandoffAnnounced = true
                 self.liveFrames.cancelRawPreviewHandoff()
                 self.onEvent?(.failed(text))
             }
@@ -403,7 +404,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     }
     private func configure(front: Bool, preparedForPiP: Bool = false, pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) throws {
         stopSmoothZoomOnQueue()
-        previewHandoff = nil; previewHandoffAnnounced = true
+        previewHandoff = nil; previewHandoffFormat = nil; previewHandoffAnnounced = true
         liveFrames.clear()
         pipRearFrames.clear(); pipPresenterFrames.clear()
         focusLocked = false; meteringLocks.removeAll()
@@ -654,7 +655,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                 (!camera.isFocusPointOfInterestSupported || camera.isFocusModeSupported(.autoFocus)),
             focusLocked: focusLocked, exposureBias: camera.exposureTargetBias,
             minimumExposureBias: camera.minExposureTargetBias, maximumExposureBias: camera.maxExposureTargetBias,
-            canFlip: device(front: !isFront) != nil && seamless?.pipEnabled != true && seamless?.needsPiPReprepare != true, hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on,
+            canFlip: device(front: !isFront) != nil && seamless?.pipEnabled != true && seamless?.needsPiPReprepare != true && (seamless == nil || seamless?.readyToFlip == true), hasTorch: camera.hasTorch, torchOn: camera.torchMode == .on,
             canStayOnLens: camera.isVirtualDevice && camera.activePrimaryConstituent != nil && camera.primaryConstituentDeviceSwitchingBehavior != .unsupported,
             smoothMoving: smoothTimer != nil,
             recordingFormat: configuredProfile == .appleLog ? "Apple Log · HEVC 10-bit" : "Standard · H.264",
@@ -999,7 +1000,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         CameraStabilization.configure(connection, format: videoInput?.device.activeFormat,
             preview: false, front: isFront, sharedStream: true)
     }
-    func flip() {
+    func flip(previewFormat: MovieFormat? = nil) {
         queue.async {
             guard CameraCompatibility.allowsFlip(profile: self.configuredProfile, recording: self.ticket != nil,
                 otherCameraSupported: self.device(front: !self.isFront) != nil,
@@ -1026,6 +1027,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             self.stopSmoothZoomOnQueue()
             // Preserve the outgoing frame while the new input warms up.
             self.previewHandoffAnnounced = false
+            self.previewHandoffFormat = previewFormat
             self.previewHandoff = CameraPreviewHandoff(after: CMClockGetTime(self.session.synchronizationClock ?? CMClockGetHostTimeClock()))
             let oldFront = self.isFront
             do {
@@ -1061,13 +1063,15 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                     self.queue.asyncAfter(deadline: .now() + 4) { [weak self] in
                         guard let self, self.previewHandoff?.id == pending.id else { return }
                         self.previewHandoff = nil; self.previewHandoffAnnounced = true
+                        // Keep the rotation gate: do not release a wrongly oriented
+                        // replacement frame just because the handoff timed out.
                         self.liveFrames.cancelRawPreviewHandoff()
                         self.onEvent?(.notice("The camera is taking longer to prepare. The last preview stays visible until fresh frames arrive."))
                         if let options = try? self.options() { self.onEvent?(.cameraChanged(options)) }
                     }
                 } else { self.onEvent?(.cameraChanged(try self.options())) }
             } catch {
-                self.previewHandoff = nil; self.previewHandoffAnnounced = true
+                self.previewHandoff = nil; self.previewHandoffFormat = nil; self.previewHandoffAnnounced = true
                 self.liveFrames.cancelRawPreviewHandoff()
                 if self.videoInput?.device.uniqueID == old.device.uniqueID,
                    self.session.inputs.contains(where: { $0 === old }), let options = try? self.options() {
@@ -1131,7 +1135,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         queue.async {
             self.stopSmoothZoomOnQueue()
             self.requestStop()
-            self.previewHandoff = nil; self.previewHandoffAnnounced = true
+            self.previewHandoff = nil; self.previewHandoffFormat = nil; self.previewHandoffAnnounced = true
             self.liveFrames.clear()
             self.turnOffTorch()
             if self.session.isRunning { self.session.stopRunning() }
@@ -1156,12 +1160,19 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
         guard let source = CMSampleBufferGetImageBuffer(sample), let image = continuousCopies.copy(source) else { return }
         var publishPreview = true
+        if let expected = previewHandoffFormat,
+           !CameraPreviewRotation.matches(source: CGSize(width: CVPixelBufferGetWidth(image), height: CVPixelBufferGetHeight(image)),
+               angle: coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90, format: expected) {
+            return // Keep the outgoing landscape/portrait frame until the new coordinator agrees.
+        }
         if var pending = previewHandoff {
             guard !pending.after.isNumeric || time > pending.after else { return }
             publishPreview = pending.accept(time)
             previewHandoff = publishPreview ? nil : pending
+            if publishPreview { previewHandoffFormat = nil }
         }
         if publishPreview {
+            previewHandoffFormat = nil
             // Angle and mirroring travel with this frame, independent of take rotation.
             liveFrames.push(image, angle: coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90, front: isFront)
             if !previewHandoffAnnounced, previewHandoff == nil, let options = try? options() {
