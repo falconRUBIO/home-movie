@@ -208,13 +208,14 @@ struct SmoothZoomInput: Sendable {
     }
 }
 
-/// Dial travel is proportional: 120 points doubles magnification at every focal length.
+/// Compact proportional wheel: 48 points doubles magnification at every focal length.
 /// This is our interaction tuning, not a claim about Apple's private implementation.
 enum ManualZoomScale {
+    static let pointsPerDoubling = 48.0
     static func factor(start: Double, translation: Double, minimum: Double, maximum: Double) -> Double {
         guard start.isFinite, start > 0, translation.isFinite,
               minimum.isFinite, maximum.isFinite, minimum > 0, maximum >= minimum else { return minimum.isFinite && minimum > 0 ? minimum : 1 }
-        let exponent = min(log2(maximum), max(log2(minimum), log2(start) - translation / 120))
+        let exponent = min(log2(maximum), max(log2(minimum), log2(start) - translation / pointsPerDoubling))
         return pow(2, exponent)
     }
     static func label(_ displayed: Double) -> String {
@@ -235,4 +236,18 @@ struct ManualZoomSession {
         receiving = false; return true
     }
     mutating func clear() { id = nil; receiving = false }
+}
+
+/// Incremental travel rebases at a range limit, so reversal never has an overscroll dead zone.
+struct ManualZoomDrag {
+    private(set) var zoom: Double
+    private var lastTranslation = 0.0
+    init(start: Double) { zoom = start }
+    mutating func update(translation: Double, minimum: Double, maximum: Double) -> Double {
+        guard translation.isFinite else { return zoom }
+        zoom = ManualZoomScale.factor(start: zoom, translation: translation - lastTranslation,
+            minimum: minimum, maximum: maximum)
+        lastTranslation = translation
+        return zoom
+    }
 }

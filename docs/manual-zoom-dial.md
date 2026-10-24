@@ -25,29 +25,24 @@ Final Cut Camera's ramp dial is different: drag distance controls zoom rate and 
 
 Apple does not document Camera's exact gesture thresholds, scale, snap behavior, haptic tuning or dismissal timing. The following are our choices, not reverse-engineered Apple constants.
 
-## Interaction
+## Revised interaction after hardware feedback
 
-- Quick tap keeps existing lens selection.
-- Hold for 0.28 seconds, or begin dragging across a lens, to open the curved scale without switching to the touched preset.
-- Leftward travel brings higher zoom marks to the center; 120 points doubles magnification. Rightward travel reverses it. Clamp to active device limits.
-- Keep the touch attached to its original strip as the scale opens. Hold and pan can cooperate; a recognized scrub cancels the button tap.
-- Show measured zoom, converted with the existing camera multiplier. Major markings identify available lens presets and range endpoints. No invented physical lenses.
-- Give a light selection haptic when crossing a lens preset, rate limited to avoid buzzing. No magnetic snapping or release inertia.
-- Release settles at the requested framing. The dial fades after 1.4 seconds; releasing does not restore an earlier framing. No timers drive zoom itself.
-- Keep record, focus and PiP interactions available. A transparent gesture surface lets the visible wheel be regrabbed; its bounds are protected from viewfinder focus gestures. Disable interaction during camera switching/unavailable states and cancel the touch safely.
-- Offer VoiceOver Zoom In/Out actions on each lens button and respect Reduce Motion.
+The initial implementation depended on a SwiftUI overlay inside ViewThatFits/ScrollView. Hardware feedback reported that it appeared only after release, missed the first drag, occupied an awkward offset position, and required too much horizontal travel. Those symptoms are addressed structurally rather than by extending the overlay animation.
 
-The ordinary dial has token-based begin/end ownership over the existing smoothing engine. Late events from an old control cannot write zoom or cancel a newer control. UIKit teardown defers SwiftUI state changes until after the view update. It bypasses Dolly's optional physical-lens lock without changing that preference. Releasing restores the prior camera switching policy after settling; opening Dolly transfers ownership so a stale manual end cannot close the Dolly session.
+- One persistent UIKit view owns both recognition and rendering. Pan-began synchronously reveals the wheel before any camera callback. No SwiftUI insertion or layout change is needed for the first frame.
+- Ordinary controls use a single layout, outside the scrolling/ViewThatFits fallback used by Dolly. The native wheel fills a fixed 104-point control area, centered across the whole control row. Its crescent replaces the floating rounded card. Collapsed transparent space remains available to viewfinder focus.
+- Quick lens taps retain preset behavior. A 0.2-second hold opens the wheel at the existing framing. A pan opens it on the first recognized movement. Lens views stay attached throughout the touch; only their CALayer opacity changes.
+- Travel is proportional and compact: 48 points doubles zoom, compared with the previous 120. A 1× to 8× move takes 144 points rather than 360. During touch, the scale draws directly from the requested framing so slower measured camera updates cannot hold the wheel back.
+- Higher magnifications sit to the right of the fixed index. Dragging left moves those marks under the index and zooms in; dragging right zooms out. The wheel’s tick spacing uses the same travel constant as the gesture model, so visual motion agrees with finger motion.
+- Clamp incremental travel at actual device limits and rebase there. Reversing at a limit responds immediately, even after a large overscroll.
+- Lens markings give light, rate-limited haptics. Release settles at the requested framing and the scale closes after 1.1 seconds. No snap back to the touched lens or to a Dolly start point.
+- Keep the separate Dolly and PiP buttons reachable. Token-based ownership rejects stale input after a new control or Dolly takes over. Cancellation removes the wheel synchronously and defers SwiftUI teardown notifications.
+- VoiceOver zoom actions remain available. The reveal has no motion animation and does not depend on animation accessibility settings.
+
+These travel, hold, drawing and dismissal constants are our tuning. Apple documents the tap/hold/drag interaction but does not publish Camera’s exact implementation or constants.
 
 ## Validation
 
-Portable project/resource/release validation passes. Changed Swift files pass tree-sitter grammar parsing; whole-repository parsing also encounters existing errors in unchanged files. XCTest coverage adds proportional travel, direction/reversal, active device bounds, invalid input and display conversion checks. Xcode compilation and XCTest require the macOS CI job. Physical camera behavior and gesture feel require an iPhone.
+Added native UIView regression coverage for first-pan visibility before release or camera publication, live scale updates while dragging, camera-update isolation, centered placement at narrow/regular widths, stable lens geometry, preview/action hit testing, hold-without-zoom, cancellation and disabled input. Added compact-travel and immediate boundary-reversal coverage. Existing manual session ownership and range/display tests remain.
 
-Device acceptance:
-1. Tap every lens; verify a single preset switch and no dial flash.
-2. Hold a nonselected lens; confirm the current framing does not jump.
-3. Hold then drag, immediate drag, lift outside the row, cancel with app backgrounding, and flip cameras. No trailing lens tap or stuck input.
-4. Scrub both directions, slow and fast, across rear boundaries and high zoom; verify real preview/export continuity. Repeat while recording, in Standard/Log and available PiP modes.
-5. Confirm the last framing remains after release and dial collapse. Verify record and focus taps still work.
-6. Verify narrow/landscape layouts, Reduce Motion, VoiceOver actions and front-camera bounds.
-7. Open Dolly and exercise the existing A/B setup, endpoint scrub/return-to-start, Go, countdown and repeat/reverse flow. Ordinary dial must not appear in Dolly mode.
+Dolly setup, endpoint preview/return-to-start, countdown and playback implementations are compared against main and remain unchanged. Source/project checks run locally. Xcode compilation and XCTest run in macOS CI; actual touch feel and physical lens transitions still need an iPhone check.

@@ -17,11 +17,13 @@ private struct CameraControlRegionsKey: PreferenceKey {
     static func reduce(value: inout [CGRect], nextValue: () -> [CGRect]) { value.append(contentsOf: nextValue()) }
 }
 extension View {
-    func cameraControlRegion() -> some View {
+    func cameraControlRegion(visibleHeight: CGFloat? = nil) -> some View {
         background {
             GeometryReader { geometry in
+                let frame = geometry.frame(in: .named("cameraViewfinder"))
+                let height = min(frame.height, visibleHeight ?? frame.height)
                 Color.clear.preference(key: CameraControlRegionsKey.self,
-                    value: [geometry.frame(in: .named("cameraViewfinder"))])
+                    value: [CGRect(x: frame.minX, y: frame.maxY - height, width: frame.width, height: height)])
             }
         }
     }
@@ -61,6 +63,7 @@ struct CameraView: View {
     @State private var smoothZoomOpen = false
     @State private var dollyCollapsed = false
     @State private var lensControlHeight: CGFloat = 52
+    @State private var manualDialExpanded = false
     @State private var previewControlRegions: [CGRect] = []
     @State private var smoothPosition = 0.0
     @State private var zoomDragging = false
@@ -368,12 +371,13 @@ struct CameraView: View {
         }.clipped()
             .overlay { pipInteraction }
             .overlay(alignment: .bottom) {
-                lenses.cameraControlRegion().zIndex(2).background {
+                lenses.cameraControlRegion(visibleHeight: smoothZoomOpen ? nil : (manualDialExpanded ? 104 : 52)).zIndex(2).background {
                     GeometryReader { proxy in
                         Color.clear.preference(key: DollyControlHeightKey.self, value: proxy.size.height)
                     }
                 }.onPreferenceChange(DollyControlHeightKey.self) { lensControlHeight = $0 }
-                    .padding(.horizontal, landscape ? 100 : 12)
+                    .padding(.leading, landscape && smoothZoomOpen ? 100 : 12)
+                    .padding(.trailing, landscape ? 100 : 12)
                     .padding(.bottom, landscape ? 10 : 116)
             }
             .overlay(alignment: landscape ? .trailing : .bottom) {
@@ -401,68 +405,77 @@ struct CameraView: View {
     }
     @ViewBuilder private var lenses: some View {
         if let options = camera.options, !options.lenses.isEmpty {
-            VStack(spacing: 0) {
-                if smoothZoomOpen {
+            if smoothZoomOpen {
+                VStack(spacing: 0) {
                     if dollyCollapsed, let route = displayedDolly {
                         compactDollyBar(options: options, route: route)
                     } else {
                         smoothZoomBar(options: options)
                     }
-                }
-                ViewThatFits(in: .horizontal) {
-                    lensButtons(options: options)
-                    ScrollView(.horizontal) { lensButtons(options: options) }
-                        .scrollClipDisabled(!smoothZoomOpen)
-                        .scrollIndicators(.hidden).frame(height: dynamicTypeSize.isAccessibilitySize ? 64 : 44)
-                }.padding(4)
-            }.dollyControlGlass().frame(maxWidth: 360)
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: dollyCollapsed)
+                    ViewThatFits(in: .horizontal) {
+                        lensButtons(options: options)
+                        ScrollView(.horizontal) { lensButtons(options: options) }
+                            .scrollIndicators(.hidden).frame(height: dynamicTypeSize.isAccessibilitySize ? 64 : 44)
+                    }.padding(4)
+                }.dollyControlGlass().frame(maxWidth: 360)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: dollyCollapsed)
+            } else {
+                // No scrolling container, conditional overlay, or layout change during a scrub.
+                ZStack(alignment: .bottomTrailing) {
+                    ManualZoomControl(options: options,
+                        enabled: !camera.switchingCamera && countdown == nil &&
+                            (camera.state == .ready || camera.state == .recording),
+                        reservedTrailingWidth: options.maximum > options.minimum ? 100 : 50,
+                        onLens: { selectLens($0) }, onBegin: { camera.beginManualZoom(id: $0) },
+                        onZoom: { factor, time, id in camera.manualZoom(to: factor, inputTime: time, id: id) },
+                        onEnd: { camera.endManualZoom(id: $0) },
+                        onVisibilityChanged: { manualDialExpanded = $0 })
+                        .id(options.isFront)
+                    HStack(spacing: 6) { lensActions(options: options) }.padding(4)
+                }.frame(maxWidth: 360).frame(height: ZoomDialControlView.height)
+                    .background(alignment: .bottom) {
+                        Color.clear.frame(height: 52).dollyControlGlass().allowsHitTesting(false)
+                    }
+            }
         }
     }
     private func lensButtons(options: CameraOptions) -> some View {
         HStack(spacing: 6) {
-            if smoothZoomOpen {
-                ForEach(options.lenses) { lens in
-                    lensButton(label: lens.label, factor: lens.factor, options: options)
-                }
-            } else {
-                ManualZoomControl(options: options,
-                    enabled: !camera.switchingCamera && countdown == nil &&
-                        (camera.state == .ready || camera.state == .recording),
-                    onLens: { selectLens($0) }, onBegin: { camera.beginManualZoom(id: $0) },
-                    onZoom: { factor, time, id in camera.manualZoom(to: factor, inputTime: time, id: id) },
-                    onEnd: { camera.endManualZoom(id: $0) })
-                    .id(options.isFront)
+            ForEach(options.lenses) { lens in
+                lensButton(label: lens.label, factor: lens.factor, options: options)
             }
-            if options.maximum > options.minimum || smoothZoomOpen {
-                Button {
-                    manualZoomTargetShown = false
-                    preparedDollyStart = nil; preparedDollyTarget = nil; activeDolly = nil
-                    if smoothZoomOpen { camera.endSmoothZoom(); smoothZoomOpen = false }
-                    else {
-                        dollyEditor.selected = .end
-                        syncSmoothPosition(); smoothZoomOpen = true
-                        preparedDollyStart = options.zoom
-                        preparedDollyTarget = options.zoom < options.maximum ? min(options.maximum, options.zoom * 2) : options.minimum
-                        camera.beginSmoothZoom()
-                        UISelectionFeedbackGenerator().selectionChanged()
-                    }
-                } label: {
-                    MovieControlIcon(systemName: "waveform.path")
-                        .foregroundStyle(smoothZoomOpen ? .yellow : .white)
-                        .background(smoothZoomOpen ? Color.white.opacity(0.15) : .clear, in: Circle())
-                }.accessibilityLabel("Dolly").accessibilityValue(smoothZoomOpen ? "Open" : "Closed")
-                    .accessibilityAddTraits(smoothZoomOpen ? .isSelected : [])
-                    .disabled(countdown != nil || !smoothZoomOpen && camera.state != .ready && camera.state != .recording)
-            }
-            PiPControl(enabled: options.isPiPEnabled,
-                unavailableReason: options.profile == .appleLog && !options.canPreparePiP ? CameraCompatibility.logPiPExplanation : nil,
-                disabled: countdown != nil || camera.state != .ready && camera.state != .recording || camera.state == .recording && !options.piPAvailable,
-                onToggle: {
-                    if options.piPAvailable { camera.togglePiP() }
-                    else if !camera.busy { showingPiPCompatibility = true }
-                }, onLayout: { if !camera.busy { showingPiPLayout = true } })
+            lensActions(options: options)
         }
+    }
+    @ViewBuilder private func lensActions(options: CameraOptions) -> some View {
+        if options.maximum > options.minimum || smoothZoomOpen {
+            Button {
+                manualZoomTargetShown = false
+                preparedDollyStart = nil; preparedDollyTarget = nil; activeDolly = nil
+                if smoothZoomOpen { camera.endSmoothZoom(); smoothZoomOpen = false }
+                else {
+                    dollyEditor.selected = .end
+                    syncSmoothPosition(); smoothZoomOpen = true
+                    preparedDollyStart = options.zoom
+                    preparedDollyTarget = options.zoom < options.maximum ? min(options.maximum, options.zoom * 2) : options.minimum
+                    camera.beginSmoothZoom()
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
+            } label: {
+                MovieControlIcon(systemName: "waveform.path")
+                    .foregroundStyle(smoothZoomOpen ? .yellow : .white)
+                    .background(smoothZoomOpen ? Color.white.opacity(0.15) : .clear, in: Circle())
+            }.accessibilityLabel("Dolly").accessibilityValue(smoothZoomOpen ? "Open" : "Closed")
+                .accessibilityAddTraits(smoothZoomOpen ? .isSelected : [])
+                .disabled(countdown != nil || !smoothZoomOpen && camera.state != .ready && camera.state != .recording)
+        }
+        PiPControl(enabled: options.isPiPEnabled,
+            unavailableReason: options.profile == .appleLog && !options.canPreparePiP ? CameraCompatibility.logPiPExplanation : nil,
+            disabled: countdown != nil || camera.state != .ready && camera.state != .recording || camera.state == .recording && !options.piPAvailable,
+            onToggle: {
+                if options.piPAvailable { camera.togglePiP() }
+                else if !camera.busy { showingPiPCompatibility = true }
+            }, onLayout: { if !camera.busy { showingPiPLayout = true } })
     }
     private func finishDollyIfIdle() async {
         guard camera.options?.smoothMoving == false else { return }
