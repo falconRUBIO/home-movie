@@ -29,7 +29,7 @@ import UIKit
         backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.running else { return }
-                self.notice = "Export paused by leaving the app. Keep HOME MOVIE CLIPS open and export again."
+                self.notice = "Export paused by leaving the app. Keep MOVIE ROLL open and export again."
                 self.cancel()
             }
         }
@@ -151,7 +151,7 @@ import UIKit
         error = nil; notice = nil
         saveFeedback = SaveToast(kind: .saving, message: "Saving to Photos…")
         guard await authorizePhotos() else {
-            error = "Allow HOME MOVIE CLIPS to add videos to Photos in Settings, or save to Files instead."
+            error = "Allow MOVIE ROLL to add videos to Photos in Settings, or save to Files instead."
             saveFeedback = SaveToast(kind: .failure, message: "Photos access needed. Check Settings.")
             return
         }

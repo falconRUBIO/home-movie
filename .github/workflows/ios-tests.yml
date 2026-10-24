@@ -1,4 +1,4 @@
-name: Compile and test HOME MOVIE CLIPS
+name: Compile and test MOVIE ROLL
 
 on:
   push:

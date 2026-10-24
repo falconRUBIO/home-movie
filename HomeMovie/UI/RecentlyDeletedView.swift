@@ -122,7 +122,7 @@ struct RecentlyDeletedView: View {
             do {
                 let pending = try await app.store.permanentlyDelete(movieIDs: movies, sceneIDs: scenes)
                 await app.refresh(); selected = []
-                if pending > 0 { notice = "Items were removed. Some files could not be deleted yet; HOME MOVIE CLIPS will retry when reopened." }
+                if pending > 0 { notice = "Items were removed. Some files could not be deleted yet; MOVIE ROLL will retry when reopened." }
             } catch { problem = error.localizedDescription }
         }
     }
@@ -145,7 +145,7 @@ struct RecentlyDeletedView: View {
             Button("Cancel", role: .cancel) { }
             Button("Delete Permanently", role: .destructive, action: deleteConfirmedItems)
         } message: {
-            Text("\(deletingMovies.count + deletingScenes.count) selected items and their original recordings will be deleted from HOME MOVIE CLIPS. This cannot be undone. Copies in Photos, Files, and backups remain.")
+            Text("\(deletingMovies.count + deletingScenes.count) selected items and their original recordings will be deleted from MOVIE ROLL. This cannot be undone. Copies in Photos, Files, and backups remain.")
         }
         .alert("Couldn’t Complete Action", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
             Button("OK") { problem = nil }
