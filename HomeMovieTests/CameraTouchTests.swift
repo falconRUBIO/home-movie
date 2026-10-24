@@ -50,6 +50,40 @@ final class CameraTouchTests: XCTestCase {
         XCTAssertEqual(moves, 0); XCTAssertNil(countdown.remaining)
     }
 
+    func testLateManualZoomCancellationCannotEndNewerDialOrDolly() {
+        var owner = ManualZoomSession()
+        let old = UUID(), current = UUID()
+        owner.begin(old); XCTAssertTrue(owner.accepts(old))
+        owner.begin(current)
+        XCTAssertFalse(owner.end(old)); XCTAssertTrue(owner.accepts(current))
+        XCTAssertTrue(owner.end(current)); XCTAssertFalse(owner.accepts(current))
+        XCTAssertTrue(owner.isOpen) // Settling still owns the camera switching policy.
+        owner.clear() // Dolly takes over, or the camera stops.
+        XCTAssertFalse(owner.end(current)); XCTAssertFalse(owner.isOpen)
+    }
+
+    func testManualDialMovesScaleWithFingerAndUsesProportionalTravel() {
+        XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: 0, minimum: 0.5, maximum: 24), 1, accuracy: 0.00001)
+        // Higher marks sit to the right; dragging the wheel left brings them to center.
+        XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: -120, minimum: 0.5, maximum: 24), 2, accuracy: 0.00001)
+        XCTAssertEqual(ManualZoomScale.factor(start: 8, translation: -120, minimum: 0.5, maximum: 24), 16, accuracy: 0.00001)
+        XCTAssertEqual(ManualZoomScale.factor(start: 8, translation: 120, minimum: 0.5, maximum: 24), 4, accuracy: 0.00001)
+    }
+    func testManualDialClampsAtActiveDeviceLimitsAndReverses() {
+        let end = ManualZoomScale.factor(start: 2, translation: -67, minimum: 0.5, maximum: 24)
+        XCTAssertEqual(ManualZoomScale.factor(start: end, translation: 67, minimum: 0.5, maximum: 24), 2, accuracy: 0.00001)
+        XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: -10000, minimum: 0.5, maximum: 24), 24, accuracy: 0.00001)
+        XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: 10000, minimum: 0.5, maximum: 24), 0.5, accuracy: 0.00001)
+        XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: -120, minimum: 1, maximum: 1), 1)
+    }
+    func testManualDialRejectsInvalidInputAndDisplaysDeviceMultiplier() {
+        XCTAssertEqual(ManualZoomScale.factor(start: .nan, translation: 2, minimum: 0.5, maximum: 24), 0.5)
+        XCTAssertEqual(ManualZoomScale.factor(start: 1, translation: .infinity, minimum: 1, maximum: 24), 1)
+        XCTAssertEqual(ManualZoomScale.label(1 * 0.5), "0.5×")
+        XCTAssertEqual(ManualZoomScale.label(48 * 0.5), "24×")
+        XCTAssertEqual(ManualZoomScale.label(1.7), "1.7×")
+    }
+
     func testExtendedZoomUsesDisplayMultiplierAndActiveDeviceLimits() {
         let targets = ExtendedZoomTargets.available(minimum: 1, maximum: 48, multiplier: 0.5)
         XCTAssertEqual(targets, [20, 30, 40, 48])

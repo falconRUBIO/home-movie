@@ -64,6 +64,10 @@ struct Scene: Codable, Identifiable, Equatable, Sendable {
     var missing = false
     var profile: CaptureProfile? = nil
     var adjustments: SceneAdjustments? = nil
+    var filmEffectsTweaks: FilmEffectsTweaks? = nil
+    func resolvedEffects(movie settings: FilmEffectsSettings) -> FilmEffectsSettings {
+        filmEffectsTweaks?.applying(to: settings) ?? settings
+    }
     var lightAdjustments: SceneAdjustments { adjustments ?? .neutral }
     var playableDuration: CMTime { CMTimeSubtract(trimEnd.cmTime, trimStart.cmTime) }
     var validTrim: Bool {

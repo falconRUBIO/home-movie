@@ -233,6 +233,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var smoothClock = SmoothZoomClock()
     private var smoothInput = SmoothZoomInput()
     private var smoothOpen = false
+    private var manualZoomSession = ManualZoomSession()
     private var smoothClosing = false
     private var smoothSpeed = SmoothZoomSpeed.normal
     private var stayOnLens = false
@@ -780,7 +781,39 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             }
         }
     }
-    func beginSmoothZoom() { queue.async { self.beginSmoothZoomOnQueue() } }
+    // The ordinary lens dial can cross cameras regardless of Dolly's optional lens lock.
+    func beginManualZoom(id: UUID) {
+        queue.async {
+            if self.smoothLensLocked { self.stopSmoothZoomOnQueue() }
+            self.beginSmoothZoomOnQueue(lockLens: false)
+            if self.smoothOpen { self.manualZoomSession.begin(id) }
+        }
+    }
+    func manualZoom(to factor: CGFloat, inputTime: Double, id: UUID) {
+        guard factor.isFinite, factor > 0, inputTime.isFinite else { return }
+        queue.async {
+            guard self.manualZoomSession.accepts(id) else { return }
+            self.smoothInput.observe(factor: Double(factor), at: inputTime)
+            self.setSmoothTargetOnQueue(factor)
+        }
+    }
+    func endManualZoom(id: UUID) {
+        queue.async {
+            guard self.manualZoomSession.end(id) else { return }
+            self.smoothInput.end()
+            // Reach the final requested framing, then restore the camera's lens policy.
+            // No inertia, spring-back, or change to Dolly's close behavior.
+            if self.smoothTimer != nil { self.smoothClosing = true }
+            else { self.stopSmoothZoomOnQueue() }
+        }
+    }
+    func beginSmoothZoom() {
+        queue.async {
+            // Restore ordinary policy before Dolly reapplies its own lens-lock setting.
+            if self.manualZoomSession.isOpen { self.stopSmoothZoomOnQueue() }
+            self.beginSmoothZoomOnQueue()
+        }
+    }
     private func beginSmoothZoomOnQueue(lockLens: Bool = true) {
         smoothClosing = false
         guard !smoothOpen, session.isRunning, !session.isInterrupted, let camera = videoInput?.device else { return }
@@ -931,6 +964,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
     }
     private func stopSmoothZoomOnQueue() {
+        manualZoomSession.clear()
         smoothTimer?.cancel(); smoothTimer = nil; smoothGeneration = UUID(); smoothClock.reset()
         smoothFilter = nil; smoothOpen = false
         smoothClosing = false

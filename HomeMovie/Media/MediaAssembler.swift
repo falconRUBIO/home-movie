@@ -54,7 +54,7 @@ struct CompositionBundle: @unchecked Sendable {
 actor MediaAssembler {
     // Every build uses an immutable movie snapshot. Trims never modify source files.
     func build(movie: Movie, root: URL, showOriginalLog: Bool = false, filmEffects: FilmEffectsSettings? = nil, forFilmEffectsPreview: Bool = false) async throws -> CompositionBundle {
-        // Saved FX are movie edits, shared by Watch, scene review, thumbnails, and export.
+        // Resolve movie FX plus sparse clip tweaks identically in Watch, review, thumbnails and export.
         // Original bypasses the complete editing recipe, including optical effects.
         let effects: FilmEffectsSettings = showOriginalLog ? .off : (filmEffects ?? movie.exportEffects)
         try effects.validate()
@@ -62,7 +62,9 @@ actor MediaAssembler {
         guard !scenes.isEmpty else { throw HomeMovieError.message("Record a scene first.") }
         let usesLog = movie.captureProfile == .appleLog || scenes.contains { $0.profile == .appleLog }
         let cube: ColorCube? = usesLog && !showOriginalLog ? try movie.look.map { try ColorCube.load($0, root: root) } ?? ColorCube.appleStandard.get() : nil
-        let usesCustomCompositor = usesLog || effects.isActive || forFilmEffectsPreview || scenes.contains { $0.lightAdjustments.isActive }
+        let usesCustomCompositor = usesLog || effects.isActive || forFilmEffectsPreview || scenes.contains {
+            $0.lightAdjustments.isActive || (!showOriginalLog && $0.resolvedEffects(movie: effects).isActive)
+        }
         let composition = AVMutableComposition()
         guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
             throw HomeMovieError.message("Could not prepare movie tracks.")
@@ -75,6 +77,9 @@ actor MediaAssembler {
         for scene in scenes {
             try Task.checkCancellation()
             try scene.lightAdjustments.validate()
+            try scene.filmEffectsTweaks?.validate()
+            let sceneEffects = showOriginalLog ? FilmEffectsSettings.off : scene.resolvedEffects(movie: effects)
+            try sceneEffects.validate()
             guard !scene.missing, scene.validTrim else { throw HomeMovieError.message("A scene is missing or has an invalid trim. Restore or remove it before playing this movie.") }
             let asset = AVURLAsset(url: root.appendingPathComponent(scene.source))
             guard let sourceVideo = try await asset.loadTracks(withMediaType: .video).first else { throw HomeMovieError.message("A scene has no video track.") }
@@ -117,7 +122,7 @@ actor MediaAssembler {
             if usesCustomCompositor {
                 instructions.append(ColorInstruction(range: instruction.timeRange, trackID: videoTrack.trackID,
                     transform: Self.fitTransform(size: naturalSize, preferred: preferred, canvas: movie.format.canvas),
-                    cube: (scene.profile ?? movie.captureProfile) == .appleLog ? cube : nil, filmEffects: effects,
+                    cube: (scene.profile ?? movie.captureProfile) == .appleLog ? cube : nil, filmEffects: sceneEffects,
                     adjustments: showOriginalLog ? .neutral : scene.lightAdjustments))
             } else { instructions.append(instruction) }
             cursor = CMTimeAdd(cursor, scene.playableDuration)

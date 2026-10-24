@@ -59,6 +59,7 @@ import UIKit
         guard movie.activeScenes.contains(where: { $0.id == scene.id }), scene.deletedAt == nil,
               !scene.missing, scene.validTrim else { throw HomeMovieError.message("This scene is unavailable.") }
         try scene.lightAdjustments.validate()
+        try scene.filmEffectsTweaks?.validate()
         var clip = movie
         // Scene identity separates clip caches from the full movie and other clips.
         clip.id = scene.id; clip.scenes = [scene]

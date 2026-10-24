@@ -5,6 +5,7 @@ struct SceneEditState: Equatable {
     var end: Double
     var adjustments: SceneAdjustments
     var effects: FilmEffectsSettings
+    var clipEffects: FilmEffectsTweaks? = nil
 }
 
 // Session-local history. A drag is one transaction, not hundreds of frames.

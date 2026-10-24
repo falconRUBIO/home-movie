@@ -247,6 +247,84 @@ final class PipelineTests: XCTestCase {
         let original = try await MediaAssembler().build(movie: movie, root: store.root, showOriginalLog: true)
         XCTAssertEqual((original.videoComposition.instructions.first as? ColorInstruction)?.adjustments, .neutral)
     }
+    @MainActor func testClipFXPersistStayLocalAndMatchMovieAndSingleClipPlayback() async throws {
+        let store = try await makeStore()
+        let project = try await store.create(name: "Clip FX", format: .landscape)
+        for _ in 0..<2 { _ = try await record(project, into: store) }
+        let snapshots = await store.snapshot()
+        let initial = try XCTUnwrap(snapshots.first)
+        let first = initial.activeScenes[0], second = initial.activeScenes[1]
+        var base = FilmEffectsSettings.off; base.grainEnabled = true; base.grainAmount = 0.6
+        try await store.setFilmEffects(movieID: initial.id, settings: base)
+        let tweaks = FilmEffectsTweaks(offsets: [.grain: -0.3, .glow: 0.2])
+        try await store.editScene(movieID: initial.id, sceneID: first.id,
+            start: first.trimStart.cmTime, end: first.trimEnd.cmTime, adjustments: .neutral,
+            clipEffects: tweaks, updateClipEffects: true)
+        let reopened = ProjectStore(root: store.root); _ = try await reopened.load()
+        let saved = await reopened.snapshot()
+        let movie = try XCTUnwrap(saved.first)
+        XCTAssertEqual(movie.exportEffects, base)
+        XCTAssertEqual(movie.activeScenes[0].filmEffectsTweaks, tweaks)
+        XCTAssertNil(movie.activeScenes[1].filmEffectsTweaks)
+        let bundle = try await MediaAssembler().build(movie: movie, root: store.root)
+        let instructions = try XCTUnwrap(bundle.videoComposition.instructions as? [ColorInstruction])
+        XCTAssertEqual(instructions[0].filmEffects, tweaks.applying(to: base))
+        XCTAssertEqual(instructions[1].filmEffects, base)
+        let preview = try await MediaAssembler().build(movie: movie, root: store.root,
+            filmEffects: movie.exportEffects, forFilmEffectsPreview: true)
+        XCTAssertEqual((preview.videoComposition.instructions.first as? ColorInstruction)?.filmEffects,
+            instructions[0].filmEffects)
+        let clip = try ExportModel.singleSceneMovie(movie: movie, scene: movie.activeScenes[0])
+        let clipBundle = try await MediaAssembler().build(movie: clip, root: store.root, filmEffects: clip.exportEffects)
+        XCTAssertEqual((clipBundle.videoComposition.instructions.first as? ColorInstruction)?.filmEffects,
+            instructions[0].filmEffects)
+        let original = try await MediaAssembler().build(movie: movie, root: store.root, showOriginalLog: true, forFilmEffectsPreview: true)
+        XCTAssertEqual((original.videoComposition.instructions.first as? ColorInstruction)?.filmEffects, .off)
+        // A light-only save must not clear the tweaks or alter the movie base.
+        try await reopened.editScene(movieID: movie.id, sceneID: first.id,
+            start: first.trimStart.cmTime, end: first.trimEnd.cmTime, adjustments: SceneAdjustments(exposure: 0.1))
+        var changedBase = base; changedBase.grainAmount = 0.8
+        try await reopened.setFilmEffects(movieID: movie.id, settings: changedBase)
+        let changed = await reopened.snapshot()
+        let changedMovie = try XCTUnwrap(changed.first)
+        XCTAssertEqual(changedMovie.activeScenes[0].resolvedEffects(movie: changedMovie.exportEffects).grainAmount, 0.5, accuracy: 0.000001)
+        XCTAssertEqual(changedMovie.activeScenes[1].id, second.id)
+        XCTAssertEqual(changedMovie.activeScenes[1].resolvedEffects(movie: changedMovie.exportEffects), changedBase)
+        try await reopened.editScene(movieID: movie.id, sceneID: first.id,
+            start: first.trimStart.cmTime, end: first.trimEnd.cmTime, adjustments: .neutral,
+            clipEffects: nil, updateClipEffects: true)
+        let reset = await reopened.snapshot()
+        XCTAssertNil(reset.first?.activeScenes[0].filmEffectsTweaks)
+        XCTAssertEqual(reset.first?.exportEffects, changedBase)
+    }
+
+    @MainActor func testClipFXOnOtherwiseUneditedMovieUsesCompositorAndDuplicateKeepsTweaks() async throws {
+        let store = try await makeStore()
+        let project = try await store.create(name: "Clip-only FX", format: .landscape)
+        _ = try await record(project, into: store)
+        let snapshots = await store.snapshot()
+        let movie = try XCTUnwrap(snapshots.first), scene = try XCTUnwrap(movie.activeScenes.first)
+        let tweaks = FilmEffectsTweaks(offsets: [.sharpness: 0.4])
+        try await store.duplicateScene(movieID: movie.id, sceneID: scene.id,
+            start: scene.trimStart.cmTime, end: scene.trimEnd.cmTime, adjustments: .neutral,
+            clipEffects: tweaks, updateClipEffects: true)
+        let saved = await store.snapshot()
+        let result = try XCTUnwrap(saved.first)
+        XCTAssertFalse(result.exportEffects.isActive)
+        XCTAssertTrue(result.activeScenes.allSatisfy { $0.filmEffectsTweaks == tweaks })
+        let bundle = try await MediaAssembler().build(movie: result, root: store.root, filmEffects: result.exportEffects)
+        XCTAssertTrue(bundle.videoComposition.instructions.allSatisfy { ($0 as? ColorInstruction)?.filmEffects.sharpnessAmount == 0.4 })
+        var invalid = tweaks; invalid.offsets[.grain] = .infinity
+        do {
+            try await store.editScene(movieID: movie.id, sceneID: scene.id,
+                start: scene.trimStart.cmTime, end: scene.trimEnd.cmTime, adjustments: .neutral,
+                clipEffects: invalid, updateClipEffects: true)
+            XCTFail("Invalid clip FX must be rejected")
+        } catch {}
+        let after = await store.snapshot()
+        XCTAssertEqual(after.first?.revision, result.revision)
+    }
+
     @MainActor func testSceneAndMovieFXSaveAtomicallyAndReachClipExport() async throws {
         let store = try await makeStore()
         let project = try await store.create(name: "Combined recipe", format: .landscape)
