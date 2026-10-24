@@ -1,4 +1,4 @@
-# HOME MOVIE CLIPS — native iPhone foundation
+# MOVIE ROLL — native iPhone foundation
 
 A SwiftUI iPhone application for recording multiple ongoing movies, scene by scene. Choose a movie, record a take, and it is appended only after its file has been validated and committed. Watch the assembled sequence and export a separate MP4 whenever you like.
 
@@ -18,7 +18,7 @@ See `AUDIT.md`, `VALIDATION.json`, and `DEVICE_TESTS.md` for evidence and limita
 
 ## Automatic GitHub build tests
 
-[Open GitHub Actions](https://github.com/falconRUBIO/home-movie/actions/workflows/ios-tests.yml). The **Compile and test HOME MOVIE CLIPS** workflow runs on every push to `main`, pull requests targeting `main`, and manually through **Run workflow**. It generates the project and runs the existing simulator tests on a hosted Mac. Failed tests fail the build; logs and zipped XCTest results are retained for 14 days. New updates cancel an older run for the same branch. This workflow requires no Apple signing credentials and does not upload to TestFlight.
+[Open GitHub Actions](https://github.com/falconRUBIO/home-movie/actions/workflows/ios-tests.yml). The **Compile and test MOVIE ROLL** workflow runs on every push to `main`, pull requests targeting `main`, and manually through **Run workflow**. It generates the project and runs the existing simulator tests on a hosted Mac. Failed tests fail the build; logs and zipped XCTest results are retained for 14 days. New updates cancel an older run for the same branch. This workflow requires no Apple signing credentials and does not upload to TestFlight.
 
 ## TestFlight without local Xcode
 
