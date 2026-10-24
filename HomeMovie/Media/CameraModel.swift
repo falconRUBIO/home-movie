@@ -205,6 +205,13 @@ struct RecordingFlipHandoff {
     }
     func zoom(_ factor: CGFloat) { if active, !switchingCamera, [.ready, .recording].contains(state) { service.zoom(factor) } }
     func configureSmoothZoom(speed: SmoothZoomSpeed, stayOnLens: Bool) { service.configureSmoothZoom(speed: speed, stayOnLens: stayOnLens) }
+    func beginManualZoom(id: UUID) {
+        if active, !switchingCamera, [.ready, .recording].contains(state) { service.beginManualZoom(id: id) }
+    }
+    func manualZoom(to factor: CGFloat, inputTime: Double, id: UUID) {
+        if active, !switchingCamera, [.ready, .recording].contains(state) { service.manualZoom(to: factor, inputTime: inputTime, id: id) }
+    }
+    func endManualZoom(id: UUID) { service.endManualZoom(id: id) }
     func beginSmoothZoom() { if active, !switchingCamera, [.ready, .recording].contains(state) { service.beginSmoothZoom() } }
     func smoothZoom(to factor: CGFloat, inputTime: Double? = nil, inputEnded: Bool = false) {
         if active, !switchingCamera, [.ready, .recording].contains(state) { service.smoothZoom(to: factor, inputTime: inputTime, inputEnded: inputEnded) }

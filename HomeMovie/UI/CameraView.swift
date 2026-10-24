@@ -16,7 +16,7 @@ private struct CameraControlRegionsKey: PreferenceKey {
     static var defaultValue: [CGRect] = []
     static func reduce(value: inout [CGRect], nextValue: () -> [CGRect]) { value.append(contentsOf: nextValue()) }
 }
-private extension View {
+extension View {
     func cameraControlRegion() -> some View {
         background {
             GeometryReader { geometry in
@@ -412,6 +412,7 @@ struct CameraView: View {
                 ViewThatFits(in: .horizontal) {
                     lensButtons(options: options)
                     ScrollView(.horizontal) { lensButtons(options: options) }
+                        .scrollClipDisabled(!smoothZoomOpen)
                         .scrollIndicators(.hidden).frame(height: dynamicTypeSize.isAccessibilitySize ? 64 : 44)
                 }.padding(4)
             }.dollyControlGlass().frame(maxWidth: 360)
@@ -420,8 +421,18 @@ struct CameraView: View {
     }
     private func lensButtons(options: CameraOptions) -> some View {
         HStack(spacing: 6) {
-            ForEach(options.lenses) { lens in
-                lensButton(label: lens.label, factor: lens.factor, options: options)
+            if smoothZoomOpen {
+                ForEach(options.lenses) { lens in
+                    lensButton(label: lens.label, factor: lens.factor, options: options)
+                }
+            } else {
+                ManualZoomControl(options: options,
+                    enabled: !camera.switchingCamera && countdown == nil &&
+                        (camera.state == .ready || camera.state == .recording),
+                    onLens: { selectLens($0) }, onBegin: { camera.beginManualZoom(id: $0) },
+                    onZoom: { factor, time, id in camera.manualZoom(to: factor, inputTime: time, id: id) },
+                    onEnd: { camera.endManualZoom(id: $0) })
+                    .id(options.isFront)
             }
             if options.maximum > options.minimum || smoothZoomOpen {
                 Button {

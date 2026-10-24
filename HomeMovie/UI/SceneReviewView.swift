@@ -220,6 +220,8 @@ struct SceneReviewView: View {
     @State private var savedScene: Scene
     @State private var effects = FilmEffectsSettings.off
     @State private var originalEffects = FilmEffectsSettings.off
+    @State private var clipEffects: FilmEffectsTweaks?
+    @State private var editingClipFX = false
     @State private var loadedEffects = false
     @State private var comparing = false
     @State private var tool = SceneReviewTool.light
@@ -236,6 +238,8 @@ struct SceneReviewView: View {
         _end = State(initialValue: scene.trimEnd.seconds)
         _adjustments = State(initialValue: scene.lightAdjustments)
         _savedScene = State(initialValue: scene)
+        _clipEffects = State(initialValue: scene.filmEffectsTweaks?.normalized)
+        _editingClipFX = State(initialValue: scene.filmEffectsTweaks?.normalized != nil)
         _advancedLight = State(initialValue: scene.lightAdjustments.pushPull != 0 || scene.lightAdjustments.fade != 0 || scene.lightAdjustments.curve.isActive)
     }
     private var movie: Movie? { app.movie(movieID) }
@@ -244,12 +248,22 @@ struct SceneReviewView: View {
     private var hasUnsavedEdits: Bool {
         editedScene.trimStart != savedScene.trimStart || editedScene.trimEnd != savedScene.trimEnd
             || adjustments != savedScene.lightAdjustments || effects != originalEffects
+            || clipEffects?.normalized != savedScene.filmEffectsTweaks?.normalized
+    }
+    private var resolvedEffects: FilmEffectsSettings { clipEffects?.applying(to: effects) ?? effects }
+    private var scopedEffects: Binding<FilmEffectsSettings> {
+        Binding(get: { editingClipFX ? resolvedEffects : effects }, set: { edited in
+            if editingClipFX {
+                clipEffects = (clipEffects ?? FilmEffectsTweaks()).updating(
+                    from: resolvedEffects, to: edited, relativeTo: effects).normalized
+            } else { effects = edited }
+        })
     }
     private var shownRecipe: SceneReviewRecipe {
-        SceneReviewRecipe(adjustments: comparing ? .neutral : adjustments, effects: comparing ? .off : effects)
+        SceneReviewRecipe(adjustments: comparing ? .neutral : adjustments, effects: comparing ? .off : resolvedEffects)
     }
     private var editState: SceneEditState {
-        SceneEditState(start: start, end: end, adjustments: adjustments, effects: effects)
+        SceneEditState(start: start, end: end, adjustments: adjustments, effects: effects, clipEffects: clipEffects)
     }
     private func editingChanged(_ active: Bool) {
         if active { history?.begin(editState) } else { history?.end(editState) }
@@ -257,7 +271,7 @@ struct SceneReviewView: View {
     private func restoreEdit(_ state: SceneEditState) {
         pickingWhiteBalance = false; comparing = false; error = nil; notice = nil
         start = state.start; end = state.end
-        adjustments = state.adjustments; effects = state.effects
+        adjustments = state.adjustments; effects = state.effects; clipEffects = state.clipEffects
         if adjustments.pushPull != 0 || adjustments.fade != 0 || adjustments.curve.isActive { advancedLight = true }
         UISelectionFeedbackGenerator().selectionChanged()
     }
@@ -284,12 +298,12 @@ struct SceneReviewView: View {
         SceneLightControl.allCases.filter { tool == .color ? $0.isColor : !$0.isColor }
     }
     private var canReset: Bool {
-        tool == .hsl ? adjustments.hsl.isActive : tool == .fx ? effects != .off : (tool == .light && adjustments.curve.isActive) || visibleLightControls.contains { adjustments[keyPath: $0.keyPath] != 0 }
+        tool == .hsl ? adjustments.hsl.isActive : tool == .fx ? (editingClipFX ? clipEffects != nil : effects != .off) : (tool == .light && adjustments.curve.isActive) || visibleLightControls.contains { adjustments[keyPath: $0.keyPath] != 0 }
     }
     private func resetTool() {
         UISelectionFeedbackGenerator().selectionChanged()
         if tool == .hsl { adjustments.hsl = HSLAdjustments() }
-        else if tool == .fx { effects = .off }
+        else if tool == .fx { if editingClipFX { clipEffects = nil } else { effects = .off } }
         else { for control in visibleLightControls { adjustments[keyPath: control.keyPath] = 0 } }
         if tool == .light { adjustments.curve = .neutral }
         if !adjustments.isActive { adjustments = .neutral }
@@ -299,6 +313,7 @@ struct SceneReviewView: View {
         var edited = scene
         edited.trimStart = MediaTime(seconds: start); edited.trimEnd = MediaTime(seconds: end)
         edited.adjustments = adjustments.isActive ? adjustments : nil
+        edited.filmEffectsTweaks = clipEffects?.normalized
         return edited
     }
     var body: some View {
@@ -417,6 +432,8 @@ struct SceneReviewView: View {
             }
             .onChange(of: adjustments) { _, _ in invalidateExport() }
             .onChange(of: effects) { _, _ in invalidateExport() }
+            .onChange(of: clipEffects) { _, _ in invalidateExport() }
+            .onChange(of: editingClipFX) { _, _ in editingChanged(false); comparing = false }
             .onChange(of: tool) { _, _ in editingChanged(false); pickingWhiteBalance = false; comparing = false; interactingControl = nil; UISelectionFeedbackGenerator().selectionChanged() }
             .onChange(of: export.running) { _, running in
                 guard !running, waitingForExport else { return }
@@ -456,7 +473,28 @@ struct SceneReviewView: View {
     private var editingPanel: some View {
         VStack(spacing: 0) {
             if tool == .fx {
-                Form { FilmEffectsControlSections(settings: $effects, editingChanged: editingChanged, compact: true) }
+                Form {
+                    Section {
+                        Picker("Apply FX to", selection: $editingClipFX) {
+                            Text("Movie").tag(false)
+                            Text("This Clip").tag(true)
+                        }.pickerStyle(.segmented)
+                        if clipEffects != nil {
+                            Label("Clip Adjusted", systemImage: "slider.horizontal.3")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if editingClipFX {
+                            Button("Reset to Movie Look", systemImage: "arrow.counterclockwise") {
+                                editingChanged(true); clipEffects = nil; editingChanged(false)
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            }.disabled(clipEffects == nil)
+                        }
+                    } footer: {
+                        Text(editingClipFX ? "Fine-tune this clip from the movie’s look." :
+                            "Sets the look for all clips. Individual clip tweaks are kept.")
+                    }
+                    FilmEffectsControlSections(settings: scopedEffects, editingChanged: editingChanged, compact: true)
+                }
                     .listStyle(.plain).listSectionSpacing(.compact)
                     .disabled(busy || comparing || preview.loading || preview.error != nil)
             } else {
@@ -685,7 +723,8 @@ struct SceneReviewView: View {
     private func invalidateExport() { export.invalidate(); notice = nil; error = nil }
     private func persistEdits() async throws {
         try await app.store.editScene(movieID: movieID, sceneID: scene.id,
-            start: editedScene.trimStart.cmTime, end: editedScene.trimEnd.cmTime, adjustments: adjustments, filmEffects: pendingEffects)
+            start: editedScene.trimStart.cmTime, end: editedScene.trimEnd.cmTime, adjustments: adjustments, filmEffects: pendingEffects,
+            clipEffects: clipEffects, updateClipEffects: true)
         await app.refresh()
         savedScene = editedScene; originalEffects = effects
     }
@@ -696,7 +735,8 @@ struct SceneReviewView: View {
         Task {
             do {
                 try await app.store.duplicateScene(movieID: movieID, sceneID: scene.id,
-                    start: editedScene.trimStart.cmTime, end: editedScene.trimEnd.cmTime, adjustments: adjustments, filmEffects: pendingEffects)
+                    start: editedScene.trimStart.cmTime, end: editedScene.trimEnd.cmTime, adjustments: adjustments, filmEffects: pendingEffects,
+                    clipEffects: clipEffects, updateClipEffects: true)
                 await app.refresh()
                 preview.stop(); dismiss()
             } catch { self.error = error.localizedDescription; saving = false }
