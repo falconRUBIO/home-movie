@@ -68,7 +68,7 @@ struct LibraryView: View {
                 }
             }
             .frame(width: 24, height: 24)
-        }.buttonStyle(.borderedProminent)
+        }.modifier(LibraryCreateButtonStyle())
             .buttonBorderShape(.circle)
             .tint(.blue)
             .controlSize(.large)
@@ -174,12 +174,24 @@ struct LibraryView: View {
                             ForEach(sortedMovies) { movie in
                                 movieCard(movie)
                             }
-                        }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 25)
+                        }
+                        .padding(.horizontal, 20).padding(.top, 8)
+                        // The last row can scroll fully above the floating create control.
+                        .padding(.bottom, selecting ? 24 : 96)
                     }
+                    .modifier(LibraryScrollEdgeStyle())
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle("Movies").navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) {
+            .toolbarBackground(.automatic, for: .navigationBar)
+            .overlay(alignment: .bottom) {
+                if !selecting {
+                    newMovieButton
+                        .padding(.bottom, 12)
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 if selecting {
                     HStack {
                         Text("\(selected.count) selected").font(.subheadline)
@@ -187,12 +199,6 @@ struct LibraryView: View {
                         Button("Delete", systemImage: "trash", role: .destructive) { confirmingSelection = true }
                             .disabled(selected.isEmpty || deletingSelection).frame(minHeight: 44)
                     }.padding(.horizontal, 20).background(.bar)
-                } else {
-                    newMovieButton
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 8)
-                        .padding(.bottom, 12)
                 }
             }
             .toolbar {
@@ -277,6 +283,30 @@ struct LibraryView: View {
         .alert("Recording Recovery", isPresented: Binding(get: { app.recoveryNotice != nil }, set: { if !$0 { app.recoveryNotice = nil } })) {
             Button("OK") { app.recoveryNotice = nil }
         } message: { Text(app.recoveryNotice ?? "") }
+    }
+}
+
+
+// Keep system glass on the control itself, without a second material plate.
+// Native styles also adapt to Reduce Transparency, contrast and pressed states.
+private struct LibraryCreateButtonStyle: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.buttonStyle(.glassProminent)
+        } else {
+            content.buttonStyle(.borderedProminent)
+                .shadow(color: .black.opacity(0.16), radius: 8, y: 4)
+        }
+    }
+}
+
+private struct LibraryScrollEdgeStyle: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            content
+        }
     }
 }
 
