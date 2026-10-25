@@ -347,6 +347,27 @@ extern "C" { namespace coreimage {
         float edge = smoothstep(0.25, 1.0, distance);
         return float4(encode709(decode709(input.rgb) * exp2(-amount * 2.5 * edge)), input.a);
     }
+    // 16mm-inspired texture, not a calibrated emulsion simulation. Overlapping
+    // particle fields break the sparse grid without large low-frequency blobs.
+    float4 filmGrain16(sample_t input, float amount, float size, float seedLow, float seedHigh, float4 bounds, destination dest) {
+        float2 p = dest.coord();
+        if (p.x < bounds.x || p.y < bounds.y || p.x >= bounds.x + bounds.z || p.y >= bounds.y + bounds.w || input.a <= 0.000001) return input;
+        uint seed = uint(seedLow) | (uint(seedHigh) << 16);
+        float2 q = p - bounds.xy;
+        float fine = particles(q, size * 0.70, seed, 17u);
+        float body = particles(float2(q.y, -q.x) + float2(13.7, 29.1), size, seed, 103u);
+        float clump = particles(q + float2(41.3, 7.9), size * 1.45, seed, 271u);
+        float noise = fine * 0.60 + body * 0.65 + clump * 0.20;
+        float3 rgb = clamp(input.rgb / input.a, 0.0, 1.0);
+        float l = luminance(rgb);
+        // Signed luminance variation has no deliberate positive/negative bias.
+        // Taper at the endpoints instead of lifting black or graying white.
+        float response = 1.0 - 0.35 * smoothstep(0.45, 0.95, l);
+        float delta = noise * amount * 0.55 * min(l, 1.0 - l) * response;
+        float target = clamp(l + delta, 0.0, 1.0);
+        float3 shifted = rgb + (target - l);
+        return float4(fitChroma(shifted, target, 1.0) * input.a, input.a);
+    }
     float4 filmGrain(sample_t input, float amount, float size, float seedLow, float seedHigh, float4 bounds, destination dest) {
         float2 p = dest.coord();
         if (p.x < bounds.x || p.y < bounds.y || p.x >= bounds.x + bounds.z || p.y >= bounds.y + bounds.w) return input;

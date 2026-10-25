@@ -62,6 +62,31 @@ final class FilmEffectsTests: XCTestCase {
             XCTAssertEqual(a[index], a[index + 2], accuracy: 0.000001)
         }
     }
+    func test16mmGrainIsAnimatedRepeatableAndPreservesEndpoints() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)
+        var settings = FilmEffectsSettings.off
+        settings.grainEnabled = true; settings.grainAmount = 1; settings.grainTexture = .coarse16
+        let renderer = FilmEffectsRenderer()
+        for level in [CGFloat(0), 0.2, 0.5, 0.8, 1] {
+            let source = CIImage(color: CIColor(red: level, green: level, blue: level)).cropped(to: bounds)
+            let a = pixels(try renderer.render(source, settings: settings, time: .zero))
+            let repeatFrame = pixels(try renderer.render(source, settings: settings, time: .zero))
+            XCTAssertEqual(a, repeatFrame)
+            let red = stride(from: 0, to: a.count, by: 4).map { a[$0] }
+            XCTAssertEqual(red.reduce(0, +) / Float(red.count), Float(level), accuracy: 0.002)
+            if level == 0 || level == 1 {
+                for value in red { XCTAssertEqual(value, Float(level), accuracy: 0.00001) }
+            } else {
+                XCTAssertGreaterThan(red.max()! - red.min()!, 0.005)
+                let next = pixels(try renderer.render(source, settings: settings, time: CMTime(value: 1, timescale: 30)))
+                XCTAssertNotEqual(a, next)
+            }
+            for index in stride(from: 0, to: a.count, by: 4) {
+                XCTAssertEqual(a[index], a[index + 1], accuracy: 0.00001)
+                XCTAssertEqual(a[index], a[index + 2], accuracy: 0.00001)
+            }
+        }
+    }
     func testOpticsDoNotGradeNonHighlights() throws {
         let input = CIImage(color: CIColor(red: 0.3, green: 0.4, blue: 0.2)).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
         var settings = FilmEffectsSettings.off; settings.halationEnabled = true; settings.bloomEnabled = true

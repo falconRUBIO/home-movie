@@ -7,12 +7,12 @@ enum FilmGrainTexture: String, Codable, CaseIterable, Identifiable, Sendable {
     case fine35, coarse16
     var id: Self { self }
     var label: String { self == .fine35 ? "Fine 35mm" : "Coarse 16mm" }
-    var referenceSize: Double { self == .fine35 ? 1.0 : 2.0 }
+    var referenceSize: Double { self == .fine35 ? 1.0 : 1.6 }
 }
 
 // Stored separately from capture profile and LUT selection. Optional on Movie for old catalogs.
 struct FilmEffectsSettings: Codable, Equatable, Sendable {
-    static let engineVersion = 5
+    static let engineVersion = 6
     static let off = FilmEffectsSettings()
     var version = 1
     var grainEnabled = false
@@ -105,7 +105,7 @@ final class FilmEffectsRenderer {
         }
         let data = try Data(contentsOf: url)
         var result: [String: CIColorKernel] = [:]
-        for name in ["filmLinear", "filmHighlights", "filmOptics", "filmSoftness", "filmRolloff", "filmGrain", "filmVignette", "filmDetail"] {
+        for name in ["filmLinear", "filmHighlights", "filmOptics", "filmSoftness", "filmRolloff", "filmGrain", "filmGrain16", "filmVignette", "filmDetail"] {
             result[name] = try CIColorKernel(functionName: name, fromMetalLibraryData: data)
         }
         return result
@@ -165,7 +165,7 @@ final class FilmEffectsRenderer {
         }
         if settings.grainEnabled && settings.grainAmount > 0 {
             let seed = FilmEffectsSettings.frameSeed(time: time, seed: settings.seed)
-            image = try apply("filmGrain", extent: bounds, arguments: [image,
+            image = try apply(settings.grainTexture == .coarse16 ? "filmGrain16" : "filmGrain", extent: bounds, arguments: [image,
                 settings.grainAmount, settings.grainSize * settings.grainTexture.referenceSize * scale,
                 Float(seed & 65535), Float(seed >> 16), CIVector(cgRect: content)])
         }
