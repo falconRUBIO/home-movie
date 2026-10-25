@@ -3,6 +3,25 @@ import XCTest
 
 final class SceneEditHistoryTests: XCTestCase {
     private var initial: SceneEditState { SceneEditState(start: 0, end: 10, adjustments: .neutral, effects: .off) }
+    func testEditorDeletionKeepsAnAdjacentClipOrAnEmptySession() {
+        let a = UUID(), b = UUID(), c = UUID()
+        XCTAssertEqual(SceneEditorSelection.afterDeleting(a, from: [a, b, c]), b)
+        XCTAssertEqual(SceneEditorSelection.afterDeleting(b, from: [a, b, c]), c)
+        XCTAssertEqual(SceneEditorSelection.afterDeleting(c, from: [a, b, c]), b)
+        XCTAssertNil(SceneEditorSelection.afterDeleting(a, from: [a]))
+        XCTAssertNil(SceneEditorSelection.afterDeleting(a, from: []))
+    }
+    func testFinishingInterruptedDragCapturesLatestValues() {
+        var history = SceneEditHistory(initial), latest = initial
+        history.begin(initial)
+        latest.adjustments.exposure = -0.14
+        latest.adjustments.brilliance = -0.24
+        history.end(latest)
+        XCTAssertFalse(history.isGrouping)
+        XCTAssertEqual(history.current, latest)
+        XCTAssertEqual(history.undo(), initial)
+        XCTAssertEqual(history.redo(), latest)
+    }
     func testDragIsOneUndoAndRedoRestoresCompleteRecipeWithoutObserverFeedback() {
         let original = initial
         var history = SceneEditHistory(original), changed = original

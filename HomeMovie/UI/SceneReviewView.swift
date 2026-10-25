@@ -197,13 +197,49 @@ private struct SceneReviewRecipe: Equatable {
     let effects: FilmEffectsSettings
 }
 
+// Keep the sheet alive while replacing a deleted clip's editing session.
 struct SceneReviewView: View {
+    @EnvironmentObject private var app: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let movieID: UUID
+    @State private var selectedScene: Scene?
+
+    init(movieID: UUID, scene: Scene) {
+        self.movieID = movieID
+        _selectedScene = State(initialValue: scene)
+    }
+
+    var body: some View {
+        Group {
+            if let scene = selectedScene {
+                SceneReviewSession(movieID: movieID, scene: scene) { nextID in
+                    selectedScene = app.movie(movieID)?.activeScenes.first { $0.id == nextID }
+                }.id(scene.id)
+            } else {
+                NavigationStack {
+                    ContentUnavailableView("No Clips", systemImage: "film",
+                        description: Text("The clip was moved to Recently Deleted. You can restore it from Settings."))
+                        .navigationTitle("Edit Scene")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { dismiss() }
+                            }
+                        }
+                }
+            }
+        }
+    }
+}
+
+private struct SceneReviewSession: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let movieID: UUID
     let scene: Scene
+    let onDeleted: (UUID?) -> Void
     @StateObject private var preview = SceneReviewPreviewModel()
     @StateObject private var export = ExportModel()
     @State private var history: SceneEditHistory?
@@ -232,7 +268,8 @@ struct SceneReviewView: View {
     @State private var confirmDiscard = false
     @State private var error: String?
     @State private var notice: String?
-    init(movieID: UUID, scene: Scene) {
+    init(movieID: UUID, scene: Scene, onDeleted: @escaping (UUID?) -> Void) {
+        self.onDeleted = onDeleted
         self.movieID = movieID; self.scene = scene
         _start = State(initialValue: scene.trimStart.seconds)
         _end = State(initialValue: scene.trimEnd.seconds)
@@ -368,10 +405,10 @@ struct SceneReviewView: View {
                         Divider()
                         Button("Delete Scene", systemImage: "trash", role: .destructive) { confirmRemove = true }
                     } label: { Image(systemName: "ellipsis.circle").frame(minWidth: 44, minHeight: 44) }
-                        .accessibilityLabel("Scene actions").disabled(busy || history?.isGrouping == true)
+                        .accessibilityLabel("Scene actions").disabled(busy)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { saveEditsAndClose() }.disabled(busy || preview.loading || history?.isGrouping == true)
+                    Button("Done") { saveEditsAndClose() }.disabled(busy)
                 }
             }
             .fullScreenCover(isPresented: $showingFullscreenPreview) {
@@ -392,13 +429,7 @@ struct SceneReviewView: View {
             .alert("Delete this scene?", isPresented: $confirmRemove) {
                 Button("Cancel", role: .cancel) { }
                 Button("Move to Recently Deleted", role: .destructive) {
-                    saving = true
-                    Task {
-                        do {
-                            try await app.store.setSceneDeleted(movieID: movieID, sceneID: scene.id, deleted: true)
-                            await app.refresh(); preview.stop(); dismiss()
-                        } catch { self.error = error.localizedDescription; saving = false }
-                    }
+                    deleteScene()
                 }
             } message: { Text("Restore it later from Settings. Its original file will be kept.") }
             .task {
@@ -742,7 +773,31 @@ struct SceneReviewView: View {
             } catch { self.error = error.localizedDescription; saving = false }
         }
     }
+    private func deleteScene() {
+        guard !busy else { return }
+        editingChanged(false)
+        let nextID = SceneEditorSelection.afterDeleting(scene.id, from: movie?.activeScenes.map(\.id) ?? [])
+        saving = true; error = nil
+        preview.player?.pause()
+        Task {
+            do {
+                try await app.store.setSceneDeleted(movieID: movieID, sceneID: scene.id, deleted: true)
+                await app.refresh()
+                preview.stop(); export.cancel()
+                onDeleted(nextID)
+            } catch { self.error = error.localizedDescription; saving = false }
+        }
+    }
     private func saveEditsAndClose() {
+        guard !busy else { return }
+        // UIKit can cancel a slider gesture without delivering its end callback.
+        // Finish the transaction using the latest values; preview readiness is
+        // unrelated to persisting edits and must never trap the user here.
+        editingChanged(false)
+        pickingWhiteBalance = false; comparing = false; interactingControl = nil
+        if !loadedEffects, let movie {
+            effects = movie.exportEffects; originalEffects = effects; loadedEffects = true
+        }
         saving = true; error = nil
         Task {
             do { try await persistEdits(); preview.stop(); dismiss() }
