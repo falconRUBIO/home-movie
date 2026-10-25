@@ -317,7 +317,7 @@ struct CameraView: View {
                     Divider()
                     Button("Add Apple Log Look…", systemImage: "plus") { importingDisplayLook = false; addingLook = true }.disabled(camera.busy)
                     Button("Add Rec.709 Look…", systemImage: "plus") { importingDisplayLook = true; addingLook = true }.disabled(camera.busy)
-                } label: { MovieControlIcon(systemName: "slider.horizontal.3").homeGlass() }
+                } label: { MovieControlIcon(systemName: "camera.filters").homeGlass() }
                     .accessibilityLabel("Live look: \(liveOriginal ? "Original Log" : movie.lookName)")
                     .disabled(changingLook)
             }
