@@ -1,6 +1,6 @@
 # Landscape camera and flip audit
 
-Reference: user-provided screenshots IMG_5913 (MOVIE ROLL) and IMG_5915 (Apple Camera). The app fitted a 16:9 preview inside safe-area height and a 112-point review rail. This produced visible top/bottom margins and an overly wide right region. Apple's screenshot fills the usable landscape height, retaining the leading notch area and a compact trailing control rail.
+Reference: user-provided screenshots IMG_5913 (MOVIE MODE) and IMG_5915 (Apple Camera). The app fitted a 16:9 preview inside safe-area height and a 112-point review rail. This produced visible top/bottom margins and an overly wide right region. Apple's screenshot fills the usable landscape height, retaining the leading notch area and a compact trailing control rail.
 
 ## Layout
 

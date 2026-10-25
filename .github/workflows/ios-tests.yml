@@ -1,4 +1,4 @@
-name: Compile and test MOVIE ROLL
+name: Compile and test MOVIE MODE
 
 on:
   push:

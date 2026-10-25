@@ -271,7 +271,7 @@ struct LibraryView: View {
                 if ready && openLastMovie, let id = UUID(uuidString: lastMovieID), app.activeMovies.contains(where: { $0.id == id }) { app.prewarmCamera(movieID: id); path = [id] }
             }
         }
-        .alert("MOVIE ROLL", isPresented: Binding(get: { app.error != nil }, set: { if !$0 { app.error = nil } })) {
+        .alert("MOVIE MODE", isPresented: Binding(get: { app.error != nil }, set: { if !$0 { app.error = nil } })) {
             Button("OK") { app.error = nil }
         } message: { Text(app.error ?? "") }
         .alert("Recording Recovery", isPresented: Binding(get: { app.recoveryNotice != nil }, set: { if !$0 { app.recoveryNotice = nil } })) {
@@ -567,7 +567,7 @@ struct SettingsView: View {
                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
             }
         } header: { Text("Help & Privacy") }
-        footer: { Text("Contact Support opens our public help page. Tap Email MOVIE ROLL Support there, or copy the contact address into your email service. App Permissions opens iPhone Settings for camera, microphone, and Photos access.") }
+        footer: { Text("Contact Support opens our public help page. Tap Email MOVIE MODE Support there, or copy the contact address into your email service. App Permissions opens iPhone Settings for camera, microphone, and Photos access.") }
     }
     var body: some View {
         NavigationStack {
@@ -603,16 +603,16 @@ struct PrivacyView: View {
                 Link("Privacy Policy", destination: URL(string: "https://home-movie-support.falcon-craft-4475.chatgpt.site/privacy/")!)
             }
             Section("Your movies") {
-                Text("MOVIE ROLL keeps recordings and edit information on this iPhone. It has no account system, advertising, or analytics service, and does not upload your movies to a developer server.")
+                Text("MOVIE MODE keeps recordings and edit information on this iPhone. It has no account system, advertising, or analytics service, and does not upload your movies to a developer server.")
             }
             Section("Diagnostics") {
                 Text("A bounded support log and Apple performance/crash reports stay on this iPhone. Reports can include technical device information and stack traces. They are shared only when you choose Share Diagnostics; no developer analytics endpoint receives them automatically.")
             }
             Section("Permissions") {
-                Text("Camera and microphone access record video and sound. Photos access only adds copies when you choose to save a movie or enable original-scene copies. MOVIE ROLL does not request access to read your photo library.")
+                Text("Camera and microphone access record video and sound. Photos access only adds copies when you choose to save a movie or enable original-scene copies. MOVIE MODE does not request access to read your photo library.")
             }
             Section("Copies and backups") {
-                Text("When you save or share, the destination you choose handles that copy. Files backups include original recordings and project metadata. iCloud Drive and iCloud Photos follow your Apple settings; MOVIE ROLL does not confirm completed cloud syncing.")
+                Text("When you save or share, the destination you choose handles that copy. Files backups include original recordings and project metadata. iCloud Drive and iCloud Photos follow your Apple settings; MOVIE MODE does not confirm completed cloud syncing.")
             }
             Section("Deleting footage") {
                 Text("Recently Deleted keeps original files until you choose Delete Permanently. Copies saved to Photos, Files, or backups remain separate and must be managed at those destinations. Deleting this app can remove its local projects.")
