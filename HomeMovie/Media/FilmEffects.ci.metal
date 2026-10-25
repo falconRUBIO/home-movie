@@ -92,10 +92,12 @@ extern "C" { namespace coreimage {
     }
     float4 sceneHSL(sample_t input, float4 red, float4 orange, float4 yellow,
                     float4 green, float4 aqua, float4 blue, float4 purple, float4 magenta) {
-        float3 rgb = clamp(input.rgb, 0.0, 1.0);
+        // The compositor supplies display-encoded Rec.709 with color management
+        // disabled. Unpremultiply before nonlinear color math, then restore alpha.
+        if (input.a <= 0.000001) return input;
+        float3 rgb = clamp(input.rgb / input.a, 0.0, 1.0);
         float hi = max(rgb.r, max(rgb.g, rgb.b)), lo = min(rgb.r, min(rgb.g, rgb.b));
         float chroma = hi - lo;
-        // Achromatic pixels have no meaningful hue. Avoid coloring gray noise.
         if (chroma < 0.00001) return input;
         float light = (hi + lo) * 0.5;
         float sat = chroma / max(1.0 - abs(2.0 * light - 1.0), 0.00001);
@@ -104,7 +106,8 @@ extern "C" { namespace coreimage {
         hue = fract(hue / 6.0 + 1.0);
         float4 bands[8] = {red, orange, yellow, green, aqua, blue, purple, magenta};
         float3 adjustment = float3(0.0); float total = 0.0;
-        // All masks use the original hue, wrap across red, and have smooth edges.
+        // Original-pixel masks form a smooth partition across uneven band widths.
+        // Never reselect a pixel after moving its hue; overlapping edits cannot cascade.
         for (int i = 0; i < 8; ++i) {
             float delta = fract(hue - bands[i].w + 1.5) - 0.5;
             float previous = bands[(i + 7) % 8].w;
@@ -114,15 +117,40 @@ extern "C" { namespace coreimage {
             adjustment += bands[i].xyz * weight; total += weight;
         }
         adjustment /= max(total, 0.00001);
-        float protection = smoothstep(0.0, 0.08, chroma);
-        hue = fract(hue + adjustment.x * protection / 6.0 + 1.0);
-        sat = adjustment.y < 0.0 ? sat * (1.0 + adjustment.y * protection) :
-              sat + (1.0 - sat) * adjustment.y * protection;
-        light = adjustment.z < 0.0 ? light * (1.0 + adjustment.z * protection * 0.6) :
-                light + (1.0 - light) * adjustment.z * protection * 0.6;
-        float c = (1.0 - abs(2.0 * light - 1.0)) * sat;
-        float3 wave = clamp(abs(fract(hue + float3(0.0, 2.0/3.0, 1.0/3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
-        return float4((wave - 0.5) * c + light, input.a);
+        // Preserve unrelated pixels exactly, including their existing headroom.
+        if (max(abs(adjustment.x), max(abs(adjustment.y), abs(adjustment.z))) < 0.000001) return input;
+        // Relative saturation protects near-gray highlights; absolute chroma also
+        // suppresses unstable shadow noise. Neither control invents color in gray.
+        float protection = smoothstep(0.015, 0.10, sat) * smoothstep(0.002, 0.03, chroma);
+        if (protection <= 0.0) return input;
+        float3 linear = decode709(rgb);
+        float level = luminance(linear);
+        float3 result = linear;
+        if (adjustment.x != 0.0) {
+            // +/-30 degrees at full strength. HSL is used for color selection and
+            // rotation only: its lightness is not a measure of visible brightness.
+            hue = fract(hue + adjustment.x * protection / 12.0 + 1.0);
+            float3 wave = clamp(abs(fract(hue + float3(0.0, 2.0/3.0, 1.0/3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+            float3 rotated = decode709((wave - 0.5) * chroma + light);
+            result = rotated * (level / max(luminance(rotated), 0.000001));
+        }
+        // Scale existing chroma instead of driving every selected color toward
+        // 100% HSL saturation. -100 is neutral; +100 doubles chroma before gamut fit.
+        float gain = adjustment.y < 0.0 ? 1.0 + adjustment.y * protection : exp2(adjustment.y * protection);
+        result = float3(level) + (result - float3(level)) * gain;
+        if (adjustment.z != 0.0) {
+            float lightGain = exp2(adjustment.z * protection);
+            // One stop down/up with a continuous highlight shoulder; keep texture
+            // and avoid the former 60% blend toward white, which washed out colors.
+            float target = lightGain <= 1.0 ? level * lightGain :
+                level + (1.0 - level) * (1.0 - exp(-level * (lightGain - 1.0) / max(1.0 - level, 0.000001)));
+            result *= target / max(level, 0.000001);
+            level = target;
+        }
+        // A shared chroma reduction keeps luminance and the RGB hue ray intact.
+        // Independent channel clipping would shift hue and flatten gradients.
+        result = fitChroma(result, level, 1.0);
+        return float4(encode709(result) * input.a, input.a);
     }
 
     // Only extended-output custom LUTs use this display rendering transform.
