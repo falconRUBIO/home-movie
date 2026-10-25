@@ -293,7 +293,13 @@ float4 logFalseColor(sample_t input) {
         if (whitePoint != 0.0) { target = min(1.0, target + whitePoint * 0.22 * pow(target, 3.0)); }
         target = clamp(target, 0.0, 1.0);
         float3 result;
-        if (pipelineVersion >= 3.0 && l > 0.000001) {
+        float chroma = max(rgb.r, max(rgb.g, rgb.b)) - min(rgb.r, min(rgb.g, rgb.b));
+        if (pipelineVersion >= 3.0 && chroma <= 0.000001) {
+            // Exact neutrals need no hue reconstruction. A redundant divide,
+            // multiply and gamut fit can reverse half-float steps on a nearly
+            // flat highlight shoulder. Preserve the scalar tonal result exactly.
+            result = float3(target);
+        } else if (pipelineVersion >= 3.0 && l > 0.000001) {
             // Raise density with one RGB gain, preserving channel ratios until
             // the gamut boundary. Only then reduce chroma at constant luma.
             // Mixing toward white at every lift unnecessarily washed out skin
