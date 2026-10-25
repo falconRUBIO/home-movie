@@ -81,8 +81,9 @@ struct WatchMovieView: View {
                                 Divider()
                                 Button("Add Apple Log Look…", systemImage: "plus") { importingDisplayLook = false; importingLook = true }
                                 Button("Add Rec.709 Look…", systemImage: "plus") { importingDisplayLook = true; importingLook = true }
-                            } label: { MovieControlIcon(systemName: "slider.horizontal.3") }
-                                .accessibilityLabel("Look: \(showOriginalLog ? "Original Log" : movie.lookName)")
+                            } label: { MovieControlIcon(systemName: "camera.filters") }
+                                .accessibilityLabel("Movie Looks")
+                                .accessibilityValue(showOriginalLog ? "Original Log" : movie.lookName)
                                 .disabled(changingLook)
                         }
                     }
