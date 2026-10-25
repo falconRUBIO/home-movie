@@ -150,38 +150,41 @@ struct LibraryView: View {
             }
         }
     }
-    var body: some View {
-        NavigationStack(path: $path) {
-            Group {
-                if !app.loaded {
-                    VStack(spacing: 16) {
-                        if app.loadFailure == nil { ProgressView("Opening your movies…") }
-                        else {
-                            Text("Your movies could not be opened.")
-                            Text(app.loadFailure ?? "").font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                            Button("Try Again") { Task { await app.load() } }
-                            Button("Backup & Catalog Recovery") { backups = true }
-                            Button("Preserved Recording Files") { recovery = true }
-                        }
+    private var libraryContent: some View {
+        Group {
+            if !app.loaded {
+                VStack(spacing: 16) {
+                    if app.loadFailure == nil { ProgressView("Opening your movies…") }
+                    else {
+                        Text("Your movies could not be opened.")
+                        Text(app.loadFailure ?? "").font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        Button("Try Again") { Task { await app.load() } }
+                        Button("Backup & Catalog Recovery") { backups = true }
+                        Button("Preserved Recording Files") { recovery = true }
                     }
-                } else if app.activeMovies.isEmpty {
-                    ContentUnavailableView {
-                        Label("Your movie starts here", systemImage: "video")
-                    } description: { Text("Record a moment. Come back for the next.") }
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: movieColumns, alignment: .leading, spacing: 24) {
-                            ForEach(sortedMovies) { movie in
-                                movieCard(movie)
-                            }
-                        }
-                        .padding(.horizontal, 20).padding(.top, 8)
-                        // The last row can scroll fully above the floating create control.
-                        .padding(.bottom, selecting ? 24 : 96)
-                    }
-                    .modifier(LibraryScrollEdgeStyle())
                 }
+            } else if app.activeMovies.isEmpty {
+                ContentUnavailableView {
+                    Label("Your movie starts here", systemImage: "video")
+                } description: { Text("Record a moment. Come back for the next.") }
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: movieColumns, alignment: .leading, spacing: 24) {
+                        ForEach(sortedMovies) { movie in
+                            movieCard(movie)
+                        }
+                    }
+                    .padding(.horizontal, 20).padding(.top, 8)
+                    // The last row can scroll fully above the floating create control.
+                    .padding(.bottom, selecting ? 24 : 96)
+                }
+                .modifier(LibraryScrollEdgeStyle())
             }
+        }
+    }
+
+    private var libraryPage: some View {
+        libraryContent
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle("Movies").navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.automatic, for: .navigationBar)
@@ -201,35 +204,41 @@ struct LibraryView: View {
                     }.padding(.horizontal, 20).background(.bar)
                 }
             }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if selecting {
-                        Button(selected.count == app.activeMovies.count ? "Deselect All" : "Select All") {
-                            selected = selected.count == app.activeMovies.count ? [] : Set(app.activeMovies.map(\.id))
-                        }.disabled(deletingSelection)
-                    }
-                }
-                ToolbarItem(placement: .topBarLeading) {
-                    if selecting {
-                        Button("Done") { selecting = false; selected = [] }.disabled(deletingSelection)
-                    } else {
-                    Button { settings = true } label: { MovieControlIcon(systemName: "gearshape") }
-                        .accessibilityLabel("Settings").disabled(!app.loaded)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if !selecting {
-                        Menu {
-                            Button("Select", systemImage: "checkmark.circle") { selected = []; selecting = true }
-                            Button("Rearrange", systemImage: "arrow.up.arrow.down") { rearranging = true }.disabled(app.activeMovies.count < 2)
-                            Picker("Sort", selection: $sortValue) {
-                                ForEach(MovieLibrarySort.allCases) { Text($0.rawValue).tag($0.rawValue) }
-                            }
-                        } label: { MovieControlIcon(systemName: "ellipsis.circle") }
-                            .accessibilityLabel("Library options").disabled(!app.loaded || app.activeMovies.isEmpty)
-                    }
-                }
+            .toolbar { libraryToolbar }
+    }
+
+    @ToolbarContentBuilder private var libraryToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            if selecting {
+                Button(selected.count == app.activeMovies.count ? "Deselect All" : "Select All") {
+                    selected = selected.count == app.activeMovies.count ? [] : Set(app.activeMovies.map(\.id))
+                }.disabled(deletingSelection)
             }
+        }
+        ToolbarItem(placement: .topBarLeading) {
+            if selecting {
+                Button("Done") { selecting = false; selected = [] }.disabled(deletingSelection)
+            } else {
+                Button { settings = true } label: { MovieControlIcon(systemName: "gearshape") }
+                    .accessibilityLabel("Settings").disabled(!app.loaded)
+            }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            if !selecting {
+                Menu {
+                    Button("Select", systemImage: "checkmark.circle") { selected = []; selecting = true }
+                    Button("Rearrange", systemImage: "arrow.up.arrow.down") { rearranging = true }.disabled(app.activeMovies.count < 2)
+                    Picker("Sort", selection: $sortValue) {
+                        ForEach(MovieLibrarySort.allCases) { Text($0.rawValue).tag($0.rawValue) }
+                    }
+                } label: { MovieControlIcon(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("Library options").disabled(!app.loaded || app.activeMovies.isEmpty)
+            }
+        }
+    }
+
+    private var librarySheets: some View {
+        libraryPage
             .onChange(of: app.activeMovies.map(\.id)) { _, ids in selected.formIntersection(ids) }
             .sheet(item: $coverMovie) { MovieCoverPicker(movie: $0).environmentObject(app) }
             .sheet(isPresented: $rearranging) {
@@ -257,6 +266,10 @@ struct LibraryView: View {
                 WatchMovieView(movieID: movie.id, playbackOnly: true, autoplay: true).environmentObject(app)
             }
             .sheet(item: $exportMovie) { movie in ExportView(movie: movie).environmentObject(app) }
+    }
+
+    private var libraryActions: some View {
+        librarySheets
             .alert("Rename Movie", isPresented: Binding(get: { renameMovie != nil }, set: { if !$0 { renameMovie = nil } })) {
                 TextField("Movie name", text: $renameText)
                 Button("Cancel", role: .cancel) { renameMovie = nil }
@@ -276,7 +289,10 @@ struct LibraryView: View {
             .onChange(of: app.loaded) { _, ready in
                 if ready && openLastMovie, let id = UUID(uuidString: lastMovieID), app.activeMovies.contains(where: { $0.id == id }) { app.prewarmCamera(movieID: id); path = [id] }
             }
-        }
+    }
+
+    var body: some View {
+        NavigationStack(path: $path) { libraryActions }
         .alert("MOVIE MODE", isPresented: Binding(get: { app.error != nil }, set: { if !$0 { app.error = nil } })) {
             Button("OK") { app.error = nil }
         } message: { Text(app.error ?? "") }
