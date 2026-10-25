@@ -291,7 +291,9 @@ final class SceneAdjustmentsTests: XCTestCase {
                     }
                     let ramp = stride(from: 0, to: pixels.count, by: 4).map { pixels[$0] }
                     XCTAssertTrue(ramp.allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 1 })
-                    XCTAssertTrue(zip(ramp, ramp.dropFirst()).allSatisfy { $1 >= $0 })
+                    let minimumStep = zip(ramp, ramp.dropFirst()).map { $1 - $0 }.min() ?? 0
+                    XCTAssertGreaterThanOrEqual(minimumStep, 0,
+                        "Exposure \(exposure), Shadows \(shadows), Highlights \(highlights): smallest ramp step \(minimumStep)")
                 }
             }
         }

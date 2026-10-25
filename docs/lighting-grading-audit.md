@@ -17,6 +17,8 @@ Exposure and white balance already operated on decoded source light, but Shadows
 
 Display brightening and curves mixed RGB toward white, reducing saturation even with the color controls unchanged. Positive Black Point and White Point clipped ranges of shadow and highlight values. Push/Pull's subtractive density offset could flatten the deepest shadows. Brilliance added neighborhood contrast using a blurred image, potentially producing halos.
 
+Achromatic display tones map directly through the scalar curve, avoiding redundant color-space round trips that can cause one-ULP jitter on a flat shoulder.
+
 The old rounded transfer constants also produced a small discontinuity at the toe/power join. A dense finishing ramp reproduced a brightness reversal of approximately 0.0002. Using a continuous internal transfer removes that reversal.
 
 ## Modern production processing

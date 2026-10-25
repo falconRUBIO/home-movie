@@ -42,6 +42,9 @@ float3 fitChroma(float3 rgb, float level, float gain) {
 // Display finishing moves brightness with a shared linear RGB gain. Mixing
 // toward white desaturates colored highlights even when Saturation is untouched.
 float3 remapDisplayLevel(float3 rgb, float from, float to) {
+    // Achromatic pixels already are the scalar tone curve. Avoid a redundant
+    // decode/scale/encode round trip that can jitter by one ULP on a flat shoulder.
+    if (rgb.r == rgb.g && rgb.g == rgb.b) return float3(to);
     if (abs(to - from) < 0.0000001) return rgb;
     if (from <= 0.0) return float3(to);
     float3 linear = decode709(rgb);
