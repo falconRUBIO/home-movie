@@ -12,7 +12,7 @@ enum FilmGrainTexture: String, Codable, CaseIterable, Identifiable, Sendable {
 
 // Stored separately from capture profile and LUT selection. Optional on Movie for old catalogs.
 struct FilmEffectsSettings: Codable, Equatable, Sendable {
-    static let engineVersion = 6
+    static let engineVersion = 7
     static let off = FilmEffectsSettings()
     var version = 1
     var grainEnabled = false
@@ -126,7 +126,7 @@ final class FilmEffectsRenderer {
         if settings.halationEnabled && settings.halationAmount > 0 || settings.bloomEnabled && settings.bloomAmount > 0 {
             let linear = try apply("filmLinear", extent: bounds, arguments: [source])
             let black = CIImage(color: .black).cropped(to: bounds)
-            var bloom = black, red = black, orange = black
+            var bloom = black, red = black, orange = black, halationSource = black
             if settings.bloomEnabled && settings.bloomAmount > 0 {
                 let threshold = 0.86 - 0.32 * settings.bloomSensitivity
                 let highlight = try apply("filmHighlights", extent: bounds, arguments: [linear, threshold, 0])
@@ -136,11 +136,12 @@ final class FilmEffectsRenderer {
             if settings.halationEnabled && settings.halationAmount > 0 {
                 let threshold = 0.88 - 0.28 * settings.halationSensitivity
                 let highlight = try apply("filmHighlights", extent: bounds, arguments: [linear, threshold, 1])
+                halationSource = highlight
                 let radius = (2 + 14 * settings.halationSpread) * scale
                 red = diffuse(highlight, radius: radius * 1.6, extent: bounds, weights: [0.75, 0.2, 0.05])
                 orange = diffuse(highlight, radius: radius * 0.65, extent: bounds, weights: [0.8, 0.15, 0.05])
             }
-            image = try apply("filmOptics", extent: bounds, arguments: [linear, bloom, red, orange,
+            image = try apply("filmOptics", extent: bounds, arguments: [linear, bloom, red, orange, halationSource,
                 settings.bloomEnabled ? settings.bloomAmount : 0,
                 settings.halationEnabled ? settings.halationAmount : 0])
         }
@@ -174,7 +175,10 @@ final class FilmEffectsRenderer {
     private func diffuse(_ source: CIImage, radius: Double, extent: CGRect, weights: [Double]) -> CIImage {
         // Reduced-resolution diffusion retains a full-resolution sharp base and grain.
         let reduction: CGFloat = radius > 8 ? 0.25 : 0.5
-        let reduced = source.transformed(by: CGAffineTransform(scaleX: reduction, y: reduction))
+        // Request antialiased downsampling explicitly: Core Image's default is
+        // platform-dependent. Tiny lamps must not blink as they cross the
+        // reduced-resolution sampling grid on iPhone.
+        let reduced = source.transformed(by: CGAffineTransform(scaleX: reduction, y: reduction), highQualityDownsample: true)
         let small = reduced.extent
         var result = CIImage(color: .black).cropped(to: small)
         for (index, weight) in weights.enumerated() {

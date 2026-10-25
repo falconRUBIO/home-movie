@@ -62,6 +62,42 @@ final class FilmEffectsTests: XCTestCase {
             XCTAssertEqual(a[index], a[index + 2], accuracy: 0.000001)
         }
     }
+    func testFineGrainDoesNotLiftBlackCrushWhiteOrShiftPatchBrightness() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)
+        var settings = FilmEffectsSettings.off
+        settings.grainEnabled = true; settings.grainAmount = 1; settings.grainSize = 2
+        let renderer = FilmEffectsRenderer()
+        for level in [Float(0), 0.15, 0.3, 0.7, 0.85, 1] {
+            let source = CIImage(color: CIColor(red: CGFloat(level), green: CGFloat(level), blue: CGFloat(level)))
+                .cropped(to: bounds)
+            var mean = 0.0
+            for frame: Int64 in 0..<3 {
+                let result = pixels(try renderer.render(source, settings: settings, time: CMTime(value: frame, timescale: 30)))
+                let red = stride(from: 0, to: result.count, by: 4).map { result[$0] }
+                mean += red.reduce(0.0) { $0 + Double($1) } / Double(red.count)
+                if level == 0 || level == 1 {
+                    XCTAssertTrue(red.allSatisfy { abs($0 - level) < 0.00001 })
+                }
+            }
+            XCTAssertEqual(mean / 3, Double(level), accuracy: 0.002, "Grain must not act as a brightness adjustment")
+        }
+    }
+    func testBothGrainTexturesRespectPremultipliedAlpha() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 128, height: 128)
+        let opaque = CIImage(color: CIColor(red: 0.6, green: 0.3, blue: 0.2)).cropped(to: bounds)
+        let translucent = CIImage(color: CIColor(red: 0.6, green: 0.3, blue: 0.2, alpha: 0.5)).cropped(to: bounds)
+        let renderer = FilmEffectsRenderer()
+        for texture in FilmGrainTexture.allCases {
+            var settings = FilmEffectsSettings.off
+            settings.grainEnabled = true; settings.grainAmount = 1; settings.grainTexture = texture
+            let a = pixels(try renderer.render(opaque, settings: settings, time: .zero))
+            let b = pixels(try renderer.render(translucent, settings: settings, time: .zero))
+            for i in stride(from: 0, to: a.count, by: 4) {
+                for c in 0..<3 { XCTAssertEqual(b[i + c], a[i + c] * 0.5, accuracy: 0.002) }
+                XCTAssertEqual(b[i + 3], 0.5, accuracy: 0.0001)
+            }
+        }
+    }
     func test16mmGrainIsAnimatedRepeatableAndPreservesEndpoints() throws {
         let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)
         var settings = FilmEffectsSettings.off
@@ -94,6 +130,42 @@ final class FilmEffectsTests: XCTestCase {
         XCTAssertEqual(result[0], 0.3, accuracy: 0.001)
         XCTAssertEqual(result[1], 0.4, accuracy: 0.001)
         XCTAssertEqual(result[2], 0.2, accuracy: 0.001)
+    }
+    func testLocalHalationDoesNotTintUniformBrightFields() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 128, height: 128)
+        var settings = FilmEffectsSettings.off
+        settings.halationEnabled = true; settings.halationAmount = 1; settings.halationSensitivity = 1
+        let renderer = FilmEffectsRenderer()
+        for level in [CGFloat(0.7), 0.85, 0.98] {
+            let source = CIImage(color: CIColor(red: level, green: level, blue: level)).cropped(to: bounds)
+            let result = pixels(try renderer.render(source, settings: settings, time: .zero))
+            for i in stride(from: 0, to: result.count, by: 4) {
+                for c in 0..<3 { XCTAssertEqual(result[i + c], Float(level), accuracy: 0.002) }
+            }
+        }
+    }
+    func testTinyLightGlowSurvivesEveryReducedSamplingPhase() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)
+        let background = CIImage(color: .black).cropped(to: bounds)
+        var settings = FilmEffectsSettings.off
+        settings.bloomEnabled = true; settings.bloomAmount = 1
+        settings.bloomSpread = 1; settings.bloomSensitivity = 1
+        let renderer = FilmEffectsRenderer()
+        var energies: [Double] = []
+        for y in 0..<4 { for x in 0..<4 {
+            let light = CIImage(color: .white).cropped(to: CGRect(x: CGFloat(120 + x), y: CGFloat(120 + y), width: 1, height: 1))
+            let source = light.composited(over: background).cropped(to: bounds)
+            let result = pixels(try renderer.render(source, settings: settings, time: .zero))
+            let energy = stride(from: 0, to: result.count, by: 4).reduce(0.0) { sum, index in
+                let v = Double(result[index])
+                return sum + (v < 0.081 ? v / 4.5 : pow((v + 0.099) / 1.099, 1 / 0.45))
+            } - 1 // Exclude the source light itself.
+            XCTAssertGreaterThan(energy, 0.05, "A one-pixel lamp must not disappear from the glow mask")
+            energies.append(energy)
+        }}
+        let maximum = try XCTUnwrap(energies.max()), minimum = try XCTUnwrap(energies.min())
+        XCTAssertLessThan(maximum / minimum, 1.75,
+            "Subpixel sampling phase must not make a moving light's glow blink")
     }
     func testBloomAndHalationWorkIndependently() throws {
         let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)

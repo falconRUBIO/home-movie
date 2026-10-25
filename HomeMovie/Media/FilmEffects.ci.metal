@@ -365,12 +365,18 @@ float4 logFalseColor(sample_t input) {
         float spectral = mix(1.0, clamp(input.r / max(l, 0.001), 0.15, 1.0), warm);
         return float4(input.rgb * gate * spectral, 1.0);
     }
-    float4 filmOptics(sample_t base, sample_t bloom, sample_t red, sample_t orange, float bloomAmount, float halationAmount) {
+    float4 filmOptics(sample_t base, sample_t bloom, sample_t red, sample_t orange, sample_t halationSource, float bloomAmount, float halationAmount) {
         float l = luminance(base.rgb);
         float sourceProtection = 1.0 - smoothstep(0.65, 0.995, l);
         float localContrast = smoothstep(0.001, 0.035, max(luminance(red.rgb) - l * 0.18, 0.0));
-        float3 halo = float3(luminance(red.rgb), luminance(orange.rgb) * 0.32, luminance(orange.rgb) * 0.025);
-        float3 energy = bloom.rgb * bloomAmount * 2.8 + halo * halationAmount * 4.0 * sourceProtection * localContrast;
+        // Local halation is scattered highlight energy arriving from nearby
+        // pixels. Remove the local source so a flat bright wall cannot become
+        // a red overlay. Broader red diffusion surrounds the tighter orange core.
+        float localSource = luminance(halationSource.rgb);
+        float redScatter = max(luminance(red.rgb) - localSource, 0.0);
+        float orangeScatter = max(luminance(orange.rgb) - localSource, 0.0);
+        float3 halo = float3(redScatter, orangeScatter * 0.32, orangeScatter * 0.025);
+        float3 energy = max(bloom.rgb, 0.0) * bloomAmount * 2.8 + halo * halationAmount * 4.0 * sourceProtection * localContrast;
         // Channel-relative headroom protection, no whole-frame tone or saturation changes.
         float3 result = base.rgb + max(1.0 - base.rgb, 0.0) * (1.0 - exp(-energy));
         return float4(encode709(result), base.a);
@@ -435,19 +441,21 @@ float4 logFalseColor(sample_t input) {
     }
     float4 filmGrain(sample_t input, float amount, float size, float seedLow, float seedHigh, float4 bounds, destination dest) {
         float2 p = dest.coord();
-        if (p.x < bounds.x || p.y < bounds.y || p.x >= bounds.x + bounds.z || p.y >= bounds.y + bounds.w) return input;
+        if (p.x < bounds.x || p.y < bounds.y || p.x >= bounds.x + bounds.z || p.y >= bounds.y + bounds.w || input.a <= 0.000001) return input;
         uint seed = uint(seedLow) | (uint(seedHigh) << 16);
         float fine = particles(p - bounds.xy, size, seed, 17u);
         float cluster = particles(p - bounds.xy + float2(13.7, 29.1), size * 1.8, seed, 103u);
         float coarse = particles(p - bounds.xy + float2(41.3, 7.9), size * 3.1, seed, 271u);
-        float l = clamp(luminance(input.rgb), 0.0, 1.0);
+        float3 rgb = clamp(input.rgb / input.a, 0.0, 1.0);
+        float l = luminance(rgb);
         float response = 0.25 + 0.75 * pow(max(4.0 * l * (1.0 - l), 0.0), 0.65);
-        float g = (fine * 0.65 + cluster * 0.25 + coarse * 0.10) * amount * 0.38 * response;
-        // Mostly luminance grain: preserve hue and underlying detail, limit endpoint bias.
-        // Scale toward black or white instead of suppressing all grain whenever
-        // a single channel is saturated. Neutral patches remain neutral.
-        float3 rgb = clamp(input.rgb, 0.0, 1.0);
-        float3 result = g >= 0.0 ? rgb + (1.0 - rgb) * g * 2.0 : rgb + rgb * g * 2.0;
-        return float4(result, input.a);
+        float noise = fine * 0.65 + cluster * 0.25 + coarse * 0.10;
+        // Equal positive/negative luminance perturbations. The former asymmetric
+        // black/white blend lifted shadows and dulled highlights on average.
+        // Match its mid-gray strength, taper at the display endpoints, and fit
+        // chroma jointly instead of modulating each channel's headroom separately.
+        float delta = noise * amount * 0.76 * min(l, 1.0 - l) * response;
+        float target = clamp(l + delta, 0.0, 1.0);
+        return float4(fitChroma(rgb + (target - l), target, 1.0) * input.a, input.a);
     }
 }}

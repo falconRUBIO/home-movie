@@ -32,7 +32,7 @@ struct FilmEffectsControlSections: View {
     private var rolloffControls: some View {
         Section {
             amountSlider("Highlight Roll-Off", value: effectAmount(\.rolloffAmount, enabled: \.rolloffEnabled), accessibilityLabel: "Highlight Roll-Off amount")
-        } footer: { Text("Smooths bright tones toward white. Lower amounts keep highlights brighter.") }
+        } footer: { Text("Softens the brightest tones while preserving shadow detail. Lower amounts keep highlights brighter.") }
     }
     private var grainControls: some View {
         Section {
