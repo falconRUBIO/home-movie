@@ -100,7 +100,7 @@ final class ReliabilityDiagnostics: @unchecked Sendable {
                     return "\(formatter.string(from: entry.date)) \(entry.event.rawValue)\(failure)\(details)"
                 }
                 let apple = self.systemFiles().suffix(4).compactMap { try? String(contentsOf: $0, encoding: .utf8) }
-                continuation.resume(returning: (["HOME MOVIE CLIPS \(version) (\(build))", ProcessInfo.processInfo.operatingSystemVersionString,
+                continuation.resume(returning: (["MOVIE MODE \(version) (\(build))", ProcessInfo.processInfo.operatingSystemVersionString,
                     "Local support events; Apple performance/crash reports appear below when delivered.",
                     "An unfinished operation may indicate interruption, force quit or termination.", ""] + events + apple).joined(separator: "\n"))
             }

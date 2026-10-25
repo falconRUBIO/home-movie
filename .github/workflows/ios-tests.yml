@@ -1,4 +1,4 @@
-name: Compile and test HOME MOVIE CLIPS
+name: Compile and test MOVIE MODE
 
 on:
   push:
@@ -39,6 +39,7 @@ jobs:
         run: |
           if [ -d build/TestResults.xcresult ]; then
             ditto -c -k --keepParent build/TestResults.xcresult build/TestResults.xcresult.zip
+            xcrun xcresulttool export attachments --path build/TestResults.xcresult --output-path build/attachments
           fi
       - name: Save build log and test results
         if: always()
@@ -48,6 +49,7 @@ jobs:
           path: |
             build/xcodebuild.log
             build/TestResults.xcresult.zip
+            build/attachments/
           if-no-files-found: warn
           retention-days: 14
 

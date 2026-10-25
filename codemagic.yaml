@@ -2,7 +2,7 @@
 # Add an App Store Connect integration named home-movie in Codemagic.
 workflows:
   validate-ios:
-    name: Compile and test HOME MOVIE CLIPS
+    name: Compile and test MOVIE MODE
     instance_type: mac_mini_m2
     max_build_duration: 60
     environment:
@@ -17,7 +17,7 @@ workflows:
       - build/xcodebuild.log
       - /tmp/xcodebuild_logs/*.log
   testflight-internal:
-    name: HOME MOVIE CLIPS internal TestFlight beta
+    name: MOVIE MODE internal TestFlight beta
     instance_type: mac_mini_m2
     max_build_duration: 90
     integrations:

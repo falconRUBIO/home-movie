@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-// Scene review edits the movie recipe used by preview and export.
+// The caller selects the movie recipe or resolved clip recipe; slider behavior stays shared.
 struct FilmEffectsControlSections: View {
     @Binding var settings: FilmEffectsSettings
     var editingChanged: (Bool) -> Void = { _ in }
@@ -11,9 +11,9 @@ struct FilmEffectsControlSections: View {
     @State private var showBloomDetails = false
     var body: some View {
         Group {
+            grainControls
             halationControls
             bloomControls
-            grainControls
             softnessControls
             rolloffControls
             Section {

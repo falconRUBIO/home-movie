@@ -109,10 +109,12 @@ float4 logFalseColor(sample_t input) {
     }
     float4 sceneHSL(sample_t input, float4 red, float4 orange, float4 yellow,
                     float4 green, float4 aqua, float4 blue, float4 purple, float4 magenta) {
-        float3 rgb = clamp(input.rgb, 0.0, 1.0);
+        // The compositor supplies display-encoded Rec.709 with color management
+        // disabled. Unpremultiply before nonlinear color math, then restore alpha.
+        if (input.a <= 0.000001) return input;
+        float3 rgb = clamp(input.rgb / input.a, 0.0, 1.0);
         float hi = max(rgb.r, max(rgb.g, rgb.b)), lo = min(rgb.r, min(rgb.g, rgb.b));
         float chroma = hi - lo;
-        // Achromatic pixels have no meaningful hue. Avoid coloring gray noise.
         if (chroma < 0.00001) return input;
         float light = (hi + lo) * 0.5;
         float sat = chroma / max(1.0 - abs(2.0 * light - 1.0), 0.00001);
@@ -121,7 +123,8 @@ float4 logFalseColor(sample_t input) {
         hue = fract(hue / 6.0 + 1.0);
         float4 bands[8] = {red, orange, yellow, green, aqua, blue, purple, magenta};
         float3 adjustment = float3(0.0); float total = 0.0;
-        // All masks use the original hue, wrap across red, and have smooth edges.
+        // Original-pixel masks form a smooth partition across uneven band widths.
+        // Never reselect a pixel after moving its hue; overlapping edits cannot cascade.
         for (int i = 0; i < 8; ++i) {
             float delta = fract(hue - bands[i].w + 1.5) - 0.5;
             float previous = bands[(i + 7) % 8].w;
@@ -131,15 +134,40 @@ float4 logFalseColor(sample_t input) {
             adjustment += bands[i].xyz * weight; total += weight;
         }
         adjustment /= max(total, 0.00001);
-        float protection = smoothstep(0.0, 0.08, chroma);
-        hue = fract(hue + adjustment.x * protection / 6.0 + 1.0);
-        sat = adjustment.y < 0.0 ? sat * (1.0 + adjustment.y * protection) :
-              sat + (1.0 - sat) * adjustment.y * protection;
-        light = adjustment.z < 0.0 ? light * (1.0 + adjustment.z * protection * 0.6) :
-                light + (1.0 - light) * adjustment.z * protection * 0.6;
-        float c = (1.0 - abs(2.0 * light - 1.0)) * sat;
-        float3 wave = clamp(abs(fract(hue + float3(0.0, 2.0/3.0, 1.0/3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
-        return float4((wave - 0.5) * c + light, input.a);
+        // Preserve unrelated pixels exactly, including their existing headroom.
+        if (max(abs(adjustment.x), max(abs(adjustment.y), abs(adjustment.z))) < 0.000001) return input;
+        // Relative saturation protects near-gray highlights; absolute chroma also
+        // suppresses unstable shadow noise. Neither control invents color in gray.
+        float protection = smoothstep(0.015, 0.10, sat) * smoothstep(0.002, 0.03, chroma);
+        if (protection <= 0.0) return input;
+        float3 linear = decode709(rgb);
+        float level = luminance(linear);
+        float3 result = linear;
+        if (adjustment.x != 0.0) {
+            // +/-30 degrees at full strength. HSL is used for color selection and
+            // rotation only: its lightness is not a measure of visible brightness.
+            hue = fract(hue + adjustment.x * protection / 12.0 + 1.0);
+            float3 wave = clamp(abs(fract(hue + float3(0.0, 2.0/3.0, 1.0/3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+            float3 rotated = decode709((wave - 0.5) * chroma + light);
+            result = rotated * (level / max(luminance(rotated), 0.000001));
+        }
+        // Scale existing chroma instead of driving every selected color toward
+        // 100% HSL saturation. -100 is neutral; +100 doubles chroma before gamut fit.
+        float gain = adjustment.y < 0.0 ? 1.0 + adjustment.y * protection : exp2(adjustment.y * protection);
+        result = float3(level) + (result - float3(level)) * gain;
+        if (adjustment.z != 0.0) {
+            float lightGain = exp2(adjustment.z * protection);
+            // One stop down/up with a continuous highlight shoulder; keep texture
+            // and avoid the former 60% blend toward white, which washed out colors.
+            float target = lightGain <= 1.0 ? level * lightGain :
+                level + (1.0 - level) * (1.0 - exp(-level * (lightGain - 1.0) / max(1.0 - level, 0.000001)));
+            result *= target / max(level, 0.000001);
+            level = target;
+        }
+        // A shared chroma reduction keeps luminance and the RGB hue ray intact.
+        // Independent channel clipping would shift hue and flatten gradients.
+        result = fitChroma(result, level, 1.0);
+        return float4(encode709(result) * input.a, input.a);
     }
 
     // Only extended-output custom LUTs use this display rendering transform.
@@ -363,6 +391,27 @@ float4 logFalseColor(sample_t input) {
         float distance = length((p - 0.5) * 1.41421356);
         float edge = smoothstep(0.25, 1.0, distance);
         return float4(encode709(decode709(input.rgb) * exp2(-amount * 2.5 * edge)), input.a);
+    }
+    // 16mm-inspired texture, not a calibrated emulsion simulation. Overlapping
+    // particle fields break the sparse grid without large low-frequency blobs.
+    float4 filmGrain16(sample_t input, float amount, float size, float seedLow, float seedHigh, float4 bounds, destination dest) {
+        float2 p = dest.coord();
+        if (p.x < bounds.x || p.y < bounds.y || p.x >= bounds.x + bounds.z || p.y >= bounds.y + bounds.w || input.a <= 0.000001) return input;
+        uint seed = uint(seedLow) | (uint(seedHigh) << 16);
+        float2 q = p - bounds.xy;
+        float fine = particles(q, size * 0.70, seed, 17u);
+        float body = particles(float2(q.y, -q.x) + float2(13.7, 29.1), size, seed, 103u);
+        float clump = particles(q + float2(41.3, 7.9), size * 1.45, seed, 271u);
+        float noise = fine * 0.60 + body * 0.65 + clump * 0.20;
+        float3 rgb = clamp(input.rgb / input.a, 0.0, 1.0);
+        float l = luminance(rgb);
+        // Signed luminance variation has no deliberate positive/negative bias.
+        // Taper at the endpoints instead of lifting black or graying white.
+        float response = 1.0 - 0.35 * smoothstep(0.45, 0.95, l);
+        float delta = noise * amount * 0.55 * min(l, 1.0 - l) * response;
+        float target = clamp(l + delta, 0.0, 1.0);
+        float3 shifted = rgb + (target - l);
+        return float4(fitChroma(shifted, target, 1.0) * input.a, input.a);
     }
     float4 filmGrain(sample_t input, float amount, float size, float seedLow, float seedHigh, float4 bounds, destination dest) {
         float2 p = dest.coord();

@@ -54,6 +54,7 @@ actor ProjectStore {
             }
             for scene in movie.scenes {
                 try scene.lightAdjustments.validate()
+                try scene.filmEffectsTweaks?.validate()
                 guard scene.validTrim, scene.sequence >= 0 && scene.sequence < 1_000_000_000,
                       scene.source == "Originals/\(scene.id.uuidString).mov",
                       scene.width.isFinite && scene.height.isFinite && scene.width > 0 && scene.height > 0 && scene.bytes >= 0 && scene.bytes <= Int64.max / 4 else {
@@ -109,7 +110,7 @@ actor ProjectStore {
         if fm.fileExists(atPath: path.path) {
             // A damaged or newer manifest must never be overwritten by an empty catalog.
             let decoded = try JSONDecoder().decode(Catalog.self, from: Data(contentsOf: path))
-            guard decoded.schemaVersion == 1 else { throw HomeMovieError.message("This project uses a newer version of HOME MOVIE CLIPS.") }
+            guard decoded.schemaVersion == 1 else { throw HomeMovieError.message("This project uses a newer version of MOVIE MODE.") }
             try validate(decoded)
             catalog = decoded
         } else { try write(catalog) }
@@ -120,7 +121,7 @@ actor ProjectStore {
         }
         if migrated.movies != catalog.movies { try write(migrated) }
         var notices: [String] = []
-        if finishPermanentDeletions() > 0 { notices.append("Some deleted files could not be removed yet. HOME MOVIE CLIPS will retry when reopened.") }
+        if finishPermanentDeletions() > 0 { notices.append("Some deleted files could not be removed yet. MOVIE MODE will retry when reopened.") }
         let deleting = Set(catalog.pendingDeletionIDs ?? [])
         let journalFiles = try fm.contentsOfDirectory(at: root.appendingPathComponent("Journal"), includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" }
         var pending: [(URL, CaptureTicket)] = []
@@ -362,8 +363,9 @@ actor ProjectStore {
         try? fm.removeItem(at: url(ticket.journal))
     }
     func editScene(movieID: UUID, sceneID: UUID, start: CMTime, end: CMTime, adjustments: SceneAdjustments,
-                   filmEffects: FilmEffectsSettings? = nil) throws {
-        try requireIdle(); try adjustments.validate(); try filmEffects?.validate()
+                   filmEffects: FilmEffectsSettings? = nil, clipEffects: FilmEffectsTweaks? = nil,
+                   updateClipEffects: Bool = false) throws {
+        try requireIdle(); try adjustments.validate(); try filmEffects?.validate(); try clipEffects?.validate()
         let m = try index(movieID)
         guard catalog.movies[m].deletedAt == nil,
               let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID && $0.deletedAt == nil }) else {
@@ -373,6 +375,7 @@ actor ProjectStore {
         next.movies[m].scenes[c].trimStart = MediaTime(start)
         next.movies[m].scenes[c].trimEnd = MediaTime(end)
         next.movies[m].scenes[c].adjustments = adjustments.isActive ? adjustments : nil
+        if updateClipEffects { next.movies[m].scenes[c].filmEffectsTweaks = clipEffects?.normalized }
         guard next.movies[m].scenes[c].validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
         if let filmEffects { next.movies[m].filmEffects = filmEffects }
         guard next.movies[m] != catalog.movies[m] else { return }
@@ -389,9 +392,10 @@ actor ProjectStore {
     }
     /// Save current edits and insert an independently owned copy directly after this scene.
     func duplicateScene(movieID: UUID, sceneID: UUID, start: CMTime, end: CMTime,
-                        adjustments: SceneAdjustments, filmEffects: FilmEffectsSettings? = nil) throws {
+                        adjustments: SceneAdjustments, filmEffects: FilmEffectsSettings? = nil,
+                        clipEffects: FilmEffectsTweaks? = nil, updateClipEffects: Bool = false) throws {
         try requireIdle()
-        try adjustments.validate(); try filmEffects?.validate()
+        try adjustments.validate(); try filmEffects?.validate(); try clipEffects?.validate()
         let m = try index(movieID)
         guard catalog.movies[m].deletedAt == nil,
               let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID && $0.deletedAt == nil }),
@@ -401,6 +405,7 @@ actor ProjectStore {
         var edited = catalog.movies[m].scenes[c]
         edited.trimStart = MediaTime(start); edited.trimEnd = MediaTime(end)
         edited.adjustments = adjustments.isActive ? adjustments : nil
+        if updateClipEffects { edited.filmEffectsTweaks = clipEffects?.normalized }
         guard edited.validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
         try requireSpace(bytes: edited.bytes + 100_000_000)
         var copy = edited
@@ -636,7 +641,7 @@ actor ProjectStore {
     func endMaintenance() { maintenance = false }
     func catalogSnapshot() -> Catalog { catalog }
     func validateBackupCatalog(_ value: Catalog) throws {
-        guard value.schemaVersion == 1 else { throw HomeMovieError.message("This backup requires a newer version of HOME MOVIE CLIPS.") }
+        guard value.schemaVersion == 1 else { throw HomeMovieError.message("This backup requires a newer version of MOVIE MODE.") }
         try validate(value)
     }
     private func preserveCatalog() throws {

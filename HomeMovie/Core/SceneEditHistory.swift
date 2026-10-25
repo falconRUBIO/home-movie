@@ -5,6 +5,7 @@ struct SceneEditState: Equatable {
     var end: Double
     var adjustments: SceneAdjustments
     var effects: FilmEffectsSettings
+    var clipEffects: FilmEffectsTweaks? = nil
 }
 
 // Session-local history. A drag is one transaction, not hundreds of frames.
@@ -85,5 +86,14 @@ struct SceneAdjustmentClipboard {
         if selection.contains(.whiteBalance) { result.warmth = source.warmth; result.tint = source.tint }
         try result.validate()
         return result
+    }
+}
+
+// Choose the next clip in movie order, falling back to the previous clip.
+enum SceneEditorSelection {
+    static func afterDeleting(_ id: UUID, from ids: [UUID]) -> UUID? {
+        guard let index = ids.firstIndex(of: id) else { return ids.first }
+        if index + 1 < ids.count { return ids[index + 1] }
+        return index > 0 ? ids[index - 1] : nil
     }
 }

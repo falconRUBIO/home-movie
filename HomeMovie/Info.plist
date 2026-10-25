@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>HOME MOVIE CLIPS</string>
+	<string>MOVIE MODE</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>MOVIE MODE</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -32,9 +32,9 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>HOME MOVIE CLIPS uses your camera to record video scenes in your movies.</string>
+	<string>MOVIE MODE uses your camera to record video scenes in your movies.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>HOME MOVIE CLIPS uses your microphone to record sound with your video scenes.</string>
+	<string>MOVIE MODE uses your microphone to record sound with your video scenes.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save finished movies and optional safety copies of original scenes to Photos.</string>
 	<key>UIRequiredDeviceCapabilities</key>
@@ -47,7 +47,7 @@
 			<key>UTTypeIdentifier</key>
 			<string>com.falconcraft.homemovie.backup</string>
 			<key>UTTypeDescription</key>
-			<string>HOME MOVIE CLIPS Project Backup</string>
+			<string>MOVIE MODE Project Backup</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>com.apple.package</string>
@@ -65,7 +65,7 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>HOME MOVIE CLIPS Project Backup</string>
+			<string>MOVIE MODE Project Backup</string>
 			<key>LSHandlerRank</key>
 			<string>Owner</string>
 			<key>LSItemContentTypes</key>

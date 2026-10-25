@@ -7,14 +7,36 @@ import UIKit
     private var owner: UUID?
     private weak var currentScene: UIWindowScene?
     func apply(owner: UUID, format: MovieFormat?, scene: UIWindowScene) {
-        let next: UIInterfaceOrientationMask = format == .portrait ? .portrait : format == .landscape ? .landscape : .allButUpsideDown
+        let next = Self.orientationMask(format: format, current: scene.interfaceOrientation)
         guard self.owner != owner || mask != next else { return }
         self.owner = owner; mask = next; currentScene = scene
         scene.windows.forEach { window in
             window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
             window.rootViewController?.presentedViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
         }
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: next)) { _ in }
+        // Lock in place when the current side already matches. On unlock, retain
+        // the existing auto-rotation request so a take/page can resume following the phone.
+        if format == nil || !Self.contains(next, orientation: scene.interfaceOrientation) {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: next)) { _ in }
+        }
+    }
+    static func orientationMask(format: MovieFormat?, current: UIInterfaceOrientation) -> UIInterfaceOrientationMask {
+        guard let format else { return .allButUpsideDown }
+        if format == .portrait { return .portrait }
+        switch current {
+        case .landscapeLeft: return .landscapeLeft
+        case .landscapeRight: return .landscapeRight
+        default: return .landscape
+        }
+    }
+    static func contains(_ mask: UIInterfaceOrientationMask, orientation: UIInterfaceOrientation) -> Bool {
+        switch orientation {
+        case .portrait: return mask.contains(.portrait)
+        case .portraitUpsideDown: return mask.contains(.portraitUpsideDown)
+        case .landscapeLeft: return mask.contains(.landscapeLeft)
+        case .landscapeRight: return mask.contains(.landscapeRight)
+        default: return false
+        }
     }
     // A camera's sensor compensation angle describes video pixels, not the
     // orientation of the interface the user is currently looking at.
@@ -41,6 +63,7 @@ import UIKit
         guard self.owner == owner else { return }
         self.owner = nil; mask = .allButUpsideDown
         scene?.windows.forEach { $0.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations() }
+        // Real navigation dismissal resumes the app's ordinary auto-rotation.
         scene?.requestGeometryUpdate(.iOS(interfaceOrientations: .allButUpsideDown)) { _ in }
     }
 }
@@ -59,9 +82,10 @@ import UIKit
 }
 struct MovieOrientation: UIViewControllerRepresentable {
     let format: MovieFormat?
+    var onInterfaceChange: (UIInterfaceOrientation) -> Void = { _ in }
     func makeUIViewController(context: Context) -> MovieOrientationController { MovieOrientationController() }
     func updateUIViewController(_ controller: MovieOrientationController, context: Context) {
-        controller.format = format; controller.apply()
+        controller.format = format; controller.onInterfaceChange = onInterfaceChange; controller.apply()
     }
     static func dismantleUIViewController(_ controller: MovieOrientationController, coordinator: ()) {
         OrientationPolicy.shared.release(owner: controller.identity, scene: controller.view.window?.windowScene)
@@ -71,14 +95,28 @@ struct MovieOrientation: UIViewControllerRepresentable {
     let identity = UUID()
     var format: MovieFormat?
     private weak var lastScene: UIWindowScene?
-    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); apply() }
+    var onInterfaceChange: (UIInterfaceOrientation) -> Void = { _ in }
+    private var lastReportedOrientation = UIInterfaceOrientation.unknown
+    private var appeared = false
+    override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); apply() }
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.apply() }
+    }
+    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); appeared = true; apply() }
     override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
+        super.viewDidDisappear(animated); appeared = false
         OrientationPolicy.shared.release(owner: identity, scene: lastScene ?? view.window?.windowScene)
     }
     func apply() {
-        guard let scene = view.window?.windowScene, scene.activationState == .foregroundActive else { return }
+        guard appeared, let scene = view.window?.windowScene, scene.activationState == .foregroundActive else { return }
         lastScene = scene
+        let orientation = scene.interfaceOrientation
+        if orientation != .unknown, orientation != lastReportedOrientation {
+            lastReportedOrientation = orientation
+            let notify = onInterfaceChange
+            DispatchQueue.main.async { notify(orientation) }
+        }
         OrientationPolicy.shared.apply(owner: identity, format: format, scene: scene)
     }
 }

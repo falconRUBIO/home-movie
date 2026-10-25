@@ -40,11 +40,12 @@ actor ThumbnailService {
     private let cache = NSCache<NSString, UIImage>()
     init() { cache.countLimit = 48; cache.totalCostLimit = 32 * 1024 * 1024 }
     func image(scene: Scene, root: URL, movie: Movie? = nil) async throws -> UIImage {
-        let key = "\(root.path)-\(scene.id)-\(scene.trimStart.value)-\(scene.trimStart.scale)-\(movie?.revision ?? 0)-\(movie?.look?.id.uuidString ?? "standard")-\(scene.lightAdjustments.exposure)-\(scene.lightAdjustments.shadows)-\(scene.lightAdjustments.highlights)" as NSString
+        let resolvedEffects = scene.resolvedEffects(movie: movie?.exportEffects ?? .off)
+        let key = "\(resolvedEffects.cacheIdentity)-\(root.path)-\(scene.id)-\(scene.trimStart.value)-\(scene.trimStart.scale)-\(movie?.revision ?? 0)-\(movie?.look?.id.uuidString ?? "standard")-\(scene.lightAdjustments.exposure)-\(scene.lightAdjustments.shadows)-\(scene.lightAdjustments.highlights)" as NSString
         if let image = cache.object(forKey: key) { return image }
         let generator: AVAssetImageGenerator
         let time: CMTime
-        if (scene.profile ?? movie?.captureProfile ?? .standard) == .appleLog || scene.lightAdjustments.isActive || movie?.exportEffects.isActive == true {
+        if (scene.profile ?? movie?.captureProfile ?? .standard) == .appleLog || scene.lightAdjustments.isActive || resolvedEffects.isActive {
             var preview = movie ?? Movie(name: "Preview", format: scene.width > scene.height ? .landscape : .portrait)
             preview.scenes = [scene]
             preview.profile = scene.profile ?? movie?.captureProfile ?? .standard

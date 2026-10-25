@@ -1,6 +1,7 @@
 import XCTest
 import AVFoundation
 import CoreImage
+import UIKit
 @testable import HomeMovie
 
 final class SceneAdjustmentsTests: XCTestCase {
@@ -58,6 +59,77 @@ final class SceneAdjustmentsTests: XCTestCase {
         XCTAssertGreaterThan(a[1], original[1])
         let balanced = sample(try recipe.applyingBalance(to: color(0.8, 0.2, 0.2), logEncoded: true))
         for i in 0..<3 { XCTAssertEqual(balanced[i], original[i], accuracy: 0.002) }
+    }
+    private func hslLuminance(_ pixel: [Float]) -> Float {
+        let linear = pixel.prefix(3).map { value -> Float in
+            value < 0.081 ? value / 4.5 : pow((value + 0.099) / 1.099, 1 / 0.45)
+        }
+        return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+    }
+    func testHSLHueAndSaturationPreserveMeasuredLuminance() throws {
+        for input in [color(0.8, 0.2, 0.2), color(0.45, 0.3, 0.2), color(0.2, 0.4, 0.85)] {
+            let original = hslLuminance(sample(input))
+            for amount in [-1.0, -0.5, 0.5, 1.0] {
+                for path in [\HSLValues.hue, \.saturation] {
+                    var hsl = HSLAdjustments()
+                    for band in HSLBand.allCases { hsl[band][keyPath: path] = amount }
+                    let output = sample(try hsl.apply(to: input))
+                    XCTAssertEqual(hslLuminance(output), original, accuracy: 0.003)
+                    XCTAssertTrue(output.prefix(3).allSatisfy { $0.isFinite && (0...1).contains($0) })
+                }
+            }
+        }
+    }
+    func testHSLSaturationDoesNotInventStrongColorInMutedPixels() throws {
+        let input = color(0.52, 0.48, 0.48)
+        var hsl = HSLAdjustments(); hsl[.red].saturation = 1
+        let output = sample(try hsl.apply(to: input))
+        // The former HSL saturation-to-one response made this almost pure red.
+        XCTAssertLessThan(output[0] - output[1], 0.1)
+        XCTAssertGreaterThan(output[0] - output[1], 0.04)
+        let neutralHighlight = color(0.96, 0.955, 0.955)
+        let unchanged = sample(try hsl.apply(to: neutralHighlight))
+        for i in 0..<3 { XCTAssertEqual(unchanged[i], sample(neutralHighlight)[i], accuracy: 0.002) }
+    }
+    func testHSLLightnessRetainsColorAndOrdersBrightness() throws {
+        let input = color(0.7, 0.3, 0.2), original = sample(input)
+        var previous: Float = -1
+        for amount in [-1.0, -0.5, 0, 0.5, 1.0] {
+            var hsl = HSLAdjustments()
+            for band in HSLBand.allCases { hsl[band].lightness = amount }
+            let output = sample(try hsl.apply(to: input))
+            let level = hslLuminance(output)
+            XCTAssertGreaterThan(level, previous); previous = level
+            XCTAssertGreaterThan(output[0], output[1]); XCTAssertGreaterThan(output[1], output[2])
+            XCTAssertGreaterThan(colorfulness(output), colorfulness(original) * 0.75)
+        }
+    }
+    func testHSLAllBandBoundariesAreContinuousAndUnselectedPixelsStayExact() throws {
+        for band in HSLBand.allCases {
+            var hsl = HSLAdjustments(); hsl[band] = HSLValues(hue: 0.8, saturation: 0.7, lightness: -0.4)
+            var previous: [Float]?
+            for step in 0...720 {
+                let input = CIImage(color: CIColor(color: UIColor(hue: CGFloat(step) / 720,
+                    saturation: 0.6, brightness: 0.75, alpha: 1)))
+                    .cropped(to: CGRect(x: 0, y: 0, width: 1, height: 1))
+                let output = sample(try hsl.apply(to: input))
+                XCTAssertTrue(output.prefix(3).allSatisfy { $0.isFinite && (0...1).contains($0) })
+                if let previous { for i in 0..<3 { XCTAssertLessThan(abs(output[i] - previous[i]), 0.035) } }
+                previous = output
+            }
+        }
+        var hsl = HSLAdjustments(); hsl[.red].hue = 1
+        let extendedBlue = color(0.1, 0.1, 1.2)
+        XCTAssertEqual(sample(try hsl.apply(to: extendedBlue)), sample(extendedBlue))
+    }
+    func testHSLRespectsPremultipliedAlpha() throws {
+        var hsl = HSLAdjustments(); hsl[.red] = HSLValues(hue: 0.5, saturation: 0.4, lightness: 0.2)
+        let opaque = sample(try hsl.apply(to: color(0.8, 0.2, 0.2)))
+        let transparent = CIImage(color: CIColor(red: 0.8, green: 0.2, blue: 0.2, alpha: 0.5))
+            .cropped(to: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let output = sample(try hsl.apply(to: transparent))
+        for i in 0..<3 { XCTAssertEqual(output[i], opaque[i] * 0.5, accuracy: 0.003) }
+        XCTAssertEqual(output[3], 0.5, accuracy: 0.001)
     }
     func testNewControlsRoundTripAndOldEditsRetainTheirPipeline() throws {
         let recipe = SceneAdjustments(exposure: 0.3, contrast: 0.4, blackPoint: -0.2, saturation: 0.5, vibrance: -0.6)
