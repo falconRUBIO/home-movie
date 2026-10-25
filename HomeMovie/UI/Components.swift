@@ -126,10 +126,10 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     private var lookRenderer: LiveLookRenderer?
     private var samplePreview = false
     var onLiveLookStatus: ((LiveLookStatus) -> Void)?
-    func configureLiveLook(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false, logSource: Bool = false) {
+    func configureLiveLook(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false, logSource: Bool = false, falseColor: Bool = false) {
         samplePreview = passthrough
         if passthrough { rotationObservation = nil; rotationCoordinator = nil }
-        if lookView == nil, active, cube != nil || passthrough, let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) {
+        if lookView == nil, active, cube != nil || passthrough || falseColor, let device = MTLCreateSystemDefaultDevice(), let renderer = LiveLookRenderer(device: device) {
             let view = MTKView(frame: bounds, device: device)
             view.isUserInteractionEnabled = false; view.framebufferOnly = false
             view.colorPixelFormat = .bgra8Unorm; (view.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: CGColorSpace.itur_709)
@@ -143,11 +143,11 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         // The Metal display loop reads only the latest frame. Keep its layer visible at full
         // opacity so drawable acquisition never depends on a first-render alpha handshake.
         lookRenderer?.frames?.setListener(nil)
-        lookRenderer?.configure(frames: frames, cube: cube, active: active, passthrough: passthrough, logSource: logSource)
+        lookRenderer?.configure(frames: frames, cube: cube, active: active, passthrough: passthrough, logSource: logSource, falseColor: falseColor)
         lookRenderer?.front = showingFront
-        (lookView?.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: passthrough ? CGColorSpace.sRGB : CGColorSpace.itur_709)
+        (lookView?.layer as? CAMetalLayer)?.colorspace = CGColorSpace(name: falseColor || passthrough ? CGColorSpace.sRGB : CGColorSpace.itur_709)
         resizeLookView()
-        let enabled = active && (cube != nil || passthrough) && frames != nil
+        let enabled = active && (cube != nil || passthrough || falseColor) && frames != nil
         lookView?.alpha = 1; lookView?.isHidden = !enabled; lookView?.isPaused = !enabled
         if enabled, lookRenderer == nil { onLiveLookStatus?(.unavailable) }
     }
@@ -337,6 +337,7 @@ struct CameraPreview: UIViewRepresentable {
     var liveActive = false
     var samplePreview = false
     var displayPaused = false
+    var falseColor = false
     var onLiveLookStatus: ((LiveLookStatus) -> Void)? = nil
     var fixedFormat: MovieFormat? = nil
     let onFocus: (CGPoint, Bool) -> Bool
@@ -360,7 +361,7 @@ struct CameraPreview: UIViewRepresentable {
         view.fixedFormat = fixedFormat
         view.onLiveLookStatus = onLiveLookStatus
         view.setFront(front)
-        view.configureLiveLook(frames: liveFrames, cube: liveCube, active: (liveActive || samplePreview) && !displayPaused, passthrough: samplePreview, logSource: options?.profile == .appleLog)
+        view.configureLiveLook(frames: liveFrames, cube: liveCube, active: (liveActive || samplePreview || falseColor) && !displayPaused, passthrough: samplePreview, logSource: options?.profile == .appleLog, falseColor: falseColor)
         if let options { view.updateMetering(options) }
         view.updatePreviewRotation(fallback: angle)
         guard let connection = view.previewLayer.connection else { return }

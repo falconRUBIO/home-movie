@@ -67,6 +67,23 @@ float particles(float2 p, float size, uint seed, uint salt) {
 }
 
 extern "C" { namespace coreimage {
+// Preview-only exposure zones relative to 18% gray. These are not sensor clipping claims.
+float4 logFalseColor(sample_t input) {
+    float3 encoded = input.a > 0.0 ? input.rgb / input.a : float3(0.0);
+    float3 linear = float3(decodeAppleLog(encoded.r), decodeAppleLog(encoded.g), decodeAppleLog(encoded.b));
+    float y = dot(linear, float3(0.2627, 0.6780, 0.0593)); // BT.2020 linear luminance
+    float stops = log2(max(y, 0.00000001) / 0.18);
+    float gray = clamp(0.48 + stops * 0.075, 0.08, 0.92);
+    float3 color = float3(gray);
+    if (stops < -6.0) color = float3(0.55, 0.0, 0.85);
+    else if (stops < -4.0) color = float3(0.0, 0.25, 1.0);
+    else if (stops >= 4.0) color = float3(1.0, 0.08, 0.03);
+    else if (stops >= 3.0) color = float3(1.0, 0.65, 0.0);
+    else if (abs(stops) <= 0.15) color = float3(0.1, 0.8, 0.2);
+    else if (abs(stops - 1.0) <= 0.15) color = float3(1.0, 0.45, 0.65);
+    return float4(color * input.a, input.a);
+}
+
     float4 sceneTone(sample_t input, float4 p0, float4 p1, float4 p2, float4 p3, float4 p4, float4 p5, float4 p6, float4 p7, float4 p8, float4 p9, float4 p10, float4 p11, float4 p12, float4 p13, float4 p14, float4 p15, float count, float fade) {
         float4 points[16] = {p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15};
         float3 rgb = clamp(input.rgb, 0.0, 1.0);

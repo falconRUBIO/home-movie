@@ -147,6 +147,7 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
     private(set) var status = LiveLookStatus.inactive
     private var passthrough = false
     private var logSource = false
+    private(set) var falseColor = false
     var onStatusChanged: ((LiveLookStatus) -> Void)?
     private func report(_ status: LiveLookStatus) {
         guard self.status != status else { return }
@@ -154,25 +155,26 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         if status == .ready { ReliabilityDiagnostics.shared.record(.firstPreviewFrame) }
         onStatusChanged?(status)
     }
-    func configure(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false, logSource: Bool = false) {
-        let nextFrames = active && (cube != nil || passthrough) ? frames : nil
+    func configure(frames: LiveFrames?, cube: ColorCube?, active: Bool, passthrough: Bool = false, logSource: Bool = false, falseColor: Bool = false) {
+        let falseColor = falseColor && logSource
+        let nextFrames = active && (cube != nil || passthrough || falseColor) ? frames : nil
         let nextCube = active ? cube : nil
-        let managed = passthrough && !logSource && cube == nil
+        let managed = passthrough && !logSource && cube == nil && !falseColor
         if nextFrames != nil, contextPassthrough != managed {
             var options: [CIContextOption: Any] = [.cacheIntermediates: false, .name: "HomeMovie.LivePreview"]
             if !managed { options[.workingFormat] = CIFormat.RGBAh.rawValue; options[.workingColorSpace] = NSNull(); options[.outputColorSpace] = NSNull() }
             context = CIContext(mtlCommandQueue: queue, options: options)
             contextPassthrough = managed
         }
-        if self.frames !== nextFrames || self.passthrough != passthrough || self.cube?.rgba != nextCube?.rgba ||
+        if self.frames !== nextFrames || self.passthrough != passthrough || self.falseColor != falseColor || self.logSource != logSource || self.cube?.rgba != nextCube?.rgba ||
             self.cube?.dimension != nextCube?.dimension || self.cube?.minimum != nextCube?.minimum ||
             self.cube?.maximum != nextCube?.maximum {
             presentationID = UUID()
             report(nextFrames == nil ? .inactive : .preparing)
         }
-        self.frames = nextFrames; self.cube = nextCube; self.passthrough = passthrough; self.logSource = logSource
+        self.frames = nextFrames; self.cube = nextCube; self.passthrough = passthrough; self.logSource = logSource; self.falseColor = falseColor
     }
-    func canPresent(_ id: UUID) -> Bool { id == presentationID && frames != nil && (cube != nil || passthrough) }
+    func canPresent(_ id: UUID) -> Bool { id == presentationID && frames != nil && (cube != nil || passthrough || falseColor) }
     var angle: CGFloat = 90
     var front = false
     private var rendering = false
@@ -183,6 +185,13 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
     func previewImage(_ source: CVPixelBuffer, to canvas: CGSize, pip: LivePiPFrame?) throws -> CIImage {
+        if falseColor {
+            if let pip {
+                return try FalseColorPreview.image(background: source, presenter: pip.presenter, canvas: canvas,
+                    backgroundAngle: pip.backgroundAngle, presenterAngle: pip.presenterAngle, presentation: pip.presentation)
+            }
+            return try FalseColorPreview.image(source)
+        }
         let isLog = logSource || cube != nil || LogPiPColor.isLog(source)
         let image: CIImage
         if let pip {
@@ -210,7 +219,7 @@ enum LiveLookStatus: Equatable { case inactive, preparing, ready, unavailable }
         _ = try context.startTask(toRender: image, to: destination)
     }
     func draw(in view: MTKView) {
-        guard !rendering, cube != nil || passthrough, let source = frames?.snapshot(), let drawable = view.currentDrawable,
+        guard !rendering, cube != nil || passthrough || falseColor, let source = frames?.snapshot(), let drawable = view.currentDrawable,
               let command = queue.makeCommandBuffer() else { return }
         do {
             try encode(source.buffer, to: drawable.texture, command: command, composed: source.composed, sourceAngle: source.angle, pip: source.pip, sourceFront: source.front)

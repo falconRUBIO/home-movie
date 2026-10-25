@@ -51,6 +51,8 @@ struct CameraView: View {
     @State private var pinchBase: CGFloat?
     @State private var lastZoomAt = Date.distantPast
     @State private var liveCube: ColorCube?
+    @AppStorage(FalseColorPreview.preferenceKey) private var falseColorEnabled = false
+    private var showsFalseColor: Bool { falseColorEnabled && movie?.captureProfile == .appleLog }
     @AppStorage("originalLogPreview") private var liveOriginal = false
     @State private var liveLookStatus = LiveLookStatus.inactive
     @State private var manualZoomTargetShown = false
@@ -200,6 +202,15 @@ struct CameraView: View {
             cancelCountdown()
         }
         .onChange(of: dollyStartDelaySeconds) { _, _ in cancelCountdown() }
+        .onChange(of: falseColorEnabled) { _, enabled in
+            if enabled, movie?.captureProfile == .appleLog { liveLookStatus = .preparing }
+        }
+        .onChange(of: liveLookStatus) { _, status in
+            if showsFalseColor, status == .unavailable {
+                falseColorEnabled = false
+                camera.message = "False Color is unavailable. Your normal preview has been restored; recording is unaffected."
+            }
+        }
         .onChange(of: zoomSpeed) { _, _ in updateZoomSettings() }
         .onChange(of: stayOnLens) { _, _ in updateZoomSettings() }
         .onChange(of: camera.options?.minimum) { _, _ in if !zoomDragging { syncSmoothPosition() } }
@@ -331,6 +342,11 @@ struct CameraView: View {
                     }
                     Divider()
                 }
+                if movie.captureProfile == .appleLog {
+                    Toggle("False Color", isOn: $falseColorEnabled.withSelectionFeedback())
+                    Text("Exposure guide · Preview only")
+                    Divider()
+                }
                 Button("Movie Settings", systemImage: "film") { showingMovieSettings = true }
                     .disabled(camera.busy)
                 Button("Dolly Settings", systemImage: "slider.horizontal.3") { showingDollySettings = true }
@@ -389,7 +405,22 @@ struct CameraView: View {
     }
     private func captureIndicators(movie: Movie) -> some View {
         VStack(spacing: 6) {
-            if movie.captureProfile == .appleLog {
+            if showsFalseColor {
+                VStack(spacing: 3) {
+                    Text(liveLookStatus == .ready ? "False Color" : liveLookStatus == .unavailable ? "False Color unavailable" : "Loading False Color…")
+                        .font(.caption2.weight(.semibold))
+                    if liveLookStatus == .ready {
+                        HStack(spacing: 8) {
+                            Label("Low", systemImage: "circle.fill").foregroundStyle(Color(red: 0.35, green: 0.6, blue: 1))
+                            Label("Gray", systemImage: "circle.fill").foregroundStyle(.green)
+                            Label("High", systemImage: "circle.fill").foregroundStyle(.orange)
+                        }.font(.system(size: 10, weight: .medium))
+                    }
+                }.padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 6))
+                    .allowsHitTesting(false)
+                    .accessibilityLabel("False Color exposure guide. Blue: low exposure. Green: middle gray. Orange and red: high exposure. Preview only.")
+            } else if movie.captureProfile == .appleLog {
                 let wantsLook = !liveOriginal && camera.state.showsLiveLook
                 LogLookBadge(lookName: wantsLook ? (liveLookStatus == .ready ? movie.lookName : liveLookStatus == .unavailable ? "Preview unavailable" : "Loading look…") : "Original")
             }
@@ -965,6 +996,7 @@ struct CameraView: View {
                 liveActive: movie?.captureProfile == .appleLog && camera.state.showsLiveLook,
                 samplePreview: camera.options?.samplePreview == true,
                 displayPaused: showingPiPLayout || camera.options?.dualCameraPrepared == true,
+                falseColor: showsFalseColor,
                 onLiveLookStatus: { status in
                     guard camera.options?.dualCameraPrepared != true else { return }
                     Task { @MainActor in liveLookStatus = status }
@@ -994,7 +1026,7 @@ struct CameraView: View {
                     frontFrames: camera.service.pipPresenterFrames, layout: camera.pipLayout,
                     format: pipCanvasFormat,
                     liveFrames: camera.service.liveFrames, paused: showingPiPLayout,
-                    sourceFront: camera.options?.isFront == true,
+                    sourceFront: camera.options?.isFront == true, falseColor: showsFalseColor,
                     profile: movie?.captureProfile ?? .standard, cube: liveOriginal ? nil : liveCube,
                     onStatus: { status in if liveLookStatus != status { liveLookStatus = status } })
                     .allowsHitTesting(false)

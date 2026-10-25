@@ -391,6 +391,7 @@ struct MovieSettingsView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     let movie: Movie
+    @AppStorage(FalseColorPreview.preferenceKey) private var falseColorEnabled = false
     @State private var originalLogPreview = UserDefaults.standard.bool(forKey: "originalLogPreview")
     @State private var profile: CaptureProfile
     @State private var selectedLook: LUTReference?
@@ -428,8 +429,9 @@ struct MovieSettingsView: View {
                             Text("Cinema").tag(false)
                             Text("Log").tag(true)
                         }.pickerStyle(.segmented)
+                        Toggle("False Color", isOn: $falseColorEnabled.withSelectionFeedback())
                     } header: { Text("Live Preview") } footer: {
-                        Text("Cinema shows your selected look. Log shows the flat image. Recordings stay in Apple Log; playback and export use your selected look.")
+                        Text("Cinema shows your selected look. Log shows the flat image. False Color temporarily replaces either preview with an exposure map. Blue/purple mark low exposure; green marks middle gray; orange/red mark high exposure. These are exposure guides, not guaranteed clipping limits. Recordings stay in Apple Log.")
                     }
                     Section {
                         Menu {
