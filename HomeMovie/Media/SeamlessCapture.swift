@@ -1,6 +1,16 @@
 import AVFoundation
 import CoreImage
 
+// Readiness expires when a camera stops delivering. A frame seen once during
+// setup must not permit a flip to a frozen stream later in the same session.
+enum CameraFrameFreshness {
+    static func isFresh(_ timestamp: CMTime, at now: CMTime) -> Bool {
+        guard timestamp.isNumeric, now.isNumeric else { return false }
+        let age = CMTimeSubtract(now, timestamp).seconds
+        return age.isFinite && age >= -0.1 && age <= 0.5
+    }
+}
+
 // A take has one writer, one clock and one microphone regardless of the selected camera.
 // Each writer is confined to one serial queue; the capture pipeline uses a dedicated writing queue.
 final class ContinuousTakeWriter {
@@ -221,6 +231,7 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private var lastVideoTime = CMTime.invalid
     private var lastPresentation = PiPPresentation()
     private var lastPresenterTime = CMTime.invalid
+    private var lastRearTime = CMTime.invalid
     private var presenterDisabled = false
     private var pressureObservations: [NSKeyValueObservation] = []
     private var thermalObserver: NSObjectProtocol?
@@ -240,7 +251,12 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private var backFrame: CVPixelBuffer?
     private(set) var front = true
     var activeInput: AVCaptureDeviceInput { front ? frontInput : backInput }
-    var readyToFlip: Bool { frontReady && backReady && !presenterDisabled }
+    var readyToFlip: Bool {
+        let now = CMClockGetTime(session.synchronizationClock ?? CMClockGetHostTimeClock())
+        return frontReady && backReady && !presenterDisabled
+            && CameraFrameFreshness.isFresh(lastPresenterTime, at: now)
+            && CameraFrameFreshness.isFresh(lastRearTime, at: now)
+    }
     private var take: ContinuousTakePipeline?
     private var ticket: CaptureTicket?
     private var announcedStart = false
@@ -419,6 +435,9 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         timeline.setLayout(layout); preferredCanvas = canvasFormat
     }
     private var previewAngle: CGFloat {
+        // The preview and saved pixels use the same per-camera orientation for
+        // the entire take, even if the rotation coordinator changes mid-take.
+        if take != nil { return front ? recordedPresenterAngle : recordedRearAngle }
         let observed = (front ? frontRotation : backRotation)?.videoRotationAngleForHorizonLevelCapture ?? 90
         return (MovieFormat.captureFormat(angle: observed) ?? .portrait).recordingAngle(observed: observed)
     }
@@ -476,7 +495,10 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         if output === frontOutput {
             frontReady = true; frontFrame = image; matcher.push(image, at: time); lastPresenterTime = time
             presenterFrames.push(image, angle: frontRotation?.videoRotationAngleForHorizonLevelCapture)
-        } else { backReady = true; backFrame = image; rearFrames.push(image, angle: backRotation?.videoRotationAngleForHorizonLevelCapture) }
+        } else {
+            backReady = true; backFrame = image; lastRearTime = time
+            rearFrames.push(image, angle: backRotation?.videoRotationAngleForHorizonLevelCapture)
+        }
         if !wasReady && readyToFlip {
             if pendingPiPEnable { setPiPEnabled(true) }
             onReady?()

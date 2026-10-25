@@ -215,6 +215,7 @@ float4 logFalseColor(sample_t input) {
     }
     float4 sceneLight(sample_t input, sample_t local, float exposure, float shadows, float highlights, float warmth, float tint, float brightness, float brilliance, float pushPull,
                       float contrast, float blackPoint, float whitePoint, float saturation, float vibrance, float pipelineVersion) {
+        if (input.a <= 0.000001) return input;
         float3 rgb = clamp(input.rgb, 0.0, 1.0);
         // Display-only entry points can still use the new exposure response.
         // Production version-2 recipes apply Exposure in sceneBalance and pass zero here.
@@ -292,7 +293,13 @@ float4 logFalseColor(sample_t input) {
         if (whitePoint != 0.0) { target = min(1.0, target + whitePoint * 0.22 * pow(target, 3.0)); }
         target = clamp(target, 0.0, 1.0);
         float3 result;
-        if (target >= l) {
+        if (pipelineVersion >= 3.0 && l > 0.000001) {
+            // Raise density with one RGB gain, preserving channel ratios until
+            // the gamut boundary. Only then reduce chroma at constant luma.
+            // Mixing toward white at every lift unnecessarily washed out skin
+            // and colored surfaces, even when there was ample channel headroom.
+            result = fitChroma(rgb * (target / l), target, 1.0);
+        } else if (target >= l) {
             result = rgb + (1.0 - rgb) * ((target - l) / max(1.0 - l, 0.000000000001));
         } else {
             result = rgb * (target / max(l, 0.000000000001));

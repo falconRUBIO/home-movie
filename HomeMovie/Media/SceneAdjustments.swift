@@ -4,7 +4,7 @@ import CoreImage
 // Reversible per-scene nodes: source balance, look, then display finishing.
 struct SceneAdjustments: Codable, Equatable, Sendable {
     static let neutral = SceneAdjustments()
-    static let engineVersion = 9
+    static let engineVersion = 10
     var hsl = HSLAdjustments()
     var curve = LightCurve.neutral
     var fade = 0.0
@@ -22,7 +22,8 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
     var saturation = 0.0
     var vibrance = 0.0
     // 1 preserves historical all-after-LUT edits; 2 balances before the look.
-    var pipelineVersion = 2
+    // 3 also preserves color density when raising display tones.
+    var pipelineVersion = 3
     private enum CodingKeys: String, CodingKey { case hsl, curve, fade, exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance, pipelineVersion }
     private var values: [Double] { [exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull, contrast, blackPoint, whitePoint, saturation, vibrance] }
     var isActive: Bool { hsl.isActive || curve.isActive || fade != 0 || values.contains { $0 != 0 } }
@@ -32,7 +33,7 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
         guard fade.isFinite, (0...1).contains(fade) else {
             throw HomeMovieError.message("This scene’s fade adjustment is invalid.")
         }
-        guard (1...2).contains(pipelineVersion), values.allSatisfy({ $0.isFinite && (-1...1).contains($0) }) else {
+        guard (1...3).contains(pipelineVersion), values.allSatisfy({ $0.isFinite && (-1...1).contains($0) }) else {
             throw HomeMovieError.message("This scene’s light adjustments are invalid.")
         }
     }
@@ -40,7 +41,7 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
     // input encoding. Never feed linear RGB straight into an Apple Log LUT.
     func applyingBalance(to source: CIImage, logEncoded: Bool) throws -> CIImage {
         try validate()
-        guard pipelineVersion == 2, exposure != 0 || warmth != 0 || tint != 0 else { return source }
+        guard pipelineVersion >= 2, exposure != 0 || warmth != 0 || tint != 0 else { return source }
         guard let kernel = try Self.balanceKernel.get(), let output = kernel.apply(extent: source.extent,
             arguments: [source, exposure, warmth, tint, logEncoded ? 1.0 : 0.0]) else {
             throw HomeMovieError.message("This scene’s source balance could not be rendered.")
@@ -49,7 +50,7 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
     }
     func applyingFinishing(to source: CIImage) throws -> CIImage {
         var finishing = self
-        if pipelineVersion == 2 { finishing.exposure = 0; finishing.warmth = 0; finishing.tint = 0 }
+        if pipelineVersion >= 2 { finishing.exposure = 0; finishing.warmth = 0; finishing.tint = 0 }
         finishing.hsl = HSLAdjustments()
         return try hsl.apply(to: finishing.apply(to: source))
     }
@@ -57,7 +58,7 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
         try validate()
         guard isActive else { return source }
         let radius = max(1, min(source.extent.width, source.extent.height) / 1080 * 12)
-        let local = pipelineVersion == 2 && brilliance != 0 ? source.clampedToExtent()
+        let local = pipelineVersion >= 2 && brilliance != 0 ? source.clampedToExtent()
             .applyingFilter("CIGaussianBlur", parameters: ["inputRadius": radius]).cropped(to: source.extent) : source
         guard let kernel = try Self.kernel.get(), let output = kernel.apply(extent: source.extent,
             arguments: [source, local, exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull,
@@ -101,7 +102,7 @@ extension SceneAdjustments {
         saturation = try values.decodeIfPresent(Double.self, forKey: .saturation) ?? 0
         vibrance = try values.decodeIfPresent(Double.self, forKey: .vibrance) ?? 0
         pipelineVersion = try values.decodeIfPresent(Int.self, forKey: .pipelineVersion)
-            ?? (isActive ? 1 : 2)
+            ?? (isActive ? 1 : 3)
         try validate()
     }
 }

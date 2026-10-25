@@ -21,6 +21,9 @@ enum GradedMovieExporter {
     static func export(_ bundle: CompositionBundle, to url: URL,
                        progress: @escaping @Sendable (Double) async -> Void) async throws {
         try Task.checkCancellation()
+        guard bundle.duration.isNumeric, bundle.duration.seconds.isFinite, bundle.duration.seconds > 0 else {
+            throw HomeMovieError.message("The movie has no valid playable duration.")
+        }
         let reader = try AVAssetReader(asset: bundle.asset)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         writer.shouldOptimizeForNetworkUse = true
@@ -105,12 +108,30 @@ enum GradedMovieExporter {
                 throw writer.error ?? reader.error ?? HomeMovieError.message("Movie export was interrupted.")
             }
             if writer.status == .cancelled || reader.status == .cancelled { throw CancellationError() }
+            guard writer.status == .writing else {
+                throw writer.error ?? HomeMovieError.message("The movie encoder stopped before export finished.")
+            }
             guard input.isReadyForMoreMediaData else { try await Task.sleep(for: .milliseconds(2)); continue }
-            guard let sample = output.copyNextSampleBuffer() else { input.markAsFinished(); return }
-            guard input.append(sample) else { throw writer.error ?? HomeMovieError.message("Could not encode movie media.") }
+            // No sample or autoreleased decoder/encoder temporaries survive a
+            // frame, including across the async progress callback. This matters
+            // for long Main10 exports with multiple optical effects enabled.
+            let timestamp: CMTime? = try autoreleasepool {
+                guard let sample = output.copyNextSampleBuffer() else {
+                    if reader.status == .failed {
+                        throw reader.error ?? HomeMovieError.message("Could not read movie media.")
+                    }
+                    if reader.status == .cancelled { throw CancellationError() }
+                    return nil
+                }
+                guard input.append(sample) else {
+                    throw writer.error ?? HomeMovieError.message("Could not encode movie media.")
+                }
+                return CMSampleBufferGetPresentationTimeStamp(sample)
+            }
+            guard let timestamp else { input.markAsFinished(); return }
             frames += 1
-            if frames % 6 == 0, let progress {
-                await progress(min(0.99, CMSampleBufferGetPresentationTimeStamp(sample).seconds / duration.seconds))
+            if frames % 6 == 0, let progress, timestamp.isNumeric, timestamp.seconds.isFinite {
+                await progress(max(0, min(0.99, timestamp.seconds / duration.seconds)))
             }
         }
     }

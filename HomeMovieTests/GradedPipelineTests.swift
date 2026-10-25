@@ -120,6 +120,28 @@ final class GradedPipelineTests: XCTestCase {
         let preview = try await row(composition, composition: video), exported = try await row(AVURLAsset(url: destination), composition: nil)
         XCTAssertGreaterThan(Set(exported).count, 256)
         for x in [128, 512, 896] { XCTAssertEqual(Double(preview[x]), Double(exported[x]), accuracy: 8) }
+        // Exercise the real reader/compositor/Main10 writer with the combination
+        // previously reported to crash, alongside light and overlapping HSL.
+        var effects = FilmEffectsSettings.off
+        effects.grainEnabled = true; effects.grainTexture = .coarse16; effects.grainAmount = 0.8
+        effects.halationEnabled = true; effects.halationAmount = 0.8
+        effects.bloomEnabled = true; effects.bloomAmount = 0.8
+        var adjustments = SceneAdjustments(shadows: 0.3, highlights: -0.4, brightness: 0.2)
+        adjustments.hsl[.orange] = HSLValues(hue: 0.3, saturation: 0.2, lightness: -0.1)
+        adjustments.hsl[.yellow] = HSLValues(hue: -0.2, saturation: 0.3, lightness: 0.1)
+        video.instructions = [ColorInstruction(range: CMTimeRange(start: .zero, duration: duration),
+            trackID: track.trackID, transform: .identity, cube: nil, filmEffects: effects, adjustments: adjustments)]
+        let effectsPreview = try await row(composition, composition: video)
+        for attempt in 0..<2 {
+            let effectsURL = root.appendingPathComponent("effects-\(attempt).mp4")
+            try await GradedMovieExporter.export(bundle, to: effectsURL) { value in
+                XCTAssertTrue(value.isFinite && (0...1).contains(value))
+            }
+            let effectsOutput = try await row(AVURLAsset(url: effectsURL), composition: nil)
+            for x in [128, 512, 896] {
+                XCTAssertEqual(Double(effectsPreview[x]), Double(effectsOutput[x]), accuracy: 12)
+            }
+        }
         let balance = try await WhiteBalanceSampler.sample(url: source, time: CMTime(value: 3, timescale: 30), point: CGPoint(x: 0.5, y: 0.5), canvas: size, logEncoded: false)
         XCTAssertEqual(balance.warmth, 0, accuracy: 0.02); XCTAssertEqual(balance.tint, 0, accuracy: 0.02)
         let cancelledURL = root.appendingPathComponent("cancelled.mp4")
@@ -127,6 +149,12 @@ final class GradedPipelineTests: XCTestCase {
         cancelled.cancel()
         do { try await cancelled.value; XCTFail("Cancelled export must not succeed") } catch is CancellationError { }
         XCTAssertFalse(FileManager.default.fileExists(atPath: cancelledURL.path))
+        let invalidURL = root.appendingPathComponent("invalid.mp4")
+        let invalid = CompositionBundle(asset: composition, videoComposition: video, audioMix: nil, duration: .zero)
+        do {
+            try await GradedMovieExporter.export(invalid, to: invalidURL) { _ in }
+            XCTFail("A zero-duration export must fail before opening a writer")
+        } catch { XCTAssertFalse(FileManager.default.fileExists(atPath: invalidURL.path)) }
         let exportedAsset = AVURLAsset(url: destination)
         let exportedTracks = try await exportedAsset.loadTracks(withMediaType: .video)
         let descriptions = try await XCTUnwrap(exportedTracks.first).load(.formatDescriptions)

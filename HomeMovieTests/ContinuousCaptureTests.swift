@@ -4,6 +4,15 @@ import CoreImage
 @testable import HomeMovie
 
 final class ContinuousCaptureTests: XCTestCase {
+    func testFlipReadinessExpiresAndRejectsInvalidCameraTimes() {
+        let now = CMTime(seconds: 10, preferredTimescale: 600)
+        XCTAssertTrue(CameraFrameFreshness.isFresh(CMTime(seconds: 9.97, preferredTimescale: 600), at: now))
+        XCTAssertTrue(CameraFrameFreshness.isFresh(CMTime(seconds: 9.5, preferredTimescale: 600), at: now))
+        XCTAssertFalse(CameraFrameFreshness.isFresh(CMTime(seconds: 9.4, preferredTimescale: 600), at: now))
+        XCTAssertFalse(CameraFrameFreshness.isFresh(CMTime(seconds: 11, preferredTimescale: 600), at: now))
+        XCTAssertFalse(CameraFrameFreshness.isFresh(.invalid, at: now))
+        XCTAssertFalse(CameraFrameFreshness.isFresh(now, at: .indefinite))
+    }
     func testLogFlipKeepsOutgoingFrameUntilFreshNewCameraFramesArrive() async throws {
         let frames = LiveFrames(), front = try frame(red: false), rear = try frame(red: true)
         frames.configureRawPreview(angle: 90, front: true)

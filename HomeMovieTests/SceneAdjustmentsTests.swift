@@ -146,8 +146,52 @@ final class SceneAdjustmentsTests: XCTestCase {
                 XCTAssertThrowsError(try bad.validate())
             }
         }
-        var badVersion = recipe; badVersion.pipelineVersion = 3
+        var badVersion = recipe; badVersion.pipelineVersion = 4
         XCTAssertThrowsError(try badVersion.validate())
+    }
+    func testDensityPreservingLiftAndLegacyRendition() throws {
+        let input = color(0.45, 0.30, 0.20)
+        let original = sample(input)
+        let modern = SceneAdjustments(brightness: 0.35)
+        XCTAssertEqual(modern.pipelineVersion, 3)
+        let lifted = sample(try modern.apply(to: input))
+        XCTAssertGreaterThan(lifted[0], original[0])
+        XCTAssertEqual(lifted[0] / lifted[1], original[0] / original[1], accuracy: 0.002)
+        XCTAssertEqual(lifted[1] / lifted[2], original[1] / original[2], accuracy: 0.002)
+        var legacy = modern; legacy.pipelineVersion = 2
+        let historical = sample(try legacy.apply(to: input))
+        XCTAssertLessThan(colorfulness(historical), colorfulness(lifted))
+        let l = original[0] * 0.2126 + original[1] * 0.7152 + original[2] * 0.0722
+        let target = l + 0.35 * 0.28 * pow(sin(l * .pi), 2)
+        for c in 0..<3 {
+            XCTAssertEqual(historical[c], original[c] + (1 - original[c]) * (target - l) / (1 - l), accuracy: 0.002)
+        }
+        XCTAssertEqual(try JSONDecoder().decode(SceneAdjustments.self, from: JSONEncoder().encode(legacy)), legacy)
+    }
+    func testLiftWithCombinedHSLKeepsSkinAndSaturatedColorsFiniteInGamut() throws {
+        let inputs = [color(0.62, 0.43, 0.32), color(0.23, 0.15, 0.11),
+                      color(0.96, 0.95, 0.94), color(0.02, 0.021, 0.019),
+                      color(0.95, 0.05, 0.02), color(0.02, 0.08, 0.95)]
+        for amount in [-1.0, -0.5, 0.5, 1.0] {
+            var recipe = SceneAdjustments(shadows: amount, highlights: -amount,
+                brightness: amount, contrast: amount, blackPoint: -amount)
+            for band in HSLBand.allCases {
+                recipe.hsl[band] = HSLValues(hue: amount, saturation: amount, lightness: -amount)
+            }
+            for input in inputs {
+                let output = sample(try recipe.applyingFinishing(to: input))
+                XCTAssertTrue(output.allSatisfy { $0.isFinite && (-0.001...1.001).contains($0) })
+            }
+        }
+        // Adjacent warm bands must combine once using the ORIGINAL hue mask.
+        // Identical orange/yellow edits equal the same uniform edit in between.
+        var adjacent = HSLAdjustments(), uniform = HSLAdjustments()
+        let edit = HSLValues(hue: 0.4, saturation: 0.3, lightness: -0.2)
+        adjacent[.orange] = edit; adjacent[.yellow] = edit
+        for band in HSLBand.allCases { uniform[band] = edit }
+        let between = color(0.8, 0.65, 0.2) // 45 degrees
+        let a = sample(try adjacent.apply(to: between)), b = sample(try uniform.apply(to: between))
+        for c in 0..<4 { XCTAssertEqual(a[c], b[c], accuracy: 0.002) }
     }
     func testContrastIsSymmetricAndBlackPointIsAnIndependentToe() throws {
         let strong = SceneAdjustments(contrast: 1), soft = SceneAdjustments(contrast: -1)

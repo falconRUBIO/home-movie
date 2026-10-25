@@ -1171,10 +1171,18 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             previewHandoff = publishPreview ? nil : pending
             if publishPreview { previewHandoffFormat = nil }
         }
+        let observed = coordinator?.videoRotationAngleForHorizonLevelCapture ?? continuousAngle
+        let sourceAngle: CGFloat
+        if continuousTake != nil {
+            sourceAngle = continuousSourceAngles[isFront]
+                ?? (MovieFormat.captureFormat(angle: observed) ?? .portrait).recordingAngle(observed: observed)
+            continuousSourceAngles[isFront] = sourceAngle
+        } else { sourceAngle = observed }
         if publishPreview {
             previewHandoffFormat = nil
-            // Angle and mirroring travel with this frame, independent of take rotation.
-            liveFrames.push(image, angle: coordinator?.videoRotationAngleForHorizonLevelCapture ?? 90, front: isFront)
+            // Keep preview rotation consistent with the saved take. Mirroring
+            // remains preview-only and travels with the selected camera frame.
+            liveFrames.push(image, angle: sourceAngle, front: isFront)
             if !previewHandoffAnnounced, previewHandoff == nil, let options = try? options() {
                 previewHandoffAnnounced = true
                 onEvent?(.cameraChanged(options))
@@ -1182,11 +1190,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
         guard let take = continuousTake, let ticket, !take.finishing else { return }
         // Lock each camera's source rotation independently from the writer canvas.
-        let observed = coordinator?.videoRotationAngleForHorizonLevelCapture ?? continuousAngle
-        let angle = continuousSourceAngles[isFront]
-            ?? (MovieFormat.captureFormat(angle: observed) ?? .portrait).recordingAngle(observed: observed)
-        continuousSourceAngles[isFront] = angle
-        take.appendVideo(image, presenter: nil, presentation: nil, at: time, angle: angle, presenterAngle: angle) { [weak self, weak take] accepted, error in
+        take.appendVideo(image, presenter: nil, presentation: nil, at: time, angle: sourceAngle, presenterAngle: sourceAngle) { [weak self, weak take] accepted, error in
             guard let self, let take, self.continuousTake === take else { return }
             if accepted, !self.continuousStarted {
                 self.continuousStarted = true; self.onEvent?(.started(ticket.sceneID))

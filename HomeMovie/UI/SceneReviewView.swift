@@ -253,6 +253,8 @@ private struct SceneReviewSession: View {
     @State private var advancedLight = false
     @State private var pickingWhiteBalance = false
     @State private var samplingWhiteBalance = false
+    @State private var whiteBalanceTask: Task<Void, Never>?
+    @State private var whiteBalanceRequest = UUID()
     @State private var savedScene: Scene
     @State private var effects = FilmEffectsSettings.off
     @State private var originalEffects = FilmEffectsSettings.off
@@ -273,15 +275,20 @@ private struct SceneReviewSession: View {
         self.movieID = movieID; self.scene = scene
         _start = State(initialValue: scene.trimStart.seconds)
         _end = State(initialValue: scene.trimEnd.seconds)
-        _adjustments = State(initialValue: scene.lightAdjustments)
-        _savedScene = State(initialValue: scene)
+        // Unedited clips adopt the current rendition without marking the editor
+        // dirty. Existing creative recipes retain their saved processing version.
+        var initial = scene
+        if !initial.lightAdjustments.isActive { initial.lightAdjustments = .neutral }
+        _adjustments = State(initialValue: initial.lightAdjustments)
+        _savedScene = State(initialValue: initial)
         _clipEffects = State(initialValue: scene.filmEffectsTweaks?.normalized)
         _editingClipFX = State(initialValue: scene.filmEffectsTweaks?.normalized != nil)
         _advancedLight = State(initialValue: scene.lightAdjustments.pushPull != 0 || scene.lightAdjustments.fade != 0 || scene.lightAdjustments.curve.isActive)
     }
     private var movie: Movie? { app.movie(movieID) }
     private var reviewAspect: CGFloat { movie?.format.aspect ?? (scene.width > scene.height ? 16 / 9 : 9 / 16) }
-    private var busy: Bool { samplingWhiteBalance || saving || export.running || savingPhotos || waitingForExport }
+    private var committing: Bool { saving || export.running || savingPhotos || waitingForExport }
+    private var busy: Bool { samplingWhiteBalance || committing }
     private var hasUnsavedEdits: Bool {
         editedScene.trimStart != savedScene.trimStart || editedScene.trimEnd != savedScene.trimEnd
             || adjustments != savedScene.lightAdjustments || effects != originalEffects
@@ -379,9 +386,10 @@ private struct SceneReviewSession: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
+                        cancelWhiteBalanceSample()
                         if hasUnsavedEdits { preview.player?.pause(); confirmDiscard = true }
                         else { preview.stop(); dismiss() }
-                    }.disabled(busy)
+                    }.disabled(committing)
                 }
                 ToolbarItemGroup(placement: .topBarLeading) {
                     Button("Undo", systemImage: "arrow.uturn.backward", action: undoEdit)
@@ -408,7 +416,7 @@ private struct SceneReviewSession: View {
                         .accessibilityLabel("Scene actions").disabled(busy)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { saveEditsAndClose() }.disabled(busy)
+                    Button("Done") { saveEditsAndClose() }.disabled(committing)
                 }
             }
             .fullScreenCover(isPresented: $showingFullscreenPreview) {
@@ -480,6 +488,7 @@ private struct SceneReviewSession: View {
         }
         .interactiveDismissDisabled(busy || hasUnsavedEdits)
         .onDisappear {
+            cancelWhiteBalanceSample()
             if !showingFullscreenPreview { preview.stop(); export.cancel() }
         }
     }
@@ -738,18 +747,29 @@ private struct SceneReviewSession: View {
         pickingWhiteBalance = false; samplingWhiteBalance = true; error = nil
         let time = preview.player?.currentTime() ?? scene.trimStart.cmTime
         let url = app.store.root.appendingPathComponent(scene.source)
-        Task {
-            defer { samplingWhiteBalance = false }
+        let request = UUID(); whiteBalanceRequest = request
+        whiteBalanceTask = Task {
+            defer {
+                if whiteBalanceRequest == request { samplingWhiteBalance = false; whiteBalanceTask = nil }
+            }
             do {
                 let result = try await WhiteBalanceSampler.sample(url: url, time: time, point: point,
                     canvas: movie.format.canvas, logEncoded: (scene.profile ?? movie.captureProfile) == .appleLog)
+                try Task.checkCancellation()
+                guard whiteBalanceRequest == request else { return }
                 editingChanged(true)
                 adjustments.warmth = result.warmth; adjustments.tint = result.tint
                 editingChanged(false)
                 UISelectionFeedbackGenerator().selectionChanged()
                 notice = "White balance set for this scene."
-            } catch { self.error = error.localizedDescription }
+            } catch {
+                if !Task.isCancelled, whiteBalanceRequest == request { self.error = error.localizedDescription }
+            }
         }
+    }
+    private func cancelWhiteBalanceSample() {
+        whiteBalanceRequest = UUID(); whiteBalanceTask?.cancel(); whiteBalanceTask = nil
+        samplingWhiteBalance = false; pickingWhiteBalance = false
     }
     private func invalidateExport() { export.invalidate(); notice = nil; error = nil }
     private func persistEdits() async throws {
@@ -789,7 +809,8 @@ private struct SceneReviewSession: View {
         }
     }
     private func saveEditsAndClose() {
-        guard !busy else { return }
+        guard !committing else { return }
+        cancelWhiteBalanceSample()
         // UIKit can cancel a slider gesture without delivering its end callback.
         // Finish the transaction using the latest values; preview readiness is
         // unrelated to persisting edits and must never trap the user here.
