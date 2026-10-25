@@ -11,9 +11,9 @@ struct FilmEffectsControlSections: View {
     @State private var showBloomDetails = false
     var body: some View {
         Group {
+            grainControls
             halationControls
             bloomControls
-            grainControls
             softnessControls
             rolloffControls
             Section {
