@@ -22,7 +22,7 @@ The renderer and recipe resolution are shared by clip review, Watch Movie and ex
 | Effect | Audit result |
 | --- | --- |
 | Halation | Retain broader red scattering and a tighter orange component, highlight sensitivity, and bright-source protection. Subtract the local highlighted source from each diffused component before adding the halo. This isolates local spill and prevents a uniform bright wall from acquiring a red overlay. |
-| Glow/Bloom | Retain source-colored highlight extraction and bounded, linear-light addition. Explicitly request high-quality downsampling for diffusion rather than inheriting platform defaults. Clamp incoming bloom energy nonnegative to prevent resampling undershoot from becoming a dark ring. |
+| Glow/Bloom | Retain source-colored highlight extraction and bounded, linear-light addition. Insert an intermediate after native-resolution highlight extraction, then explicitly request high-quality downsampling. Averaging must not erase a tiny lamp before nonlinear highlight selection. Clamp incoming bloom energy nonnegative to prevent resampling undershoot from becoming a dark ring. |
 | Fine 35mm grain | Keep the existing procedural particle mixture and mid-gray strength. Replace asymmetric black/white blending with symmetric luminance perturbation and joint chroma fitting. This corrects unintended average shadow lift and highlight darkening; black/white remain stable. Handle premultiplied alpha consistently with Coarse 16mm. |
 | Coarse 16mm grain | Retain its independently seeded, rotated particle layers, tone-dependent response, stable endpoints and existing alpha handling. It is a coarser texture, not a calibrated film-stock profile. |
 | Optical Softness | Retain linear-light diffusion blended with the sharp base; flat fields remain unchanged. This is separate from highlight glow. |
@@ -30,7 +30,7 @@ The renderer and recipe resolution are shared by clip review, Watch Movie and ex
 | Sharpness | Retain bounded luminance enhancement before grain. Existing checks cover high-contrast edges, flat areas and enhancement-vector color preservation. |
 | Vignette | Retain progressive linear-light edge attenuation with center protection, defined relative to the actual content rectangle. This is a finishing vignette, not a calibrated lens profile. |
 
-FX engine version increases from 6 to 7, invalidating cached exports. Saved slider
+FX engine version increases from 6 to 8, invalidating cached exports. Saved slider
 values and movie/clip FX scope stay intact; existing enabled effects render with
 the corrected engine. Fine-grain texture in shadows/highlights and local halation
 can therefore differ from an older export.
@@ -54,7 +54,10 @@ GPU compilation, Core Image resampling or iPhone appearance.
 New production-kernel XCTest coverage checks fine-grain patch means and endpoints,
 both grain textures with premultiplied alpha, uniform bright fields with halation,
 and a one-pixel light at all sixteen phases of the quarter-resolution diffusion
-grid. Existing coverage includes moving/repeatable grain, warm halos versus neutral
+grid. The initial GPU run found that a downsampling quality flag alone still lost
+the tiny source; an explicit highlight intermediate enforces extraction before
+reduction and respects the compositor's disabled intermediate cache across frames.
+Existing coverage includes moving/repeatable grain, warm halos versus neutral
 glow, saturated neon, softness, roll-off, vignette, sharpness, saved settings,
 clip/movie FX scope, and preview/export parity with combined FX. The full iPhone
 simulator workflow must pass on the final code commit.
@@ -72,4 +75,5 @@ do not establish physical-device memory, heat or sustained export performance.
 - [Dehancer separate-node workflow](https://www.dehancer.com/learn/article/davinci-resolve-node-sequence): interpreting Log before separate Rec.709 bloom/halation and combining optical branches in parallel.
 - [Apple high-quality downsampling](https://developer.apple.com/documentation/coreimage/cicontextoption/highqualitydownsample): multipass antialiasing and platform-dependent defaults.
 - [Apple explicit transform quality](https://developer.apple.com/documentation/coreimage/ciimage/transformed(by:highqualitydownsample:)): selecting downsampling quality at the image transform.
+- [Apple image intermediate](https://developer.apple.com/documentation/coreimage/ciimage/insertingintermediate(cache:)): an explicit processing boundary with cache control.
 

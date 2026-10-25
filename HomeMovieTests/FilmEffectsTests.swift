@@ -160,10 +160,11 @@ final class FilmEffectsTests: XCTestCase {
                 let v = Double(result[index])
                 return sum + (v < 0.081 ? v / 4.5 : pow((v + 0.099) / 1.099, 1 / 0.45))
             } - 1 // Exclude the source light itself.
-            XCTAssertGreaterThan(energy, 0.05, "A one-pixel lamp must not disappear from the glow mask")
+            XCTAssertGreaterThan(energy, 0.05, "A one-pixel lamp must not disappear from the glow mask at phase \(x),\(y)")
             energies.append(energy)
         }}
         let maximum = try XCTUnwrap(energies.max()), minimum = try XCTUnwrap(energies.min())
+        print("Tiny-light glow energy range: \(minimum)...\(maximum)")
         XCTAssertLessThan(maximum / minimum, 1.75,
             "Subpixel sampling phase must not make a moving light's glow blink")
     }

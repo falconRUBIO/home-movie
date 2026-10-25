@@ -12,7 +12,7 @@ enum FilmGrainTexture: String, Codable, CaseIterable, Identifiable, Sendable {
 
 // Stored separately from capture profile and LUT selection. Optional on Movie for old catalogs.
 struct FilmEffectsSettings: Codable, Equatable, Sendable {
-    static let engineVersion = 7
+    static let engineVersion = 8
     static let off = FilmEffectsSettings()
     var version = 1
     var grainEnabled = false
@@ -130,12 +130,14 @@ final class FilmEffectsRenderer {
             if settings.bloomEnabled && settings.bloomAmount > 0 {
                 let threshold = 0.86 - 0.32 * settings.bloomSensitivity
                 let highlight = try apply("filmHighlights", extent: bounds, arguments: [linear, threshold, 0])
+                    .insertingIntermediate(cache: false)
                 let radius = (5 + 35 * settings.bloomSpread) * scale
                 bloom = diffuse(highlight, radius: radius, extent: bounds, weights: [0.6, 0.3, 0.1])
             }
             if settings.halationEnabled && settings.halationAmount > 0 {
                 let threshold = 0.88 - 0.28 * settings.halationSensitivity
                 let highlight = try apply("filmHighlights", extent: bounds, arguments: [linear, threshold, 1])
+                    .insertingIntermediate(cache: false)
                 halationSource = highlight
                 let radius = (2 + 14 * settings.halationSpread) * scale
                 red = diffuse(highlight, radius: radius * 1.6, extent: bounds, weights: [0.75, 0.2, 0.05])
@@ -175,6 +177,9 @@ final class FilmEffectsRenderer {
     private func diffuse(_ source: CIImage, radius: Double, extent: CGRect, weights: [Double]) -> CIImage {
         // Reduced-resolution diffusion retains a full-resolution sharp base and grain.
         let reduction: CGFloat = radius > 8 ? 0.25 : 0.5
+        // Highlight extraction has an explicit intermediate before reduction:
+        // nonlinear thresholding must run on native pixels, before averaging.
+        // Respect the compositor's cacheIntermediates=false across frames.
         // Request antialiased downsampling explicitly: Core Image's default is
         // platform-dependent. Tiny lamps must not blink as they cross the
         // reduced-resolution sampling grid on iPhone.
