@@ -4,7 +4,7 @@ import CoreImage
 // Reversible per-scene nodes: source balance, look, then display finishing.
 struct SceneAdjustments: Codable, Equatable, Sendable {
     static let neutral = SceneAdjustments()
-    static let engineVersion = 9
+    static let engineVersion = 10
     var hsl = HSLAdjustments()
     var curve = LightCurve.neutral
     var fade = 0.0
@@ -40,31 +40,34 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
     // input encoding. Never feed linear RGB straight into an Apple Log LUT.
     func applyingBalance(to source: CIImage, logEncoded: Bool) throws -> CIImage {
         try validate()
-        guard pipelineVersion == 2, exposure != 0 || warmth != 0 || tint != 0 else { return source }
+        guard pipelineVersion == 2, exposure != 0 || warmth != 0 || tint != 0 || shadows != 0 || highlights != 0 || contrast != 0 else { return source }
         guard let kernel = try Self.balanceKernel.get(), let output = kernel.apply(extent: source.extent,
-            arguments: [source, exposure, warmth, tint, logEncoded ? 1.0 : 0.0]) else {
+            arguments: [source, exposure, warmth, tint, logEncoded ? 1.0 : 0.0, shadows, highlights, contrast]) else {
             throw HomeMovieError.message("This scene’s source balance could not be rendered.")
         }
         return output
     }
     func applyingFinishing(to source: CIImage) throws -> CIImage {
         var finishing = self
-        if pipelineVersion == 2 { finishing.exposure = 0; finishing.warmth = 0; finishing.tint = 0 }
+        if pipelineVersion == 2 {
+            finishing.exposure = 0; finishing.warmth = 0; finishing.tint = 0
+            finishing.shadows = 0; finishing.highlights = 0; finishing.contrast = 0
+        }
         finishing.hsl = HSLAdjustments()
         return try hsl.apply(to: finishing.apply(to: source))
     }
+    // Standalone display adjustment compatibility path. The production compositor
+    // calls applyingBalance before its LUT, then applyingFinishing (which strips
+    // source controls) so primary corrections are never applied twice.
     func apply(to source: CIImage) throws -> CIImage {
         try validate()
         guard isActive else { return source }
-        let radius = max(1, min(source.extent.width, source.extent.height) / 1080 * 12)
-        let local = pipelineVersion == 2 && brilliance != 0 ? source.clampedToExtent()
-            .applyingFilter("CIGaussianBlur", parameters: ["inputRadius": radius]).cropped(to: source.extent) : source
         guard let kernel = try Self.kernel.get(), let output = kernel.apply(extent: source.extent,
-            arguments: [source, local, exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull,
+            arguments: [source, source, exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull,
                 contrast, blackPoint, whitePoint, saturation, vibrance, Double(pipelineVersion)]) else {
             throw HomeMovieError.message("This scene’s light adjustments could not be rendered.")
         }
-        return try curve.apply(to: output, fade: fade)
+        return try curve.apply(to: output, fade: fade, preserveColor: pipelineVersion >= 2)
     }
     private static let kernel: Result<CIColorKernel?, Error> = Result {
         guard let url = Bundle.main.url(forResource: "FilmEffects", withExtension: "metallib") else {

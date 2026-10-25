@@ -156,7 +156,9 @@ final class SceneAdjustmentsTests: XCTestCase {
         XCTAssertEqual(sample(try strong.apply(to: gray(0.5)))[0], 0.5, accuracy: 0.0001)
         XCTAssertGreaterThan(sample(try soft.apply(to: gray(0.25)))[0], 0.35)
         XCTAssertLessThan(sample(try soft.apply(to: gray(0.75)))[0], 0.65)
-        XCTAssertEqual(sample(try SceneAdjustments(blackPoint: 1).apply(to: gray(0.04)))[0], 0, accuracy: 0.0001)
+        let deepShadow = sample(try SceneAdjustments(blackPoint: 1).apply(to: gray(0.04)))[0]
+        XCTAssertGreaterThan(deepShadow, 0, "Deepening black must retain nonzero shadow detail")
+        XCTAssertLessThan(deepShadow, 0.01)
         XCTAssertEqual(sample(try SceneAdjustments(blackPoint: -1).apply(to: gray(0)))[0], 0.12, accuracy: 0.0001)
         XCTAssertEqual(sample(try SceneAdjustments(blackPoint: 1).apply(to: gray(1)))[0], 1, accuracy: 0.0001)
         XCTAssertLessThan(abs(sample(try SceneAdjustments(blackPoint: -1).apply(to: gray(0.8)))[0] - 0.8), 0.002)
@@ -217,8 +219,8 @@ final class SceneAdjustmentsTests: XCTestCase {
         let white = sample(try SceneAdjustments(exposure: 0.5).applyingBalance(to: gray(1), logEncoded: true))[0]
         XCTAssertGreaterThan(white, 1, "Do not clamp before a correcting exposure or the LUT")
         let standard = sample(try SceneAdjustments(exposure: 0.5).applyingBalance(to: gray(0.5), logEncoded: false))[0]
-        let linear = pow((0.5 + 0.099) / 1.099, 1 / 0.45)
-        XCTAssertEqual(standard, Float(1.099 * pow(linear * 2, 0.45) - 0.099), accuracy: 0.0001)
+        let linear = pow((0.5 + 0.0992968268) / 1.0992968268, 1 / 0.45)
+        XCTAssertEqual(standard, Float(1.0992968268 * pow(linear * 2, 0.45) - 0.0992968268), accuracy: 0.0001)
     }
     func testBalancePrecedesLUTAndFinishingFollowsItWithoutChangingSources() throws {
         var values: [Float] = []
@@ -476,4 +478,139 @@ extension SceneAdjustmentsTests {
         XCTAssertGreaterThan(log[0], log[2], "Log balance must retain its source-encoded ordering")
     }
 
+}
+
+
+extension SceneAdjustmentsTests {
+    private func appleLog(_ linear: Double) -> Double {
+        if linear >= 0.01 { return 0.08550479 * log2(linear + 0.00964052) + 0.69336945 }
+        return linear >= -0.05641088 ? 47.28711236 * pow(linear + 0.05641088, 2) : 0
+    }
+    private func logGray(_ linear: Double) -> CIImage { gray(CGFloat(appleLog(linear))) }
+    private func logLinear(_ code: Float) -> Double {
+        let join = 47.28711236 * pow(0.01 + 0.05641088, 2)
+        return Double(code) >= join ? exp2((Double(code) - 0.69336945) / 0.08550479) - 0.00964052
+            : sqrt(max(Double(code), 0) / 47.28711236) - 0.05641088
+    }
+    func testScenePrimariesAnchorMiddleGrayAndPreserveLogHeadroom() throws {
+        for contrast in [-1.0, -0.5, 0.5, 1] {
+            let recipe = SceneAdjustments(shadows: 1, highlights: -1, contrast: contrast)
+            let middle = sample(try recipe.applyingBalance(to: logGray(0.18), logEncoded: true))[0]
+            XCTAssertEqual(logLinear(middle), 0.18, accuracy: 0.0003)
+        }
+        let source = logGray(2)
+        let recovered = sample(try SceneAdjustments(highlights: -1).applyingBalance(to: source, logEncoded: true))[0]
+        XCTAssertLessThan(logLinear(recovered), 1)
+        XCTAssertGreaterThan(logLinear(recovered), 0.18)
+        let lifted = sample(try SceneAdjustments(shadows: 1).applyingBalance(to: logGray(0.005), logEncoded: true))[0]
+        XCTAssertEqual(logLinear(lifted), 0.02, accuracy: 0.0001)
+        let expanded = sample(try SceneAdjustments(contrast: 1).applyingBalance(to: logGray(16), logEncoded: true))[0]
+        XCTAssertGreaterThan(expanded, 1, "Keep scene headroom before the LUT instead of clipping RGB channels")
+    }
+    func testLogPrimaryCombinationPreservesChannelRatiosAndNeutralAlpha() throws {
+        let levels = [0.5, 0.25, 0.125]
+        let source = color(CGFloat(appleLog(levels[0])), CGFloat(appleLog(levels[1])), CGFloat(appleLog(levels[2])))
+        let recipe = SceneAdjustments(exposure: 0.3, shadows: 0.8, highlights: -0.6, contrast: 0.7)
+        let output = sample(try recipe.applyingBalance(to: source, logEncoded: true)).prefix(3).map(logLinear)
+        XCTAssertEqual(output[0] / output[1], 2, accuracy: 0.02)
+        XCTAssertEqual(output[1] / output[2], 2, accuracy: 0.02)
+        let transparent = CIImage(color: CIColor(red: 0.7, green: 0.5, blue: 0.4, alpha: 0.5))
+            .cropped(to: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let opaque = sample(try recipe.applyingBalance(to: color(0.7, 0.5, 0.4), logEncoded: true))
+        let half = sample(try recipe.applyingBalance(to: transparent, logEncoded: true))
+        for c in 0..<3 { XCTAssertEqual(half[c], opaque[c] * 0.5, accuracy: 0.002) }
+        XCTAssertEqual(half[3], 0.5, accuracy: 0.001)
+    }
+    func testLogPrimariesRetainOrderingAcrossAllZoneBoundariesAndExtremes() throws {
+        let levels = (0...256).map { 0.18 * exp2(Double($0) / 16 - 12) }
+        let pixels: [Float] = levels.flatMap { value in
+            let encoded = Float(appleLog(value)); return [encoded, encoded, encoded, 1]
+        }
+        let image = CIImage(bitmapData: pixels.withUnsafeBytes { Data($0) }, bytesPerRow: pixels.count * 4,
+            size: CGSize(width: levels.count, height: 1), format: .RGBAf, colorSpace: nil)
+        for shadow in [-1.0, 0, 1] { for highlight in [-1.0, 0, 1] { for contrast in [-1.0, 0, 1] {
+            let recipe = SceneAdjustments(shadows: shadow, highlights: highlight, contrast: contrast)
+            let result = try recipe.applyingBalance(to: image, logEncoded: true)
+            var output = [Float](repeating: 0, count: pixels.count)
+            output.withUnsafeMutableBytes { sampleContext.render(result, toBitmap: $0.baseAddress!, rowBytes: pixels.count * 4,
+                bounds: image.extent, format: .RGBAf, colorSpace: nil) }
+            let ramp = stride(from: 0, to: output.count, by: 4).map { output[$0] }
+            XCTAssertTrue(ramp.allSatisfy { $0.isFinite })
+            XCTAssertTrue(zip(ramp, ramp.dropFirst()).allSatisfy { $1 >= $0 }, "Source tone ordering must not reverse")
+        } } }
+    }
+    func testPrimaryControlsRunBeforeTheLookExactlyOnce() throws {
+        let image = logGray(2)
+        // A bounded encoding-to-display test LUT. Editing after it cannot recover
+        // the two bright levels once the source input is clamped by the look.
+        var samples: [Float] = []
+        for b in 0...1 { for g in 0...1 { for r in 0...1 { samples += [Float(r), Float(g), Float(b), 1] } } }
+        let ceiling = Float(appleLog(1))
+        let cube = ColorCube(name: "Bounded", dimension: 2, rgba: samples.withUnsafeBytes { Data($0) }, maximum: [ceiling, ceiling, ceiling])
+        let recipe = SceneAdjustments(shadows: 0.5, highlights: -1)
+        let instruction = ColorInstruction(range: CMTimeRange(start: .zero, duration: CMTime(value: 1, timescale: 30)),
+            trackID: 1, transform: .identity, cube: cube, adjustments: recipe)
+        let balanced = try recipe.applyingBalance(to: image, logEncoded: true)
+        XCTAssertEqual(sample(try cube.apply(to: image))[0], 1, accuracy: 0.001)
+        XCTAssertEqual(sample(try cube.apply(to: logGray(3)))[0], 1, accuracy: 0.001)
+        let recoveredA = sample(try instruction.applyingColor(to: image))[0]
+        let recoveredB = sample(try instruction.applyingColor(to: logGray(3)))[0]
+        XCTAssertLessThan(recoveredA, recoveredB)
+        XCTAssertLessThan(recoveredB, 1)
+        XCTAssertEqual(sample(try recipe.applyingFinishing(to: balanced)), sample(balanced), "Do not apply source controls twice")
+        XCTAssertEqual(sample(try instruction.applyingColor(to: image)), sample(try cube.apply(to: balanced)))
+        var legacy = recipe; legacy.pipelineVersion = 1
+        XCTAssertTrue(try legacy.applyingBalance(to: image, logEncoded: true) === image)
+    }
+    func testDisplayBrightnessAndCurvesPreserveLinearColorRatios() throws {
+        let source = color(0.6, 0.35, 0.2)
+        func linear(_ x: Float) -> Float { x < 0.081 ? x / 4.5 : pow((x + 0.099) / 1.099, 1 / 0.45) }
+        let original = sample(source).prefix(3).map(linear)
+        var curveRecipe = SceneAdjustments()
+        curveRecipe.curve.points = [.init(x: 0, y: 0), .init(x: 0.5, y: 0.6), .init(x: 1, y: 1)]
+        for recipe in [SceneAdjustments(brightness: 0.5), SceneAdjustments(brilliance: 0.5), curveRecipe] {
+            let output = sample(try recipe.applyingFinishing(to: source)).prefix(3).map(linear)
+            XCTAssertEqual(output[0] / output[1], original[0] / original[1], accuracy: 0.02)
+            XCTAssertEqual(output[1] / output[2], original[1] / original[2], accuracy: 0.02)
+        }
+    }
+    func testBlackAndWhiteControlsKeepDetailAtBothEndsOfTheRamp() throws {
+        let black = SceneAdjustments(blackPoint: 1), white = SceneAdjustments(whitePoint: 1)
+        let low = try [0.005, 0.01, 0.02, 0.04].map { sample(try black.applyingFinishing(to: gray($0)))[0] }
+        let high = try [0.92, 0.96, 0.98, 0.99].map { sample(try white.applyingFinishing(to: gray($0)))[0] }
+        XCTAssertGreaterThan(low[0], 0); XCTAssertLessThan(high.last!, 1)
+        XCTAssertTrue(zip(low, low.dropFirst()).allSatisfy { $1 > $0 })
+        XCTAssertTrue(zip(high, high.dropFirst()).allSatisfy { $1 > $0 })
+    }
+    func testBrillianceDoesNotDependOnNeighboringPixels() throws {
+        let pixels: [Float] = [0,0,0,1, 0.4,0.4,0.4,1, 1,1,1,1]
+        let source = CIImage(bitmapData: pixels.withUnsafeBytes { Data($0) }, bytesPerRow: 48,
+            size: CGSize(width: 3, height: 1), format: .RGBAf, colorSpace: nil)
+        let recipe = SceneAdjustments(brilliance: 1)
+        let output = try recipe.applyingFinishing(to: source)
+        let center = output.transformed(by: CGAffineTransform(translationX: -1, y: 0))
+        let uniform = try recipe.applyingFinishing(to: gray(0.4))
+        for c in 0..<4 { XCTAssertEqual(sample(center)[c], sample(uniform)[c], accuracy: 0.001) }
+    }
+}
+
+
+extension SceneAdjustmentsTests {
+    func testFinishingRampDoesNotReverseAtTransferCurveJoins() throws {
+        let width = 4097
+        let pixels: [Float] = (0..<width).flatMap { i in
+            let x = Float(i) / Float(width - 1); return [x, x, x, 1]
+        }
+        let source = CIImage(bitmapData: pixels.withUnsafeBytes { Data($0) }, bytesPerRow: width * 16,
+            size: CGSize(width: width, height: 1), format: .RGBAf, colorSpace: nil)
+        let recipe = SceneAdjustments(brightness: -1, brilliance: -1, pushPull: -1, blackPoint: 1, whitePoint: -1)
+        let output = try recipe.applyingFinishing(to: source)
+        var values = [Float](repeating: 0, count: pixels.count)
+        values.withUnsafeMutableBytes { sampleContext.render(output, toBitmap: $0.baseAddress!, rowBytes: width * 16,
+            bounds: source.extent, format: .RGBAf, colorSpace: nil) }
+        let ramp = stride(from: 0, to: values.count, by: 4).map { values[$0] }
+        XCTAssertTrue(ramp.allSatisfy { $0.isFinite && (0...1).contains($0) })
+        XCTAssertTrue(zip(ramp, ramp.dropFirst()).allSatisfy { $1 >= $0 - 0.000002 },
+            "The former rounded transfer join reversed brightness by about 0.0002")
+    }
 }

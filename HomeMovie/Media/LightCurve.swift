@@ -107,7 +107,7 @@ struct LightCurve: Codable, Equatable, Sendable {
             + (-2 * t3 + 3 * t2) * p[i + 1].y + (t3 - t2) * m[i + 1] * h))
     }
 
-    func apply(to image: CIImage, fade: Double) throws -> CIImage {
+    func apply(to image: CIImage, fade: Double, preserveColor: Bool = false) throws -> CIImage {
         try validate()
         guard fade.isFinite, (0...1).contains(fade) else {
             throw HomeMovieError.message("This scene’s fade adjustment is invalid.")
@@ -119,7 +119,7 @@ struct LightCurve: Codable, Equatable, Sendable {
             let j = min(i, p.count - 1)
             arguments.append(CIVector(x: CGFloat(p[j].x), y: CGFloat(p[j].y), z: CGFloat(m[j]), w: 0))
         }
-        arguments.append(Double(p.count)); arguments.append(fade)
+        arguments.append(Double(p.count)); arguments.append(fade); arguments.append(preserveColor ? 1.0 : 0.0)
         let kernel = try Self.kernel.get()
         guard let result = kernel.apply(extent: image.extent, arguments: arguments) else {
             throw HomeMovieError.message("This scene’s tonal curve could not be rendered.")
