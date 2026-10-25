@@ -278,7 +278,7 @@ private struct SceneReviewSession: View {
         // Unedited clips adopt the current rendition without marking the editor
         // dirty. Existing creative recipes retain their saved processing version.
         var initial = scene
-        if !initial.lightAdjustments.isActive { initial.lightAdjustments = .neutral }
+        if !initial.lightAdjustments.isActive { initial.adjustments = .neutral }
         _adjustments = State(initialValue: initial.lightAdjustments)
         _savedScene = State(initialValue: initial)
         _clipEffects = State(initialValue: scene.filmEffectsTweaks?.normalized)
