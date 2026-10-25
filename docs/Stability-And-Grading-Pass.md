@@ -10,6 +10,9 @@ These are original controls, not a reproduction of Resolve's proprietary algorit
 New version-3 recipes raise display tones with shared RGB gain, then reduce chroma
 only as needed to fit the display gamut. This avoids mixing every lifted color
 toward white. Saved version-1 and version-2 recipes keep their historical rendering.
+Black/White Point remain separate endpoint trims; a lifted black pedestal does not
+multiply near-black chroma noise. Exact neutrals bypass color reconstruction to
+retain monotonic tonal steps at half-float precision.
 Unedited clips adopt version 3 on entering the editor; opening alone is not an edit.
 The export cache engine version increases to prevent reuse of obsolete renders.
 

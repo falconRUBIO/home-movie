@@ -284,6 +284,7 @@ float4 logFalseColor(sample_t input) {
             float low = pow(target, power), high = pow(1.0 - target, power);
             target = low / max(low + high, 0.00001);
         }
+        float tonalTarget = target;
         if (blackPoint != 0.0) {
             // Positive sets a deeper black threshold; negative lifts the pedestal.
             // The cubic toe falls away rapidly, leaving white unchanged.
@@ -304,7 +305,13 @@ float4 logFalseColor(sample_t input) {
             // the gamut boundary. Only then reduce chroma at constant luma.
             // Mixing toward white at every lift unnecessarily washed out skin
             // and colored surfaces, even when there was ample channel headroom.
-            result = fitChroma(rgb * (target / l), target, 1.0);
+            result = fitChroma(rgb * (tonalTarget / l), tonalTarget, 1.0);
+            // Endpoint trims are a pedestal/ceiling operation, not another
+            // density gain. In particular, lifting a near-black floor must not
+            // multiply tiny chroma noise by target / l.
+            result = target >= tonalTarget
+                ? result + (1.0 - result) * ((target - tonalTarget) / max(1.0 - tonalTarget, 0.000000000001))
+                : result * (target / max(tonalTarget, 0.000000000001));
         } else if (target >= l) {
             result = rgb + (1.0 - rgb) * ((target - l) / max(1.0 - l, 0.000000000001));
         } else {

@@ -193,6 +193,18 @@ final class SceneAdjustmentsTests: XCTestCase {
         let a = sample(try adjacent.apply(to: between)), b = sample(try uniform.apply(to: between))
         for c in 0..<4 { XCTAssertEqual(a[c], b[c], accuracy: 0.002) }
     }
+    func testBlackFloorLiftDoesNotMagnifyShadowChromaNoise() throws {
+        for input in [color(0.003, 0.002, 0.004), color(0.015, 0.010, 0.012)] {
+            let original = sample(input)
+            let span = original.prefix(3).max()! - original.prefix(3).min()!
+            let lifted = sample(try SceneAdjustments(blackPoint: -1).apply(to: input))
+            XCTAssertGreaterThan(lifted[0], original[0])
+            XCTAssertLessThanOrEqual(lifted.prefix(3).max()! - lifted.prefix(3).min()!, span + 0.0002)
+            var legacy = SceneAdjustments(blackPoint: -1); legacy.pipelineVersion = 2
+            let expected = sample(try legacy.apply(to: input))
+            for c in 0..<4 { XCTAssertEqual(lifted[c], expected[c], accuracy: 0.0002) }
+        }
+    }
     func testContrastIsSymmetricAndBlackPointIsAnIndependentToe() throws {
         let strong = SceneAdjustments(contrast: 1), soft = SceneAdjustments(contrast: -1)
         XCTAssertLessThan(sample(try strong.apply(to: gray(0.25)))[0], 0.1)

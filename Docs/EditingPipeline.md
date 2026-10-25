@@ -32,6 +32,8 @@ channel ratios while the result fits in gamut. At the gamut boundary, chroma is
 reduced at constant display luma. Unlike the version-2 white blend, a lift does
 not automatically dilute skin or colored surfaces even when headroom is available.
 This is display-referred density preservation, not scene-linear highlight recovery.
+Black/White Point then shape the pedestal and ceiling separately, so lifting the
+black floor does not amplify tiny channel noise with a large RGB gain.
 
 ## Persistence and compatibility
 
