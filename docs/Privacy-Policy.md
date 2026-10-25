@@ -1,12 +1,12 @@
-# MOVIE ROLL Privacy Policy
+# MOVIE MODE Privacy Policy
 
 Effective October 21, 2026.
 
-MOVIE ROLL is provided by the developer of the [home-movie project](https://github.com/falconRUBIO/home-movie). This policy covers the MOVIE ROLL iPhone app.
+MOVIE MODE is provided by the developer of the [home-movie project](https://github.com/falconRUBIO/home-movie). This policy covers the MOVIE MODE iPhone app.
 
 ## Recordings and projects
 
-Video, audio, thumbnails, imported looks, editing settings, and project information are stored on your device. MOVIE ROLL has no account system, advertising, tracking, or third-party analytics service. It does not send your recordings or project information to a developer server.
+Video, audio, thumbnails, imported looks, editing settings, and project information are stored on your device. MOVIE MODE has no account system, advertising, tracking, or third-party analytics service. It does not send your recordings or project information to a developer server.
 
 ## Permissions
 

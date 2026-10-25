@@ -1,6 +1,6 @@
-# Build and upload MOVIE ROLL through GitHub
+# Build and upload MOVIE MODE through GitHub
 
-Intended App Store Connect name: **MOVIE ROLL**. Update the existing app’s App Information name in App Store Connect; source changes do not update Apple’s listing automatically. Registered bundle identifier: `com.falconcraft.homemovie`.
+Intended App Store Connect name: **MOVIE MODE**. Update the existing app’s App Information name in App Store Connect; source changes do not update Apple’s listing automatically. Registered bundle identifier: `com.falconcraft.homemovie`.
 
 ## Signing setup
 
@@ -28,7 +28,7 @@ Paste the clipboard directly into the `CERTIFICATE_PRIVATE_KEY` GitHub secret an
 1. Open [Upload TestFlight or App Store candidate](https://github.com/falconRUBIO/home-movie/actions/workflows/testflight.yml).
 2. Click **Run workflow**, select **main**, and keep **distribution: app-store-candidate** for an App Store submission build. Choose **internal** only for a beta that must never be submitted to the App Store. Click **Run workflow**.
 3. The workflow checks all four secrets, runs all simulator tests, installs pinned standalone signing tools, creates/fetches the matching Apple distribution certificate and App Store provisioning profile, builds the signed IPA, runs the local archive checks, and uploads to Apple. Apple's upload service validates the package. It uses GitHub's Mac runner; no Codemagic account or queue is involved. Apple agreements and API access must be active. It fails rather than revoking existing certificates if Apple's certificate quota blocks creation.
-4. After Apple processing, open App Store Connect → **MOVIE ROLL** → **TestFlight**. Answer any compliance questions accurately. Create an internal group, add your own eligible App Store Connect user, and assign the build.
+4. After Apple processing, open App Store Connect → **MOVIE MODE** → **TestFlight**. Answer any compliance questions accurately. Create an internal group, add your own eligible App Store Connect user, and assign the build.
 5. Install Apple's **TestFlight** app on your iPhone, accept the invitation, and install the beta.
 6. Run the physical-device scenarios in `DEVICE_TESTS.md`. Simulator tests do not establish camera, microphone, lens, interruption, or real-device performance behavior.
 
