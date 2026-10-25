@@ -116,8 +116,8 @@ private enum SceneReviewTool: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 private enum SceneLightControl: String, CaseIterable, Identifiable {
-    case exposure = "Exposure", brilliance = "Brilliance", highlights = "Highlights", shadows = "Shadows"
-    case contrast = "Contrast", brightness = "Brightness", blackPoint = "Black Point", whitePoint = "White Point", pushPull = "Push/Pull"
+    case exposure = "Exposure", contrast = "Contrast", highlights = "Highlights", shadows = "Shadows"
+    case blackPoint = "Black Point", whitePoint = "White Point", brightness = "Brightness", brilliance = "Brilliance", pushPull = "Push/Pull"
     case fade = "Fade"
     case saturation = "Saturation", vibrance = "Vibrance", warmth = "Warmth", tint = "Tint"
     var id: String { rawValue }
@@ -175,17 +175,17 @@ private enum SceneLightControl: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .fade: "Lifts the finished black level for a softer, faded look. Zero is off."
-        case .exposure: "Adjusts the overall light level."
+        case .exposure: "Adjusts source exposure by up to two stops before the look. Zero is unchanged."
         case .brightness: "Brightens or darkens the midtones."
         case .brilliance: "Balances darker areas and bright highlights."
         case .pushPull: "Softens contrast or adds density. Does not change recording exposure."
-        case .contrast: "Softens or strengthens separation between light and dark tones."
-        case .blackPoint: "Lifts the darkest tones or deepens them to black."
+        case .contrast: "Softens or strengthens source contrast around middle gray before the look."
+        case .blackPoint: "Lifts the black level or deepens the darkest tones with a smooth toe."
         case .whitePoint: "Lowers the white ceiling or brightens the lightest tones."
         case .saturation: "Adjusts all color intensity. Minus 100 is black and white."
         case .vibrance: "Adjusts quieter colors more, with less boost to strong colors and warm tones."
-        case .shadows: "Adjusts detail in darker areas."
-        case .highlights: "Adjusts the brightest areas."
+        case .shadows: "Lifts or lowers darker source tones before the look, with a smooth transition into midtones."
+        case .highlights: "Lifts or lowers brighter source tones before the look. Cannot restore detail clipped during recording."
         case .warmth: "Balances cool blue and warm yellow."
         case .tint: "Balances green and magenta."
         }
@@ -694,17 +694,18 @@ private struct SceneReviewSession: View {
                 adjustments[keyPath: control.keyPath] = $0
                 if !adjustments.isActive { adjustments = .neutral }
             })
-        return adjustmentSlider(title: control.rawValue, symbol: control.symbol, detail: control.detail, value: value, range: control == .fade ? 0...1 : -1...1)
+        return adjustmentSlider(title: control.rawValue, symbol: control.symbol, detail: adjustments.pipelineVersion >= 2 ? control.detail : "Adjusts \(control.rawValue.lowercased()).", value: value, range: control == .fade ? 0...1 : -1...1, exposureStops: control == .exposure && adjustments.pipelineVersion >= 2)
     }
-    private func adjustmentSlider(title: String, symbol: String, detail: String, value: Binding<Double>, range: ClosedRange<Double> = -1...1) -> some View {
+    private func adjustmentSlider(title: String, symbol: String, detail: String, value: Binding<Double>, range: ClosedRange<Double> = -1...1, exposureStops: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: symbol).frame(width: 20).accessibilityHidden(true)
                 Text(title).fontWeight(.semibold)
                 Spacer(minLength: 8)
-                Text(abs(value.wrappedValue) < 0.005 ? "0" : String(format: "%+.0f", value.wrappedValue * 100))
+                Text(exposureStops ? String(format: "%+.2f EV", value.wrappedValue * 2)
+                    : abs(value.wrappedValue) < 0.005 ? "0" : String(format: "%+.0f", value.wrappedValue * 100))
                     .monospacedDigit().foregroundStyle(.secondary)
-                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    .frame(minWidth: exposureStops ? 80 : 44, minHeight: 44).contentShape(Rectangle())
                     .onTapGesture(count: 2) {
                         guard !busy && !comparing else { return }
                         value.wrappedValue = 0
@@ -715,7 +716,8 @@ private struct SceneReviewSession: View {
             HapticGlassSlider(value: value, range: range, editingChanged: editingChanged)
                 .frame(minHeight: 44)
                 .accessibilityLabel(title)
-                .accessibilityValue(Text(value.wrappedValue * 100, format: .number.precision(.fractionLength(0))))
+                .accessibilityValue(exposureStops ? Text("\(String(format: "%.2f", value.wrappedValue * 2)) stops")
+                    : Text(value.wrappedValue * 100, format: .number.precision(.fractionLength(0))))
                 .accessibilityHint(detail)
                 .accessibilityAction(named: "Reset to Zero") {
                     guard !busy && !comparing else { return }

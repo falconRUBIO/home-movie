@@ -2,13 +2,17 @@
 using namespace metal;
 
 // Original optical shaders and a separate per-scene light-adjustment stage.
+// Continuous BT.709-family working transfer: solve the toe/power join rather
+// than pairing rounded .018/.081 cutoffs, which can reverse a graded ramp.
+// Precise alpha/beta are the smooth-join values documented in ITU-R BT.2020.
+// RGB primaries and output metadata remain Rec.709 for display finishing.
 float3 decode709(float3 c) {
     c = max(c, 0.0);
-    return select(pow((c + 0.099) / 1.099, float3(1.0 / 0.45)), c / 4.5, c < 0.081);
+    return select(pow((c + 0.0992968268) / 1.0992968268, float3(1.0 / 0.45)), c / 4.5, c < 0.0812428583);
 }
 float3 encode709(float3 c) {
     c = max(c, 0.0);
-    return select(1.099 * pow(c, float3(0.45)) - 0.099, c * 4.5, c < 0.018);
+    return select(1.0992968268 * pow(c, float3(0.45)) - 0.0992968268, c * 4.5, c < 0.0180539685);
 }
 float luminance(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
 // Apple Log transfer function, from Apple's vendor-supplied ACES input transform.
@@ -35,6 +39,33 @@ float3 fitChroma(float3 rgb, float level, float gain) {
     }
     return clamp(float3(level) + direction * clamp(scale, 0.0, 1.0), 0.0, 1.0);
 }
+// Display finishing moves brightness with a shared linear RGB gain. Mixing
+// toward white desaturates colored highlights even when Saturation is untouched.
+float3 remapDisplayLevel(float3 rgb, float from, float to) {
+    // Achromatic pixels already are the scalar tone curve. Avoid a redundant
+    // decode/scale/encode round trip that can jitter by one ULP on a flat shoulder.
+    if (rgb.r == rgb.g && rgb.g == rgb.b) return float3(to);
+    if (abs(to - from) < 0.0000001) return rgb;
+    if (from <= 0.0) return float3(to);
+    float3 linear = decode709(rgb);
+    float gain = decode709(float3(to)).r / max(decode709(float3(from)).r, 0.000000000001);
+    float level = clamp(luminance(linear) * gain, 0.0, 1.0);
+    return encode709(fitChroma(linear * gain, level, 1.0));
+}
+
+// Scene-referred primary grading in stops about 18% scene-linear middle gray.
+// Four-stop smooth zone falloffs keep the derivative positive even at full +/-2
+// stop zone adjustments, so adjacent exposure levels cannot reverse or posterize.
+float gradeSceneLevel(float level, float shadows, float highlights, float contrast) {
+    if (level <= 0.0) return level;
+    float stops = log2(level / 0.18);
+    stops *= exp2(contrast * 0.75);
+    float shadowWeight = 1.0 - smoothstep(-4.0, 0.0, stops);
+    float highlightWeight = smoothstep(0.0, 4.0, stops);
+    stops += 2.0 * (shadows * shadowWeight + highlights * highlightWeight);
+    return 0.18 * exp2(stops);
+}
+
 uint mixBits(uint x) {
     x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; return x ^ (x >> 16);
 }
@@ -84,9 +115,10 @@ float4 logFalseColor(sample_t input) {
     return float4(color * input.a, input.a);
 }
 
-    float4 sceneTone(sample_t input, float4 p0, float4 p1, float4 p2, float4 p3, float4 p4, float4 p5, float4 p6, float4 p7, float4 p8, float4 p9, float4 p10, float4 p11, float4 p12, float4 p13, float4 p14, float4 p15, float count, float fade) {
+    float4 sceneTone(sample_t input, float4 p0, float4 p1, float4 p2, float4 p3, float4 p4, float4 p5, float4 p6, float4 p7, float4 p8, float4 p9, float4 p10, float4 p11, float4 p12, float4 p13, float4 p14, float4 p15, float count, float fade, float preserveColor) {
         float4 points[16] = {p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15};
-        float3 rgb = clamp(input.rgb, 0.0, 1.0);
+        if (preserveColor > 0.5 && input.a <= 0.000001) return input;
+        float3 rgb = clamp(preserveColor > 0.5 ? input.rgb / input.a : input.rgb, 0.0, 1.0);
         float l = clamp(luminance(rgb), 0.0, 1.0);
         int n = int(count);
         float target = l <= points[0].x ? points[0].y : points[n - 1].y;
@@ -103,6 +135,9 @@ float4 logFalseColor(sample_t input) {
         // Fade is an output pedestal, unlike Black Point's shadow threshold.
         // White stays fixed; adjacent tones keep their ordering and headroom.
         target = mix(clamp(target, 0.0, 1.0), 1.0, fade * 0.22);
+        if (preserveColor > 0.5) {
+            return float4(remapDisplayLevel(rgb, l, target) * input.a, input.a);
+        }
         float3 result = target >= l ? rgb + (1.0 - rgb) * ((target - l) / max(1.0 - l, 0.000001))
             : rgb * (target / max(l, 0.000001));
         return float4(result, input.a);
@@ -184,11 +219,14 @@ float4 logFalseColor(sample_t input) {
         float3 rgb = logEncoded > 0.5 ? float3(decodeAppleLog(input.r), decodeAppleLog(input.g), decodeAppleLog(input.b)) : decode709(input.rgb);
         return float4(rgb, input.a);
     }
-    float4 sceneBalance(sample_t input, float exposure, float warmth, float tint, float logEncoded) {
+    float4 sceneBalance(sample_t input, float exposure, float warmth, float tint, float logEncoded,
+                        float shadows, float highlights, float contrast) {
+        if (input.a <= 0.000001) return input;
+        float3 encoded = input.rgb / input.a;
         float3 rgb;
         if (logEncoded > 0.5) {
-            rgb = float3(decodeAppleLog(input.r), decodeAppleLog(input.g), decodeAppleLog(input.b));
-        } else { rgb = decode709(input.rgb); }
+            rgb = float3(decodeAppleLog(encoded.r), decodeAppleLog(encoded.g), decodeAppleLog(encoded.b));
+        } else { rgb = decode709(encoded); }
         // ±2 stops of actual linear gain. Warmth/tint are relative RGB balance,
         // not a claim to reconstruct the camera's measured white balance.
         float3 cast = warmth * float3(0.22, 0.025, -0.245) + tint * float3(0.13, -0.16, 0.13);
@@ -196,6 +234,12 @@ float4 logFalseColor(sample_t input) {
         float3 weights = logEncoded > 0.5 ? float3(0.2627, 0.6780, 0.0593) : float3(0.2126, 0.7152, 0.0722);
         gains /= dot(gains, weights); // Neutral brightness remains stable as color is balanced.
         rgb *= gains * exp2(exposure * 2.0);
+        if (shadows != 0.0 || highlights != 0.0 || contrast != 0.0) {
+            float level = dot(rgb, weights);
+            if (level > 0.0) {
+                rgb *= gradeSceneLevel(level, shadows, highlights, contrast) / level;
+            }
+        }
         if (logEncoded > 0.5) {
             rgb = float3(encodeAppleLog(rgb.r), encodeAppleLog(rgb.g), encodeAppleLog(rgb.b));
         } else {
@@ -203,7 +247,8 @@ float4 logFalseColor(sample_t input) {
             // SDR headroom. Compress the peak with one shared gain so channel
             // ratios survive; the knee converges to white as controls approach zero.
             float peak = max(rgb.r, max(rgb.g, rgb.b));
-            float strength = max(max(exposure, 0.0), max(abs(warmth), abs(tint)));
+            float strength = max(max(max(exposure, 0.0), max(abs(warmth), abs(tint))),
+                max(abs(contrast), max(max(shadows, 0.0), max(highlights, 0.0))));
             float knee = 1.0 - 0.2 * (1.0 - exp2(-strength * 2.0));
             if (peak > knee && strength > 0.0) {
                 float shoulder = knee + (1.0 - knee) * (1.0 - exp(-(peak - knee) / (1.0 - knee)));
@@ -211,11 +256,12 @@ float4 logFalseColor(sample_t input) {
             }
             rgb = encode709(rgb);
         }
-        return float4(rgb, input.a);
+        return float4(rgb * input.a, input.a);
     }
     float4 sceneLight(sample_t input, sample_t local, float exposure, float shadows, float highlights, float warmth, float tint, float brightness, float brilliance, float pushPull,
                       float contrast, float blackPoint, float whitePoint, float saturation, float vibrance, float pipelineVersion) {
-        float3 rgb = clamp(input.rgb, 0.0, 1.0);
+        if (pipelineVersion >= 2.0 && input.a <= 0.000001) return input;
+        float3 rgb = clamp(pipelineVersion >= 2.0 ? input.rgb / input.a : input.rgb, 0.0, 1.0);
         // Display-only entry points can still use the new exposure response.
         // Production version-2 recipes apply Exposure in sceneBalance and pass zero here.
         if (pipelineVersion >= 2.0 && exposure != 0.0) {
@@ -252,7 +298,8 @@ float4 logFalseColor(sample_t input) {
                     target = 0.5 + 0.5 * (x - strength * x * x * (1.0 - x));
                 }
             }
-            target = clamp(target + brilliance * 0.25 * (luminance(input.rgb) - luminance(local.rgb)) * 4.0 * target * (1.0 - target), 0.0, 1.0);
+            // Brilliance is a global tonal balance. No neighborhood blur or
+            // spatial detail boost that would draw halos around high-contrast edges.
             target += brightness * 0.28 * pow(sin(target * 3.14159265), 2.0);
         } else {
         // Preserve the historical rendition for already-saved version-1 recipes.
@@ -273,8 +320,13 @@ float4 logFalseColor(sample_t input) {
             float power = exp2(pushPull * (pipelineVersion >= 2.0 ? 0.85 : 0.65));
             float low = pow(target, power);
             float high = pow(1.0 - target, power);
+            if (pipelineVersion >= 2.0) {
+                // Density is an odds-domain offset, keeping a positive slope all
+                // the way into black instead of subtracting away shadow detail.
+                low *= exp2(-pushPull * 0.35);
+            }
             target = low / max(low + high, 0.00001);
-            target -= pushPull * (pipelineVersion >= 2.0 ? 0.12 : 0.08) * target * (1.0 - target);
+            if (pipelineVersion < 2.0) { target -= pushPull * 0.08 * target * (1.0 - target); }
         }
         if (contrast != 0.0) {
             // Symmetric perceptual S-curve around middle gray. Smooth shoulders,
@@ -284,15 +336,24 @@ float4 logFalseColor(sample_t input) {
             target = low / max(low + high, 0.00001);
         }
         if (blackPoint != 0.0) {
-            // Positive sets a deeper black threshold; negative lifts the pedestal.
-            // The cubic toe falls away rapidly, leaving white unchanged.
-            target = max(0.0, target - blackPoint * 0.12 * pow(1.0 - target, 3.0));
+            // Positive deepens a localized, smooth toe; negative lifts the pedestal.
+            // A steep falloff keeps the opposite tonal range stable.
+            if (pipelineVersion >= 2.0 && blackPoint > 0.0) {
+                target /= 1.0 + blackPoint * 6.0 * pow(1.0 - target, 8.0);
+            } else { target = max(0.0, target - blackPoint * 0.12 * pow(1.0 - target, 3.0)); }
         }
         // A mirrored shoulder controls the white ceiling while preserving black.
-        if (whitePoint != 0.0) { target = min(1.0, target + whitePoint * 0.22 * pow(target, 3.0)); }
+        if (whitePoint != 0.0) {
+            if (pipelineVersion >= 2.0 && whitePoint > 0.0) {
+                target = 1.0 - (1.0 - target) / (1.0 + whitePoint * 4.0 * pow(target, 8.0));
+            } else { target = min(1.0, target + whitePoint * 0.22 * pow(target, 3.0)); }
+        }
         target = clamp(target, 0.0, 1.0);
         float3 result;
-        if (target >= l) {
+        if (pipelineVersion >= 2.0) {
+            result = remapDisplayLevel(rgb, l, target);
+            target = luminance(result); // Following color nodes use their encoded-luma contract.
+        } else if (target >= l) {
             result = rgb + (1.0 - rgb) * ((target - l) / max(1.0 - l, 0.000000000001));
         } else {
             result = rgb * (target / max(l, 0.000000000001));
@@ -331,7 +392,7 @@ float4 logFalseColor(sample_t input) {
             float gain = saturation < 0.0 ? 1.0 + saturation : exp2(saturation);
             result = fitChroma(result, target, gain);
         }
-        return float4(result, input.a);
+        return float4(pipelineVersion >= 2.0 ? result * input.a : result, input.a);
     }
     float4 filmLinear(sample_t input) { return float4(decode709(input.rgb), input.a); }
     float4 filmHighlights(sample_t input, float threshold, float warm) {
