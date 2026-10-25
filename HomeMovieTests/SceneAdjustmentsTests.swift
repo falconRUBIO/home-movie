@@ -579,6 +579,8 @@ extension SceneAdjustmentsTests {
         let low = try [0.005, 0.01, 0.02, 0.04].map { sample(try black.applyingFinishing(to: gray($0)))[0] }
         let high = try [0.92, 0.96, 0.98, 0.99].map { sample(try white.applyingFinishing(to: gray($0)))[0] }
         XCTAssertGreaterThan(low[0], 0); XCTAssertLessThan(high.last!, 1)
+        XCTAssertEqual(sample(try black.applyingFinishing(to: gray(0.8)))[0], 0.8, accuracy: 0.0001)
+        XCTAssertEqual(sample(try white.applyingFinishing(to: gray(0.2)))[0], 0.2, accuracy: 0.0001)
         XCTAssertTrue(zip(low, low.dropFirst()).allSatisfy { $1 > $0 })
         XCTAssertTrue(zip(high, high.dropFirst()).allSatisfy { $1 > $0 })
     }

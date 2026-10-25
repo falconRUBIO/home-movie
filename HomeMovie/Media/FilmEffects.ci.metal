@@ -333,16 +333,16 @@ float4 logFalseColor(sample_t input) {
             target = low / max(low + high, 0.00001);
         }
         if (blackPoint != 0.0) {
-            // Positive sets a deeper black threshold; negative lifts the pedestal.
-            // The cubic toe falls away rapidly, leaving white unchanged.
+            // Positive deepens a localized, smooth toe; negative lifts the pedestal.
+            // A steep falloff keeps the opposite tonal range stable.
             if (pipelineVersion >= 2.0 && blackPoint > 0.0) {
-                target /= 1.0 + blackPoint * 6.0 * pow(1.0 - target, 3.0);
+                target /= 1.0 + blackPoint * 6.0 * pow(1.0 - target, 8.0);
             } else { target = max(0.0, target - blackPoint * 0.12 * pow(1.0 - target, 3.0)); }
         }
         // A mirrored shoulder controls the white ceiling while preserving black.
         if (whitePoint != 0.0) {
             if (pipelineVersion >= 2.0 && whitePoint > 0.0) {
-                target = 1.0 - (1.0 - target) / (1.0 + whitePoint * 4.0 * pow(target, 3.0));
+                target = 1.0 - (1.0 - target) / (1.0 + whitePoint * 4.0 * pow(target, 8.0));
             } else { target = min(1.0, target + whitePoint * 0.22 * pow(target, 3.0)); }
         }
         target = clamp(target, 0.0, 1.0);
