@@ -187,7 +187,8 @@ struct LibraryView: View {
         libraryContent
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle("Movies").navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.automatic, for: .navigationBar)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .overlay(alignment: .bottom) {
                 if !selecting {
                     newMovieButton
