@@ -92,6 +92,12 @@ struct CameraView: View {
     @State private var showingPiPCompatibility = false
     @State private var viewfinderSize = CGSize.zero
     @State private var interfaceFormat = MovieFormat.portrait
+    @State private var interfaceOrientation = UIInterfaceOrientation.portrait
+    private var landscapeControlsOnLeading: Bool { interfaceOrientation == .landscapeLeft }
+    private var landscapeBleedEdges: Edge.Set {
+        guard interfaceFormat == .landscape else { return [] }
+        return landscapeControlsOnLeading ? [.top, .bottom, .leading] : [.top, .bottom, .trailing]
+    }
     @State private var pipDragStart: CGPoint?
     @State private var lastPiPDragPoint: CGPoint?
     @State private var pipConfiguring = false
@@ -115,35 +121,27 @@ struct CameraView: View {
     private var dollyDelayedStart: Bool { startDelay > 0 }
     private var movie: Movie? { app.movie(movieID) }
     private var pipCanvasFormat: MovieFormat { movie?.recordingFormat ?? activeTakeFormat ?? interfaceFormat }
-    private var activeTakeFormat: MovieFormat? { camera.busy ? camera.takeFormat : nil }
+    private var activeTakeFormat: MovieFormat? { camera.activeTakeOrientation }
     private var cameraSurface: some View {
         GeometryReader { geometry in
             let landscape = geometry.size.width > geometry.size.height
             if let movie {
                 let footerHeight: CGFloat = dynamicTypeSize.isAccessibilitySize ? 100 : 64
-                let railWidth: CGFloat = 112
-                let phoneRatio: CGFloat = landscape ? 16.0 / 9.0 : 9.0 / 16.0
-                let canvasFormat: MovieFormat? = camera.options?.dualCameraPrepared == true ? pipCanvasFormat : movie.recordingFormat ?? activeTakeFormat
-                let canvasRatio: CGFloat = canvasFormat?.aspect ?? phoneRatio
-                let ratio: CGFloat = camera.options?.dualCameraPrepared == true ? canvasRatio : phoneRatio
-                let availableWidth = max(1, geometry.size.width - (landscape ? railWidth : 0))
-                let availableHeight = max(1, geometry.size.height - (landscape ? 0 : footerHeight))
-                let previewWidth = min(availableWidth, availableHeight * ratio)
-                let previewHeight = previewWidth / ratio
+                let canvasFormat: MovieFormat? = camera.options?.dualCameraPrepared == true ? pipCanvasFormat : nil
+                let layout = CameraViewportLayout(size: geometry.size, landscape: landscape,
+                    controlsOnLeading: landscapeControlsOnLeading, portraitFooter: footerHeight, canvasAspect: canvasFormat?.aspect)
                 // Keep one viewfinder/UIViewRepresentable identity across rotation.
                 // Switching between HStack/VStack branches destroys and reattaches the
                 // native preview connection (and the Cinema Metal surface).
                 ZStack(alignment: .topLeading) {
-                    viewfinder(movie: movie, landscape: landscape)
-                        .frame(width: previewWidth, height: previewHeight)
-                        .position(x: availableWidth / 2, y: availableHeight / 2)
+                    viewfinder(movie: movie, landscape: landscape, controlsOnLeading: landscapeControlsOnLeading)
+                        .frame(width: layout.preview.width, height: layout.preview.height)
+                        .position(x: layout.preview.midX, y: layout.preview.midY)
                     reviewControls(movie: movie, landscape: landscape).disabled(countdown != nil)
                         .padding(.horizontal, landscape ? 0 : 20)
-                        .frame(width: landscape ? railWidth : geometry.size.width,
-                               height: landscape ? geometry.size.height : footerHeight)
+                        .frame(width: layout.controls.width, height: layout.controls.height)
                         .background(.black)
-                        .position(x: landscape ? geometry.size.width - railWidth / 2 : geometry.size.width / 2,
-                                  y: landscape ? geometry.size.height / 2 : geometry.size.height - footerHeight / 2)
+                        .position(x: layout.controls.midX, y: layout.controls.midY)
                 }.frame(width: geometry.size.width, height: geometry.size.height)
 
             } else { ContentUnavailableView("Movie unavailable", systemImage: "film") }
@@ -154,7 +152,9 @@ struct CameraView: View {
             interfaceFormat = format
             syncPiPCanvas()
         }
-        .background(MovieOrientation(format: activeTakeFormat).frame(width: 0, height: 0))
+        .ignoresSafeArea(.container, edges: landscapeBleedEdges)
+        .background(MovieOrientation(format: activeTakeFormat ?? camera.switchingFormat,
+            onInterfaceChange: { interfaceOrientation = $0 }).frame(width: 0, height: 0))
         .background(.black).foregroundStyle(.white)
         .toolbar(.hidden, for: .navigationBar).navigationBarBackButtonHidden()
         .preferredColorScheme(.dark)
@@ -358,7 +358,7 @@ struct CameraView: View {
             } else { Color.clear.frame(width: 44, height: 44) }
         }.disabled(countdown != nil)
     }
-    private func viewfinder(movie: Movie, landscape: Bool) -> some View {
+    private func viewfinder(movie: Movie, landscape: Bool, controlsOnLeading: Bool) -> some View {
         ZStack {
             preview().zIndex(0)
             VStack(spacing: 4) {
@@ -376,12 +376,13 @@ struct CameraView: View {
                         Color.clear.preference(key: DollyControlHeightKey.self, value: proxy.size.height)
                     }
                 }.onPreferenceChange(DollyControlHeightKey.self) { lensControlHeight = $0 }
-                    .padding(.leading, landscape && smoothZoomOpen ? 100 : 12)
-                    .padding(.trailing, landscape ? 100 : 12)
+                    .padding(.leading, landscape && (smoothZoomOpen || controlsOnLeading) ? 100 : 12)
+                    .padding(.trailing, landscape && (smoothZoomOpen || !controlsOnLeading) ? 100 : 12)
                     .padding(.bottom, landscape ? 10 : 116)
             }
-            .overlay(alignment: landscape ? .trailing : .bottom) {
-                recordControl.cameraControlRegion().zIndex(3).padding(landscape ? .trailing : .bottom, 16)
+            .overlay(alignment: landscape ? (controlsOnLeading ? .leading : .trailing) : .bottom) {
+                recordControl.cameraControlRegion().zIndex(3)
+                    .padding(landscape ? (controlsOnLeading ? .leading : .trailing) : .bottom, 16)
             }
             .coordinateSpace(name: "cameraViewfinder")
             .onPreferenceChange(CameraControlRegionsKey.self) { previewControlRegions = $0; updatePiPObstacles() }
@@ -1053,15 +1054,13 @@ struct CameraView: View {
         let flip = Button { camera.flip() } label: {
             ZStack {
                 MovieControlIcon(systemName: "arrow.triangle.2.circlepath.camera")
-                    .opacity(camera.recordingFlip == nil ? 1 : 0)
-                if camera.recordingFlip != nil { ProgressView().tint(.white) }
+                    .opacity(!camera.switchingCamera && camera.recordingFlip == nil ? 1 : 0)
+                if camera.switchingCamera || camera.recordingFlip != nil { ProgressView().tint(.white) }
             }.background(.white.opacity(0.15), in: Circle())
-        }.accessibilityLabel(camera.recordingFlip == nil ? "Switch camera" : "Switching camera")
+        }.accessibilityLabel(camera.switchingCamera || camera.recordingFlip != nil ? "Switching camera" : "Switch camera")
             .accessibilityHint(movie.captureProfile == .appleLog ?
                 (camera.options?.canFlipWhileRecording == true ? "Switch cameras while keeping this Log take and microphone recording continuous." : camera.state == .recording ? CameraCompatibility.logRecordingFlipExplanation : camera.options?.canFlip == true ? "Switch cameras before recording." : CameraCompatibility.logCameraExplanation) : "Switch between the front and rear cameras.")
-            .disabled(camera.switchingCamera || camera.recordingFlip != nil || camera.state != .ready && camera.state != .recording || camera.options?.canFlip != true ||
-                movie.captureProfile == .appleLog && camera.state == .recording && camera.options?.canFlipWhileRecording != true ||
-                camera.options?.isPiPEnabled == true || camera.pipPresentation.opacity > 0)
+            .disabled(!camera.canFlipCamera)
         let watch = VStack(spacing: 0) {
             Button { openWatch() } label: {
                 Label("Watch Movie", systemImage: "play.fill")
@@ -1073,11 +1072,25 @@ struct CameraView: View {
                 .accessibilityLabel("Total movie runtime, \(durationLabel(movie.duration))")
         }
         if landscape {
-            VStack(spacing: 12) {
-                VStack(spacing: 0) { recent; recentTakeFeedback(movie: movie) }
-                watch
+            VStack(spacing: 8) {
                 flip
-            }.padding(.horizontal, 8)
+                Spacer(minLength: 8)
+                Button { openWatch() } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "play.fill").font(.system(size: 18, weight: .semibold))
+                            .frame(width: 44, height: 44).background(.white.opacity(0.12), in: Circle())
+                        Text("Movie").font(.caption.weight(.medium)).lineLimit(1)
+                        Text(durationLabel(movie.duration)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    }.frame(maxWidth: .infinity)
+                }.buttonStyle(.plain).disabled(camera.busy || movie.activeScenes.isEmpty)
+                    .accessibilityLabel("Watch movie")
+                    .accessibilityValue("Total runtime, \(durationLabel(movie.duration))")
+                Spacer(minLength: 8)
+                recent
+                    .overlay(alignment: .top) {
+                        recentTakeFeedback(movie: movie).fixedSize().offset(y: -64)
+                    }
+            }.padding(.horizontal, 8).padding(.vertical, 28)
         } else {
             HStack(spacing: 8) {
                 HStack(spacing: 4) { recent; recentTakeFeedback(movie: movie) }
