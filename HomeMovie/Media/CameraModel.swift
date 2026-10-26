@@ -96,7 +96,7 @@ struct RecordingFlipHandoff {
         state.ownsTakeOrientation || recordingFlip != nil ? takeFormat : nil
     }
     var canFlipCamera: Bool {
-        guard active, !switchingCamera, recordingFlip == nil, state == .ready || state == .recording,
+        guard active, !switchingCamera, pendingPiPEnabled == nil, recordingFlip == nil, state == .ready || state == .recording,
               let options, !options.isPiPEnabled,
               !options.dualCameraPrepared || pipPresentation.opacity <= 0.01,
               state != .recording || options.canFlipWhileRecording else { return false }
@@ -159,7 +159,7 @@ struct RecordingFlipHandoff {
         service.prepare(front: rememberedFront, profile: profile, dualCamera: dualCamera, pipLayout: layout, canvasFormat: canvasFormat)
     }
     func record(movieID: UUID, continuingAt elapsed: CMTime? = nil) {
-        guard state == .ready, !switchingCamera, active, let app else { return }
+        guard state == .ready, !switchingCamera, pendingPiPEnabled == nil, active, let app else { return }
         guard let observed = options?.angle, MovieFormat.captureFormat(angle: observed) != nil,
               let movie = app.movie(movieID), options?.profile == movie.captureProfile else { return }
         let interfaceFormat = OrientationPolicy.shared.currentInterfaceFormat(observed: observed)
@@ -281,7 +281,8 @@ struct RecordingFlipHandoff {
         setPiPEnabled(options?.isPiPEnabled != true)
     }
     func updatePiPLayout(_ layout: PiPLayout, movieID: UUID, canvasFormat: MovieFormat? = nil) {
-        guard !busy, let app else { return }
+        guard active, !switchingCamera, pendingPiPEnabled == nil,
+              state == .ready || state == .recording, let app else { return }
         let canvas = app.movie(movieID)?.recordingFormat ?? canvasFormat
             ?? OrientationPolicy.shared.currentInterfaceFormat(observed: options?.angle ?? 90)
         pipLayout = layout; service.setPiPLayout(layout, canvasFormat: canvas)

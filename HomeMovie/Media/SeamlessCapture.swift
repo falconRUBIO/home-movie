@@ -431,8 +431,10 @@ final class SeamlessCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         recordedRearAngle = (MovieFormat.captureFormat(angle: rearObserved) ?? .portrait).recordingAngle(observed: rearObserved)
     }
     func configurePiP(layout: PiPLayout, canvasFormat: MovieFormat?) {
-        guard take == nil else { return }
-        timeline.setLayout(layout); preferredCanvas = canvasFormat
+        // Layout/swap changes affect subsequent frames on the capture queue. The
+        // active take keeps its canvas, orientation, writer and audio unchanged.
+        timeline.setLayout(layout)
+        if take == nil { preferredCanvas = canvasFormat }
     }
     private var previewAngle: CGFloat {
         // The preview and saved pixels use the same per-camera orientation for

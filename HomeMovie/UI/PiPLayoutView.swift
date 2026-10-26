@@ -5,22 +5,38 @@ import UIKit
 
 struct PiPControl: View {
     let enabled: Bool
+    let composition: PiPComposition
+    let canEnable: Bool
     let disabled: Bool
     let recording: Bool
-    let onActivate: () -> Void
+    let onSelect: (PiPQuickMode) -> Void
+    let onSwap: () -> Void
+    let onSettings: () -> Void
+    private var selection: PiPQuickMode { PiPQuickMode(enabled: enabled, composition: composition) }
     var body: some View {
-        Button {
-            UISelectionFeedbackGenerator().selectionChanged()
-            onActivate()
+        Menu {
+            Picker("Layout", selection: Binding(get: { selection }, set: onSelect)) {
+                ForEach(PiPQuickMode.allCases) { mode in
+                    Label(mode.title, systemImage: mode.symbol).tag(mode)
+                }
+            }.pickerStyle(.inline).disabled(!canEnable)
+            if enabled, composition != .inset {
+                Button("Swap Cameras", systemImage: composition == .topAndBottom
+                    ? "arrow.up.arrow.down" : "arrow.left.arrow.right", action: onSwap)
+            }
+            Divider()
+            Button("PiP Settings…", systemImage: "slider.horizontal.3", action: onSettings)
+                .disabled(recording)
         } label: {
-            MovieControlIcon(systemName: "rectangle.on.rectangle")
+            MovieControlIcon(systemName: enabled ? composition.symbol : "rectangle.on.rectangle")
                 .foregroundStyle(enabled ? .yellow : .white)
                 .background(enabled ? Color.white.opacity(0.15) : .clear, in: Circle())
         }
+        .menuOrder(.fixed)
         .disabled(disabled)
         .accessibilityLabel("Picture in Picture")
-        .accessibilityValue(enabled ? "On" : "Off")
-        .accessibilityHint(recording ? "Turn Picture in Picture on or off for this clip" : "Choose a layout and turn Picture in Picture on or off")
+        .accessibilityValue(selection.title)
+        .accessibilityHint("Show layout choices. Choose Off to use one camera.")
     }
 }
 

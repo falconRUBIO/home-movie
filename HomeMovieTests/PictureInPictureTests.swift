@@ -50,6 +50,7 @@ final class PictureInPictureTests: XCTestCase {
         camera.setPiPEnabled(true)
         await camera.receive(.ready(options)) // A stale Off publication is not an acknowledgement.
         XCTAssertEqual(camera.pendingPiPEnabled, true)
+        XCTAssertFalse(camera.canFlipCamera)
         camera.togglePiP()
         XCTAssertEqual(commands, [true])
         options.isPiPEnabled = true; await camera.receive(.ready(options))
@@ -729,7 +730,7 @@ final class PictureInPictureTests: XCTestCase {
         let writer = try ContinuousTakeWriter(url: try await store.url(ticket.staging), angle: 0)
         let rear = try frame(red: 0, green: 0, blue: 220), front = try frame(red: 220, green: 0, blue: 0)
         let renderer = PiPFrameRenderer(); var timeline = PiPTimeline()
-        for index in 0..<36 {
+        for index in 0..<84 {
             let time = CMTime(value: Int64(index), timescale: 30)
             if index == 6 { timeline.setEnabled(true, at: time) }
             if index == 18 {
@@ -737,6 +738,12 @@ final class PictureInPictureTests: XCTestCase {
                 timeline.settle(at: time, canvas: writer.canvas, obstacles: [])
             }
             if index == 27 { timeline.setEnabled(false, at: time) }
+            if index == 36 { timeline.setEnabled(true, at: time) }
+            if index == 42 { timeline.setLayout(PiPLayout(composition: .topAndBottom)) }
+            if index == 48 { timeline.setLayout(PiPLayout(composition: .topAndBottom, splitSwapped: true)) }
+            if index == 54 { timeline.setLayout(PiPLayout(composition: .sideBySide)) }
+            if index == 60 { timeline.setLayout(PiPLayout(composition: .sideBySide, splitSwapped: true)) }
+            if index == 66 { timeline.setEnabled(false, at: time) }
             let image = PiPCompositor.image(background: rear, presenter: front, canvas: writer.canvas, backgroundAngle: 0,
                 presenterAngle: 0, presentation: timeline.presentation(at: time, canvas: writer.canvas))
             let buffer = try XCTUnwrap(renderer.render(image, canvas: writer.canvas))
@@ -758,7 +765,7 @@ final class PictureInPictureTests: XCTestCase {
         let videoTracks = try await asset.loadTracks(withMediaType: .video), audioTracks = try await asset.loadTracks(withMediaType: .audio)
         XCTAssertEqual(videoTracks.count, 1); XCTAssertEqual(audioTracks.count, 1)
         let audioRange = try await XCTUnwrap(audioTracks.first).load(.timeRange)
-        XCTAssertGreaterThan(audioRange.duration.seconds, 1.1)
+        XCTAssertGreaterThan(audioRange.duration.seconds, 2.7)
         let composition = try await MediaAssembler().build(movie: saved, root: root, filmEffects: settings)
         let output = root.appendingPathComponent("PiP-export.mp4")
         let export = try XCTUnwrap(AVAssetExportSession(asset: composition.asset, presetName: AVAssetExportPresetHighestQuality))
@@ -778,6 +785,17 @@ final class PictureInPictureTests: XCTestCase {
         let hidden = try await pixel(at: 35 / 30, corner: .topLeft)
         XCTAssertGreaterThan(before[2], 150); XCTAssertGreaterThan(visible[0], 150)
         XCTAssertGreaterThan(moved[0], 150); XCTAssertGreaterThan(hidden[2], 150)
+        func panelPixel(frame: Int, x: CGFloat, y: CGFloat) async throws -> [UInt8] {
+            let (cg, _) = try await generator.image(at: CMTime(value: Int64(frame), timescale: 30))
+            return sample(CIImage(cgImage: cg), point: CGPoint(x: x * writer.canvas.width, y: (1 - y) * writer.canvas.height))
+        }
+        let lowerPresenter = try await panelPixel(frame: 45, x: 0.25, y: 0.75)
+        let upperPresenter = try await panelPixel(frame: 51, x: 0.25, y: 0.25)
+        let rightPresenter = try await panelPixel(frame: 57, x: 0.75, y: 0.25)
+        let leftPresenter = try await panelPixel(frame: 63, x: 0.25, y: 0.25)
+        let offAgain = try await panelPixel(frame: 80, x: 0.25, y: 0.25)
+        for pixel in [lowerPresenter, upperPresenter, rightPresenter, leftPresenter] { XCTAssertGreaterThan(pixel[0], 150) }
+        XCTAssertGreaterThan(offAgain[2], 150)
     }
 }
 

@@ -27,3 +27,24 @@ input, failure recovery, recording-state preservation, and rendered pixels in
 inset and both split orders. These tests do not validate physical camera startup
 or timing. On-device acceptance still needs repeated toggles, dismissal/reopen,
 front/rear readiness and Standard/Log recording checks.
+
+## Native quick menu
+
+The camera button now opens one native Menu with an inline, checkmarked Picker:
+Off, Inset, Top & Bottom, Side by Side. Its icon follows the confirmed active
+layout. Re-selecting a layout leaves it unchanged. Split layouts expose a
+separate Swap Cameras action. PiP Settings opens the existing live sheet for
+size, position and orientation; it is unavailable during a take.
+
+Prepared dual-camera takes may switch layouts/swap without changing their
+writer, canvas, orientation or audio. Stop Recording remains available during
+PiP acknowledgement. Quick Off while idle restores ordinary capture; Off inside
+settings keeps the live feeds warm until dismissal. Cameras are not newly
+configured during an active take.
+
+The existing saved-movie/export regression now changes from inset to both split
+layouts and swaps each during one audio/video take, then checks exported pixels
+and continuous audio. Native menu structure follows Apple's Menu guidance and
+SwiftUI's inline Picker pattern:
+https://developer.apple.com/design/human-interface-guidelines/menus
+https://developer.apple.com/documentation/swiftui/populating-swiftui-menus-with-adaptive-controls
