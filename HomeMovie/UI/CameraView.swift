@@ -292,7 +292,8 @@ struct CameraView: View {
                 onPrepare: { preparePiPSettingsPreview() }, liveFrames: camera.service.liveFrames,
                 frontMetering: camera.options?.frontMetering, rearMetering: camera.options?.rearMetering,
                 onFocus: { point, locked, front in camera.focus(at: point, locked: locked, front: front) },
-                onExposure: { bias, front in camera.exposure(bias, front: front) })
+                onExposure: { bias, front in camera.exposure(bias, front: front) },
+                onMove: { point, finished in camera.dragPiP(to: point, finished: finished) })
         }
         .alert("Recording Details", isPresented: $showingErrorDetails) {
             Button("OK", role: .cancel) { }

@@ -54,7 +54,7 @@ struct PiPMeteringView: UIViewRepresentable {
     }
     func updateUIView(_ view: PreviewUIView, context: Context) {
         let coordinator = context.coordinator
-        coordinator.parent = self
+        coordinator.updateParent(self)
         view.protectedRegions = protectedRegions
         view.insetDragHitTest = { [weak view, weak coordinator] point in
             guard let view else { return false }
@@ -78,6 +78,16 @@ struct PiPMeteringView: UIViewRepresentable {
         private var initialCenter: CGPoint?
         private let moveFeedback = UISelectionFeedbackGenerator()
         init(_ parent: PiPMeteringView) { self.parent = parent }
+        func updateParent(_ next: PiPMeteringView) {
+            let old = parent.presentation, new = next.presentation
+            if old.enabled != new.enabled || old.composition != new.composition || old.splitSwapped != new.splitSwapped {
+                // A focus square/sun for the old panel must not adjust a now-hidden
+                // presenter or remain attached to the wrong half after a swap.
+                selectedFront = false
+                view?.resetMeteringIndicator()
+            }
+            parent = next
+        }
         func applyCapabilities() {
             guard let view, let options = selectedFront ? parent.front : parent.rear else { return }
             view.exposureBias = options.bias; view.exposureRange = options.range; view.locked = options.locked
@@ -85,11 +95,11 @@ struct PiPMeteringView: UIViewRepresentable {
         func resolve(_ point: CGPoint, canvas: CGSize) -> PiPMeteringHit? {
             guard let snapshot = parent.backgroundFrames?.snapshot() ?? parent.frames.snapshot() else { return nil }
             let state = parent.useLivePresentation ? snapshot.pip?.presentation ?? parent.presentation : parent.presentation
-            guard state.opacity > 0.001 else { return nil }
+            let presenterVisible = state.enabled && state.opacity > 0.001 && state.isPlaceable
             let presenter = state.composition == .inset ? state.rect : state.composition.presenterRect(swapped: state.splitSwapped) ?? state.rect
             let unit = CGPoint(x: point.x / max(1, canvas.width), y: point.y / max(1, canvas.height))
-            let isFront = presenter.contains(unit)
-            let panel = isFront ? presenter : state.composition == .inset ? CGRect(x: 0, y: 0, width: 1, height: 1) :
+            let isFront = presenterVisible && presenter.contains(unit)
+            let panel = isFront ? presenter : !presenterVisible || state.composition == .inset ? CGRect(x: 0, y: 0, width: 1, height: 1) :
                 state.composition.presenterRect(swapped: !state.splitSwapped) ?? .zero
             let presenterSnapshot = parent.presenterFrames?.snapshot()
             guard let buffer = isFront ? (snapshot.pip?.presenter ?? presenterSnapshot?.buffer) : snapshot.buffer else { return nil }

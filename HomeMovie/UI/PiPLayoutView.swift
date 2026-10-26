@@ -61,6 +61,7 @@ struct PiPLayoutView: View {
     var rearMetering: CameraMetering? = nil
     var onFocus: ((CGPoint, Bool, Bool) -> Bool)? = nil
     var onExposure: ((Float, Bool) -> Void)? = nil
+    var onMove: ((CGPoint, Bool) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -289,14 +290,17 @@ struct PiPLayoutView: View {
     private var preview: some View {
         ZStack {
             PiPCompositionPreview(rearFrames: rearFrames, frontFrames: frontFrames,
-                layout: layout, format: format, enabled: enabled, obstacles: obstacles, profile: logMode ? .appleLog : .standard, cube: logCube)
+                layout: layout, format: format, enabled: enabled, obstacles: obstacles,
+                liveFrames: liveFrames, profile: logMode ? .appleLog : .standard, cube: logCube)
             if ready, let liveFrames, let onFocus, let onExposure {
                 PiPMeteringView(frames: liveFrames,
                     presentation: layout.previewPresentation(enabled: enabled, canvas: format.canvas, obstacles: obstacles),
-                    presenterFrames: frontFrames, backgroundFrames: rearFrames, useLivePresentation: false,
                     front: frontMetering, rear: rearMetering, protectedRegions: [],
                     onFocus: onFocus, onExposure: onExposure, onMove: { point, finished in
-                        if finished { layout.corner = PiPGeometry.nearestCorner(to: point, layout: layout, canvas: format.canvas, obstacles: obstacles) }
+                        // Use the same capture-queue drag/settle path as the viewfinder,
+                        // so the live preview follows every drag sample, not only release.
+                        if let onMove { onMove(point, finished) }
+                        else if finished { layout.corner = PiPGeometry.nearestCorner(to: point, layout: layout, canvas: format.canvas, obstacles: obstacles) }
                     })
             }
             if !ready {
