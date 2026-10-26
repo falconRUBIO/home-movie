@@ -94,7 +94,6 @@ struct CameraView: View {
     @State private var showingMovieSettings = false
     @State private var showingPiPLayout = false
     @State private var preparedPiPForSettings = false
-    @State private var showingPiPCompatibility = false
     @State private var viewfinderSize = CGSize.zero
     @State private var interfaceFormat = MovieFormat.portrait
     @State private var interfaceOrientation = UIInterfaceOrientation.portrait
@@ -284,13 +283,18 @@ struct CameraView: View {
                 format: pipCanvasFormat,
                 rearFrames: camera.service.pipRearFrames, frontFrames: camera.service.pipPresenterFrames,
                 ready: camera.options?.piPAvailable == true, canPrepare: camera.options?.canPreparePiP == true,
+                enabled: camera.options?.isPiPEnabled == true,
+                configuring: pipConfiguring || camera.state == .preparing,
+                setupFailed: camera.pipSetupFailed || camera.state == .failed,
+                onEnabledChange: { enabled in
+                    if enabled { enableDualCamera() } else { disableDualCamera() }
+                },
                 logMode: movie?.captureProfile == .appleLog, logCube: liveOriginal ? nil : liveCube, obstacles: [],
                 onPrepare: { preparePiPSettingsPreview() }, liveFrames: camera.service.liveFrames,
                 frontMetering: camera.options?.frontMetering, rearMetering: camera.options?.rearMetering,
                 onFocus: { point, locked, front in camera.focus(at: point, locked: locked, front: front) },
                 onExposure: { bias, front in camera.exposure(bias, front: front) })
         }
-        .sheet(isPresented: $showingPiPCompatibility) { pipCompatibility }
         .alert("Recording Details", isPresented: $showingErrorDetails) {
             Button("OK", role: .cancel) { }
         } message: { Text(camera.message ?? "No additional details are available.") }
@@ -315,7 +319,6 @@ struct CameraView: View {
                 if let options = camera.options {
                     Text(options.recordingFormat)
                     if options.profile == .appleLog {
-                        Text(CameraCompatibility.logPiPExplanation)
                         Text(options.canFlipWhileRecording ? "Switch cameras during a take. Log video and microphone recording stay continuous." :
                             options.canFlip ? "Camera flip is available before recording." : CameraCompatibility.logCameraExplanation)
                     }
@@ -325,11 +328,6 @@ struct CameraView: View {
                     .disabled(camera.busy)
                 Button("Dolly Settings", systemImage: "slider.horizontal.3") { showingDollySettings = true }
                     .disabled(camera.busy)
-                Button("PiP Layout…", systemImage: "rectangle.on.rectangle") { showingPiPLayout = true }
-                    .disabled(camera.busy)
-                if camera.options?.dualCameraPrepared == true {
-                    Button("Use Ordinary Camera", systemImage: "camera") { disableDualCamera() }.disabled(camera.busy)
-                }
                 Button("Dolly Help", systemImage: "questionmark.circle") { showingDollyHelp = true }
                     .disabled(camera.busy)
                 if let last = movie.latestTake {
@@ -464,12 +462,12 @@ struct CameraView: View {
                 .disabled(countdown != nil || !smoothZoomOpen && camera.state != .ready && camera.state != .recording)
         }
         PiPControl(enabled: options.isPiPEnabled,
-            unavailableReason: options.profile == .appleLog && !options.canPreparePiP ? CameraCompatibility.logPiPExplanation : nil,
-            disabled: countdown != nil || camera.state != .ready && camera.state != .recording || camera.state == .recording && !options.piPAvailable,
-            onToggle: {
-                if options.piPAvailable { camera.togglePiP() }
-                else if !camera.busy { showingPiPCompatibility = true }
-            }, onLayout: { if !camera.busy { showingPiPLayout = true } })
+            disabled: countdown != nil || pipConfiguring || camera.state != .ready && camera.state != .recording || camera.state == .recording && !options.piPAvailable,
+            recording: camera.state == .recording,
+            onActivate: {
+                if camera.state == .recording { camera.togglePiP() }
+                else { showingPiPLayout = true }
+            })
     }
     private func finishDollyIfIdle() async {
         guard camera.options?.smoothMoving == false else { return }
@@ -1213,23 +1211,6 @@ struct CameraView: View {
         let center = PiPGeometry.desiredCenter(corner: corner, canvas: format.canvas, size: camera.pipLayout.size, orientation: camera.pipLayout.orientation)
         camera.dragPiP(to: center, finished: true)
     }
-    private var pipCompatibility: some View {
-        NavigationStack {
-            Form {
-                Section("Dual Camera") {
-                    Text(movie?.captureProfile == .appleLog ? CameraCompatibility.logPiPExplanation : "Prepare both cameras before a take so PiP can appear and disappear without restarting video or audio.")
-                    Text(movie?.captureProfile == .appleLog
-                        ? "1080p · 30 fps · Apple Log · HEVC 10-bit\nCompatible front and rear cameras. One continuous microphone."
-                        : "1080p · 30 fps · SDR · H.264\nRear 1× wide camera with digital zoom. One continuous microphone.")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    if camera.options?.canPreparePiP == true {
-                        Button("Use Dual Camera") { enableDualCamera() }
-                    } else { Text("This iPhone cannot use the required front/rear camera combination.").foregroundStyle(.secondary) }
-                }
-            }.navigationTitle("Picture-in-Picture").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showingPiPCompatibility = false } } }
-        }.presentationDetents([.medium]).presentationDragIndicator(.visible)
-    }
     private func preparePiPSettingsPreview() {
         guard !camera.busy, !pipConfiguring, let movie,
               camera.options?.canPreparePiP == true, camera.options?.piPAvailable != true else { return }
@@ -1248,7 +1229,7 @@ struct CameraView: View {
     }
     private func enableDualCamera() {
         guard !camera.busy, !pipConfiguring, countdown == nil, let movie, camera.options?.canPreparePiP == true else { return }
-        pipConfiguring = true; showingPiPLayout = false; showingPiPCompatibility = false
+        pipConfiguring = true
         enablePiPAfterPreparation = true
         Task {
             defer { pipConfiguring = false }
@@ -1256,6 +1237,7 @@ struct CameraView: View {
                 let destination = movie.id
                 try await app.store.setDualCameraCapture(movieID: destination, enabled: true)
                 await app.refresh(); movieID = destination
+                preparedPiPForSettings = false
                 if scenePhase == .active { await prepareCamera() }
             } catch { enablePiPAfterPreparation = false; camera.message = error.localizedDescription }
         }
@@ -1265,7 +1247,14 @@ struct CameraView: View {
         pipConfiguring = true; enablePiPAfterPreparation = false
         Task {
             defer { pipConfiguring = false }
-            do { try await app.store.setDualCameraCapture(movieID: movieID, enabled: false); await app.refresh(); await prepareCamera() }
+            do {
+                try await app.store.setDualCameraCapture(movieID: movieID, enabled: false)
+                await app.refresh()
+                // Keep both live feeds available while choosing a layout with PiP off.
+                // Dismissal restores the ordinary camera without persisting preview preparation.
+                preparedPiPForSettings = true
+                if camera.options?.isPiPEnabled == true { camera.togglePiP() }
+            }
             catch { camera.message = error.localizedDescription }
         }
     }
