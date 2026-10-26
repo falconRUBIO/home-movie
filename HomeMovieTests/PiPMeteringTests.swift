@@ -116,6 +116,64 @@ final class PiPMeteringTests: XCTestCase {
             }
         }
     }
+    @MainActor func testOffPreviewMetersRearAcrossTheFullCanvasForEverySavedLayout() throws {
+        let rear = LiveFrames(), front = LiveFrames()
+        let buffer = try XCTUnwrap(PiPFrameRenderer().render(CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)), canvas: CGSize(width: 64, height: 64)))
+        rear.push(buffer, angle: 90); front.push(buffer, angle: 90)
+        let canvas = CGSize(width: 390, height: 844)
+        for composition in PiPComposition.allCases {
+            for swapped in [false, true] {
+                let layout = PiPLayout(composition: composition, splitSwapped: swapped)
+                let surface = PiPMeteringView(frames: rear,
+                    presentation: layout.previewPresentation(enabled: false, canvas: canvas),
+                    presenterFrames: front, useLivePresentation: false,
+                    front: nil, rear: nil, protectedRegions: [], onFocus: { _, _, _ in true },
+                    onExposure: { _, _ in }, onMove: { _, _ in })
+                let coordinator = surface.makeCoordinator()
+                for point in [CGPoint(x: 30, y: 30), CGPoint(x: 195, y: 422), CGPoint(x: 360, y: 800)] {
+                    let hit = try XCTUnwrap(coordinator.resolve(point, canvas: canvas))
+                    XCTAssertFalse(hit.front)
+                }
+            }
+        }
+    }
+
+    @MainActor func testLiveDragRecipeAndPanelChangesKeepMeteringInSync() throws {
+        let frames = LiveFrames()
+        let rear = try XCTUnwrap(PiPFrameRenderer().render(CIImage(color: .blue), canvas: CGSize(width: 64, height: 64)))
+        let front = try XCTUnwrap(PiPFrameRenderer().render(CIImage(color: .red), canvas: CGSize(width: 64, height: 64)))
+        let canvas = CGSize(width: 390, height: 844)
+        let original = PiPPresentation(rect: CGRect(x: 0.6, y: 0.6, width: 0.3, height: 0.2), opacity: 1, enabled: true)
+        var moved = original; moved.rect.origin = CGPoint(x: 0.1, y: 0.1)
+        frames.push(rear, angle: 90, pip: LivePiPFrame(presenter: front, backgroundAngle: 90,
+            presenterAngle: 90, presentation: moved))
+        func surface(_ state: PiPPresentation) -> PiPMeteringView {
+            PiPMeteringView(frames: frames, presentation: state,
+                front: nil, rear: nil, protectedRegions: [], onFocus: { _, _, _ in true },
+                onExposure: { _, _ in }, onMove: { _, _ in })
+        }
+        let view = PreviewUIView(frame: CGRect(origin: .zero, size: canvas))
+        let coordinator = surface(original).makeCoordinator(); coordinator.view = view
+        // A moving live recipe wins over a slower layout publication, as in the settings sheet.
+        let newCenter = CGPoint(x: moved.rect.midX * canvas.width, y: moved.rect.midY * canvas.height)
+        let oldCenter = CGPoint(x: original.rect.midX * canvas.width, y: original.rect.midY * canvas.height)
+        XCTAssertEqual(coordinator.resolve(newCenter, canvas: canvas)?.front, true)
+        XCTAssertEqual(coordinator.resolve(oldCenter, canvas: canvas)?.front, false)
+        coordinator.selectedFront = true
+        var off = moved; off.enabled = false; off.opacity = 0
+        coordinator.updateParent(surface(off))
+        XCTAssertFalse(coordinator.selectedFront)
+        frames.push(rear, angle: 90, pip: LivePiPFrame(presenter: front, backgroundAngle: 90,
+            presenterAngle: 90, presentation: off))
+        XCTAssertEqual(coordinator.resolve(newCenter, canvas: canvas)?.front, false)
+        var split = moved; split.composition = .sideBySide
+        coordinator.updateParent(surface(split)); coordinator.selectedFront = true
+        split.splitSwapped = true
+        coordinator.updateParent(surface(split))
+        XCTAssertFalse(coordinator.selectedFront)
+        view.detachPreview()
+    }
+
     @MainActor func testCustomMeteringUsesRoutedCoordinatesAndHonorsProtectedControls() {
         let view = PreviewUIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         var calls = 0

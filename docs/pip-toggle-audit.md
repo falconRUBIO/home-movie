@@ -66,3 +66,17 @@ outside the inset cannot start a move. VoiceOver corner actions remain.
 Regression coverage exercises the real coordinator's first-pan, moving-anchor,
 release/cancellation lifecycle and control/sun hit testing, plus all source and
 destination corners in portrait/landscape with both inset orientations.
+
+## Post-merge preview audit
+
+The settings sheet now renders the same atomic live-frame presentation used by
+the viewfinder and routes inset moves through the same capture-queue drag/settle
+path. It follows intermediate drag samples and the existing animated settle,
+instead of updating only the corner on release. Off previews meter the rear
+camera across the full canvas, regardless of the last saved layout. Hiding the
+presenter or swapping layouts clears stale focus/exposure indicators so a hidden
+camera cannot remain selected by an old sun handle.
+
+Added regressions for Off metering in all layouts/swap orders, live-frame recipe
+precedence during a drag, and metering target reset on Off/swap. Recording,
+encoding, audio and storage implementations are unchanged by this follow-up.
