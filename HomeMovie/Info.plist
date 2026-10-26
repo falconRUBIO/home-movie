@@ -32,11 +32,11 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>MOVIE MODE uses your camera to record video scenes in your movies.</string>
+	<string>MOVIE MODE uses your camera to record video clips in your movies.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>MOVIE MODE uses your microphone to record sound with your video scenes.</string>
+	<string>MOVIE MODE uses your microphone to record sound with your video clips.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Save finished movies and optional safety copies of original scenes to Photos.</string>
+	<string>Save finished movies and optional safety copies of original clips to Photos.</string>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>
