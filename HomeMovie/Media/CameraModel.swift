@@ -89,6 +89,8 @@ struct RecordingFlipHandoff {
     private var elapsedBeforeSegment = CMTime.zero
     private var continuingRecording = false
     private var preparationID = UUID()
+    // Async preference writes must not revive a camera page that has since closed.
+    var lifecycleID: UUID { preparationID }
     @AppStorage("frontCamera") var rememberedFront = false
     var busy: Bool { switchingCamera || recordingFlip != nil || [.starting, .recording, .finalizing].contains(state) }
     var recordingSessionActive: Bool { state.canStopTake || recordingFlip != nil }

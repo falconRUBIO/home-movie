@@ -1264,12 +1264,15 @@ struct CameraView: View {
         pipConfiguring = true
         camera.beginPiPChange(to: true)
         enablePiPAfterPreparation = true
+        let lifecycle = camera.lifecycleID
         Task {
             defer { pipConfiguring = false }
             do {
                 let destination = movie.id
                 try await app.store.setDualCameraCapture(movieID: destination, enabled: true)
-                await app.refresh(); movieID = destination
+                await app.refresh()
+                guard camera.lifecycleID == lifecycle else { return }
+                movieID = destination
                 preparedPiPForSettings = false
                 if scenePhase == .active {
                     if camera.options?.piPAvailable == true { camera.setPiPEnabled(true) }
@@ -1278,25 +1281,33 @@ struct CameraView: View {
                             layout: camera.pipLayout, canvasFormat: pipCanvasFormat, enablePiP: true)
                     }
                 } else { camera.cancelPiPChange() }
-            } catch { camera.cancelPiPChange(); enablePiPAfterPreparation = false; camera.message = error.localizedDescription }
+            } catch {
+                guard camera.lifecycleID == lifecycle else { return }
+                camera.cancelPiPChange(); enablePiPAfterPreparation = false; camera.message = error.localizedDescription
+            }
         }
     }
     private func disableDualCamera() {
         guard !camera.busy, !pipConfiguring, camera.pendingPiPEnabled == nil, countdown == nil else { return }
         pipConfiguring = true; enablePiPAfterPreparation = false
         camera.beginPiPChange(to: false)
+        let lifecycle = camera.lifecycleID
         Task {
             defer { pipConfiguring = false }
             do {
                 try await app.store.setDualCameraCapture(movieID: movieID, enabled: false)
                 await app.refresh()
+                guard camera.lifecycleID == lifecycle else { return }
                 // Keep both live feeds available while choosing a layout with PiP off.
                 // Dismissal restores the ordinary camera without persisting preview preparation.
                 preparedPiPForSettings = showingPiPLayout
                 camera.setPiPEnabled(false)
                 if !showingPiPLayout, scenePhase == .active { await prepareCamera() }
             }
-            catch { camera.cancelPiPChange(); camera.message = error.localizedDescription }
+            catch {
+                guard camera.lifecycleID == lifecycle else { return }
+                camera.cancelPiPChange(); camera.message = error.localizedDescription
+            }
         }
     }
 }

@@ -48,3 +48,8 @@ and continuous audio. Native menu structure follows Apple's Menu guidance and
 SwiftUI's inline Picker pattern:
 https://developer.apple.com/design/human-interface-guidelines/menus
 https://developer.apple.com/documentation/swiftui/populating-swiftui-menus-with-adaptive-controls
+
+Async On/Off preference writes capture the model's lifecycle identifier. If the
+page is suspended, closed or replaced while storage is busy, the old completion
+cannot reconfigure the new session or clear its pending request. Regression
+coverage verifies suspension invalidation and rejection of inactive commands.

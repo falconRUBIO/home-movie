@@ -67,6 +67,21 @@ final class PictureInPictureTests: XCTestCase {
         XCTAssertNil(camera.pendingPiPEnabled)
     }
 
+    @MainActor func testSuspendingInvalidatesPendingPiPAndRejectsOldCommands() {
+        var commands: [Bool] = []
+        let app = AppModel()
+        let camera = CameraModel(app: app, applyPiPEnabled: { commands.append($0) })
+        camera.options = preparedOptions(); camera.state = .ready
+        let lifecycle = camera.lifecycleID
+        camera.beginPiPChange(to: true)
+        camera.suspend()
+        XCTAssertNotEqual(camera.lifecycleID, lifecycle)
+        XCTAssertNil(camera.pendingPiPEnabled)
+        camera.setPiPEnabled(true)
+        XCTAssertTrue(commands.isEmpty)
+        XCTAssertNil(camera.pendingPiPEnabled)
+    }
+
     @MainActor func testRecordingPiPToggleKeepsRecordingAndUsesExplicitTargets() async {
         var commands: [Bool] = []
         let app = AppModel()
