@@ -284,7 +284,8 @@ struct CameraView: View {
                 rearFrames: camera.service.pipRearFrames, frontFrames: camera.service.pipPresenterFrames,
                 ready: camera.options?.piPAvailable == true, canPrepare: camera.options?.canPreparePiP == true,
                 enabled: camera.options?.isPiPEnabled == true,
-                configuring: pipConfiguring || camera.state == .preparing,
+                requestedEnabled: camera.pendingPiPEnabled,
+                configuring: pipConfiguring || camera.pendingPiPEnabled != nil || camera.state == .preparing,
                 setupFailed: camera.pipSetupFailed || camera.state == .failed,
                 onEnabledChange: { enabled in
                     if enabled { enableDualCamera() } else { disableDualCamera() }
@@ -451,7 +452,7 @@ struct CameraView: View {
                 .disabled(countdown != nil || !smoothZoomOpen && camera.state != .ready && camera.state != .recording)
         }
         PiPControl(enabled: options.isPiPEnabled,
-            disabled: countdown != nil || pipConfiguring || camera.state != .ready && camera.state != .recording || camera.state == .recording && !options.piPAvailable,
+            disabled: countdown != nil || pipConfiguring || camera.pendingPiPEnabled != nil || camera.state != .ready && camera.state != .recording || camera.state == .recording && !options.piPAvailable,
             recording: camera.state == .recording,
             onActivate: {
                 if camera.state == .recording { camera.togglePiP() }
@@ -1232,6 +1233,7 @@ struct CameraView: View {
     private func enableDualCamera() {
         guard !camera.busy, !pipConfiguring, countdown == nil, let movie, camera.options?.canPreparePiP == true else { return }
         pipConfiguring = true
+        camera.beginPiPChange(to: true)
         enablePiPAfterPreparation = true
         Task {
             defer { pipConfiguring = false }
@@ -1240,13 +1242,17 @@ struct CameraView: View {
                 try await app.store.setDualCameraCapture(movieID: destination, enabled: true)
                 await app.refresh(); movieID = destination
                 preparedPiPForSettings = false
-                if scenePhase == .active { await prepareCamera() }
-            } catch { enablePiPAfterPreparation = false; camera.message = error.localizedDescription }
+                if scenePhase == .active {
+                    if camera.options?.piPAvailable == true { camera.setPiPEnabled(true) }
+                    else { await prepareCamera() }
+                } else { camera.cancelPiPChange() }
+            } catch { camera.cancelPiPChange(); enablePiPAfterPreparation = false; camera.message = error.localizedDescription }
         }
     }
     private func disableDualCamera() {
         guard !camera.busy, !pipConfiguring, countdown == nil else { return }
         pipConfiguring = true; enablePiPAfterPreparation = false
+        camera.beginPiPChange(to: false)
         Task {
             defer { pipConfiguring = false }
             do {
@@ -1255,9 +1261,9 @@ struct CameraView: View {
                 // Keep both live feeds available while choosing a layout with PiP off.
                 // Dismissal restores the ordinary camera without persisting preview preparation.
                 preparedPiPForSettings = true
-                if camera.options?.isPiPEnabled == true { camera.togglePiP() }
+                camera.setPiPEnabled(false)
             }
-            catch { camera.message = error.localizedDescription }
+            catch { camera.cancelPiPChange(); camera.message = error.localizedDescription }
         }
     }
 }

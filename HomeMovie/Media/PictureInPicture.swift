@@ -67,6 +67,12 @@ struct PiPLayout: Codable, Equatable, Sendable {
         self.corner = corner; self.size = size; self.orientation = orientation; self.zoom = Self.clampedZoom(zoom)
     }
     var splitPresenterRect: CGRect? { composition.presenterRect(swapped: splitSwapped) }
+    // Settings rendering and metering must agree with the actual On/Off state.
+    func previewPresentation(enabled: Bool, canvas: CGSize, obstacles: [CGRect] = []) -> PiPPresentation {
+        PiPPresentation(composition: composition, splitSwapped: splitSwapped,
+            rect: PiPGeometry.rect(layout: self, canvas: canvas, obstacles: obstacles) ?? .zero,
+            opacity: enabled ? 1 : 0, enabled: enabled, corner: corner, zoom: framingZoom)
+    }
     private enum CodingKeys: String, CodingKey { case corner, size, orientation, zoom, composition, splitSwapped }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)

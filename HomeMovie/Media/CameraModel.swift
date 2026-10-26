@@ -57,7 +57,8 @@ struct RecordingFlipHandoff {
 }
 
 @MainActor final class CameraModel: ObservableObject {
-    let service = CaptureService()
+    let service: CaptureService
+    private let applyPiPEnabled: (Bool) -> Void
     @Published var state: CameraState = .preparing
     @Published private(set) var switchingCamera = false
     @Published private(set) var switchingFormat: MovieFormat?
@@ -70,6 +71,7 @@ struct RecordingFlipHandoff {
     @Published private(set) var pipPresentation = PiPPresentation()
     @Published private(set) var pipLayout = PiPLayout()
     @Published private(set) var pipSetupFailed = false
+    @Published private(set) var pendingPiPEnabled: Bool?
     private var preferencesMovieID: UUID?
     private var enablePiPWhenReady = false
     @Published private(set) var recordingFlip: RecordingFlipHandoff?
@@ -102,7 +104,9 @@ struct RecordingFlipHandoff {
             otherCameraSupported: options.canFlip, continuousFlipSupported: options.canFlipWhileRecording)
     }
 
-    init(app: AppModel) {
+    init(app: AppModel, service: CaptureService = CaptureService(), applyPiPEnabled: ((Bool) -> Void)? = nil) {
+        self.service = service
+        self.applyPiPEnabled = applyPiPEnabled ?? service.setPiPEnabled
         self.app = app
         service.onEvent = { [weak self] event in Task { @MainActor in await self?.receive(event) } }
     }
@@ -122,13 +126,15 @@ struct RecordingFlipHandoff {
             layout: layout, canvasFormat: canvasFormat, enablePiP: enablePiP)
         // View presentation and foreground callbacks may request the same camera.
         // Keep an in-flight or ready session instead of showing Preparing again.
-        if active, preparationConfiguration == configuration, state == .preparing || state == .ready { return }
+        if active, preparationConfiguration == configuration, state == .preparing { return }
         if active, state == .ready, options?.dualCameraPrepared == dualCamera, options?.profile == profile,
-           let previous = preparationConfiguration, previous.profile == profile, previous.movieID == movieID, previous.dualCamera == dualCamera {
+           preferencesMovieID == movieID {
             preparationConfiguration = configuration
             pipLayout = layout
             service.setPiPLayout(layout, canvasFormat: canvasFormat)
-            if dualCamera, options?.isPiPEnabled != enablePiP { service.setPiPEnabled(enablePiP) }
+            // The stored configuration is only a request. Reconcile against the
+            // observed switch, including when On -> Off -> On repeats that request.
+            if dualCamera { setPiPEnabled(enablePiP) }
             return
         }
         ReliabilityDiagnostics.shared.record(.cameraRequested)
@@ -139,13 +145,13 @@ struct RecordingFlipHandoff {
         active = true; state = .preparing; message = nil; interruption = nil; hasRecoverableTake = false
         let granted = await CaptureService.permissions()
         guard active, preparationID == requestID else { return }
-        guard granted else { state = .denied; return }
+        guard granted else { state = .denied; cancelPiPChange(); return }
         if profile == .appleLog {
             do { try await LogPiPValidation.shared.check() }
             catch {
                 guard active, preparationID == requestID else { return }
                 ReliabilityDiagnostics.shared.record(.cameraFailed, error: error)
-                state = .failed; message = error.localizedDescription; pipSetupFailed = dualCamera
+                state = .failed; cancelPiPChange(); message = error.localizedDescription; pipSetupFailed = dualCamera
                 return
             }
             guard active, preparationID == requestID, !Task.isCancelled else { return }
@@ -205,12 +211,13 @@ struct RecordingFlipHandoff {
     }
     func suspend() {
         switchingCamera = false; switchingFormat = nil
-        recordingFlip = nil
+        recordingFlip = nil; cancelPiPChange()
         active = false; startCancelled = true; preparationID = UUID()
         if busy { beginBackgroundTime(); state = .finalizing; timer?.invalidate() }
         service.suspend()
     }
     func pauseForPlayback() async {
+        cancelPiPChange()
         active = false; startCancelled = true; preparationID = UUID()
         await withCheckedContinuation { continuation in
             service.suspend { continuation.resume() }
@@ -259,9 +266,19 @@ struct RecordingFlipHandoff {
         switchingFormat = format; switchingCamera = true
         service.flip(previewFormat: format)
     }
+    func beginPiPChange(to enabled: Bool) { pendingPiPEnabled = enabled }
+    func cancelPiPChange() { pendingPiPEnabled = nil; enablePiPWhenReady = false }
+    func setPiPEnabled(_ enabled: Bool) {
+        guard active, !switchingCamera, state == .ready || state == .recording,
+              options?.piPAvailable == true else { cancelPiPChange(); return }
+        pendingPiPEnabled = enabled
+        // An explicit Off must also cancel an earlier deferred On.
+        enablePiPWhenReady = false
+        applyPiPEnabled(enabled)
+    }
     func togglePiP() {
-        guard active, !switchingCamera, state == .ready || state == .recording, options?.piPAvailable == true else { return }
-        service.setPiPEnabled(options?.isPiPEnabled != true)
+        guard pendingPiPEnabled == nil else { return }
+        setPiPEnabled(options?.isPiPEnabled != true)
     }
     func updatePiPLayout(_ layout: PiPLayout, movieID: UUID, canvasFormat: MovieFormat? = nil) {
         guard !busy, let app else { return }
@@ -282,10 +299,11 @@ struct RecordingFlipHandoff {
         case .ready(let options):
             if state == .preparing { ReliabilityDiagnostics.shared.record(.cameraReady) }
             self.options = options; rememberedFront = options.isFront
+            if pendingPiPEnabled == options.isPiPEnabled { pendingPiPEnabled = nil }
             if !options.dualCameraPrepared { pipPresentation = PiPPresentation() }
             if (state == .preparing || state == .ready), recordingFlip == nil, active, interruption == nil { state = .ready }
             if enablePiPWhenReady, options.piPAvailable, active, state == .ready {
-                enablePiPWhenReady = false; service.setPiPEnabled(true)
+                setPiPEnabled(true)
             }
         case .cameraChanged(let options):
             let wasSwitching = switchingCamera; switchingCamera = false; switchingFormat = nil
@@ -345,18 +363,21 @@ struct RecordingFlipHandoff {
                 message = error.localizedDescription
             }
         case .interrupted(let text):
+            cancelPiPChange()
             ReliabilityDiagnostics.shared.record(.cameraInterrupted)
             switchingCamera = false; switchingFormat = nil
             recordingFlip = nil
             interruption = text; message = text; startCancelled = true
             if busy { state = .finalizing; beginBackgroundTime() } else { state = .interrupted }
         case .failed(let text):
+            cancelPiPChange()
             ReliabilityDiagnostics.shared.record(.cameraFailed)
             switchingCamera = false; switchingFormat = nil
             recordingFlip = nil
             message = text
             if busy { interruption = text; stop() } else { state = .failed }
         case .notice(let text):
+            cancelPiPChange()
             message = text
         case .pipPresentation(let presentation):
             pipPresentation = presentation
@@ -367,7 +388,7 @@ struct RecordingFlipHandoff {
                 catch { message = "The inset moved for this clip, but its default position could not be saved." }
             }
         case .pipSetupFailed(let text):
-            pipSetupFailed = true; enablePiPWhenReady = false; message = text
+            pipSetupFailed = true; cancelPiPChange(); message = text
             if let app, let movieID = preferencesMovieID {
                 try? await app.store.setDualCameraCapture(movieID: movieID, enabled: false); await app.refresh()
             }

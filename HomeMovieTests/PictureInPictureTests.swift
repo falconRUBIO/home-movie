@@ -6,6 +6,103 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    private func preparedOptions(profile: CaptureProfile = .standard, enabled: Bool = false) -> CameraOptions {
+        var options = CameraOptions(lenses: [], zoom: 1, minimum: 1, maximum: 8, multiplier: 1,
+            isFront: false, angle: 90, profile: profile, canMeter: false, canLock: false,
+            focusLocked: false, exposureBias: 0, minimumExposureBias: -2, maximumExposureBias: 2,
+            canFlip: true, hasTorch: false, torchOn: false, canStayOnLens: false,
+            smoothMoving: false, recordingFormat: "Test")
+        options.canPreparePiP = true; options.piPAvailable = true
+        options.dualCameraPrepared = true; options.isPiPEnabled = enabled
+        return options
+    }
+
+    @MainActor func testSamePreparedSessionCanEnableAgainAfterOffForBothProfiles() async {
+        for profile in [CaptureProfile.standard, .appleLog] {
+            var commands: [Bool] = []
+            let app = AppModel()
+            let camera = CameraModel(app: app, applyPiPEnabled: { commands.append($0) })
+            var options = preparedOptions(profile: profile)
+            camera.options = options; camera.state = .ready
+            await camera.prepare(profile: profile, dualCamera: true, enablePiP: true)
+            XCTAssertEqual(camera.state, .ready)
+            XCTAssertEqual(camera.pendingPiPEnabled, true)
+            options.isPiPEnabled = true; await camera.receive(.ready(options))
+            XCTAssertNil(camera.pendingPiPEnabled)
+            camera.setPiPEnabled(false)
+            options.isPiPEnabled = false; await camera.receive(.ready(options))
+            // Identical to the first configuration, but the live switch is now Off.
+            await camera.prepare(profile: profile, dualCamera: true, enablePiP: true)
+            XCTAssertEqual(commands, [true, false, true])
+            XCTAssertEqual(camera.pendingPiPEnabled, true)
+            XCTAssertEqual(camera.state, .ready)
+            options.isPiPEnabled = true; await camera.receive(.ready(options))
+            XCTAssertNil(camera.pendingPiPEnabled)
+        }
+    }
+
+    @MainActor func testPiPToggleWaitsForConfirmationAndRecoversFromFailure() async {
+        var commands: [Bool] = []
+        let app = AppModel()
+        let camera = CameraModel(app: app, applyPiPEnabled: { commands.append($0) })
+        var options = preparedOptions()
+        camera.options = options; camera.state = .ready
+        camera.setPiPEnabled(true)
+        await camera.receive(.ready(options)) // A stale Off publication is not an acknowledgement.
+        XCTAssertEqual(camera.pendingPiPEnabled, true)
+        camera.togglePiP()
+        XCTAssertEqual(commands, [true])
+        options.isPiPEnabled = true; await camera.receive(.ready(options))
+        XCTAssertNil(camera.pendingPiPEnabled)
+        camera.setPiPEnabled(false)
+        XCTAssertEqual(commands, [true, false])
+        await camera.receive(.notice("The camera was interrupted."))
+        XCTAssertNil(camera.pendingPiPEnabled)
+        camera.setPiPEnabled(false)
+        options.isPiPEnabled = false; await camera.receive(.ready(options))
+        XCTAssertNil(camera.pendingPiPEnabled)
+        camera.beginPiPChange(to: true)
+        await camera.receive(.interrupted("Interrupted"))
+        XCTAssertNil(camera.pendingPiPEnabled)
+    }
+
+    @MainActor func testRecordingPiPToggleKeepsRecordingAndUsesExplicitTargets() async {
+        var commands: [Bool] = []
+        let app = AppModel()
+        let camera = CameraModel(app: app, applyPiPEnabled: { commands.append($0) })
+        var options = preparedOptions()
+        camera.options = options; camera.state = .recording
+        for enabled in [true, false, true, false] {
+            camera.setPiPEnabled(enabled)
+            options.isPiPEnabled = enabled; await camera.receive(.ready(options))
+            XCTAssertEqual(camera.state, .recording)
+            XCTAssertNil(camera.pendingPiPEnabled)
+        }
+        XCTAssertEqual(commands, [true, false, true, false])
+    }
+
+    func testSettingsPreviewOffShowsOnlyRearForInsetAndBothSplitOrders() throws {
+        let rear = try frame(red: 0, green: 0, blue: 220)
+        let front = try frame(red: 220, green: 0, blue: 0)
+        let canvas = CGSize(width: 180, height: 320)
+        for composition in PiPComposition.allCases {
+            for swapped in [false, true] {
+                let layout = PiPLayout(composition: composition, splitSwapped: swapped)
+                for enabled in [true, false, true, false] {
+                    let state = layout.previewPresentation(enabled: enabled, canvas: canvas)
+                    let image = PiPCompositor.image(background: rear, presenter: front, canvas: canvas,
+                        backgroundAngle: 0, presenterAngle: 0, presentation: state)
+                    // Convert the presenter's UIKit rectangle to Core Image coordinates.
+                    let point = CGPoint(x: state.rect.midX * canvas.width,
+                        y: (1 - state.rect.midY) * canvas.height)
+                    let pixel = sample(image, point: point)
+                    XCTAssertGreaterThan(pixel[enabled ? 0 : 2], 180)
+                    XCTAssertLessThan(pixel[enabled ? 2 : 0], 40)
+                }
+            }
+        }
+    }
+
     func testNewInsetSizesStartAtFormerMediumAndFitEveryCanvas() throws {
         XCTAssertEqual(PiPSize.small.fraction, 0.36, accuracy: 0.0001)
         XCTAssertGreaterThan(PiPSize.medium.fraction, PiPSize.small.fraction)
