@@ -1,7 +1,6 @@
 import SwiftUI
 import AVFoundation
 import UIKit
-import UniformTypeIdentifiers
 
 private struct DollyLensButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -53,13 +52,17 @@ struct CameraView: View {
     @State private var liveCube: ColorCube?
     @AppStorage(FalseColorPreview.preferenceKey) private var falseColorEnabled = false
     private var showsFalseColor: Bool { falseColorEnabled && movie?.captureProfile == .appleLog }
-    @AppStorage("originalLogPreview") private var liveOriginal = false
+    @AppStorage(CameraPreviewMode.originalLogPreferenceKey) private var liveOriginal = false
     @State private var liveLookStatus = LiveLookStatus.inactive
     @State private var manualZoomTargetShown = false
-    @State private var looks: [LUTReference] = []
-    @State private var addingLook = false
-    @State private var importingDisplayLook = false
-    @State private var changingLook = false
+    @State private var showingLookPreview = false
+    @State private var showingFalseColorGuide = false
+    private var previewMode: Binding<CameraPreviewMode> {
+        Binding(get: { CameraPreviewMode(originalLog: liveOriginal, falseColor: falseColorEnabled) }, set: { mode in
+            liveOriginal = mode.usesOriginalLog
+            falseColorEnabled = mode.usesFalseColor
+        })
+    }
     @State private var addedSceneID: UUID?
     @State private var undoingTake = false
     @State private var smoothZoomOpen = false
@@ -166,10 +169,6 @@ struct CameraView: View {
         .task(id: movieID) {
             updateZoomSettings()
             await prepareCamera()
-            guard !Task.isCancelled, movie?.captureProfile == .appleLog else { return }
-            let available = await app.store.availableLooks()
-            guard !Task.isCancelled else { return }
-            looks = available
         }
         .task(id: "\(movieID)-\(movie?.captureProfile.rawValue ?? "standard")-\(movie?.look?.id.uuidString ?? "standard")") {
             guard movie?.captureProfile == .appleLog else { liveCube = nil; return }
@@ -182,21 +181,6 @@ struct CameraView: View {
                 }.value
                 guard !Task.isCancelled else { return }; liveCube = loaded
             } catch { if !Task.isCancelled { liveCube = nil; liveLookStatus = .unavailable; camera.message = "This look could not be loaded. Choose Apple Standard." } }
-        }
-        .fileImporter(isPresented: $addingLook, allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data], allowsMultipleSelection: false) { result in
-            changingLook = true
-            Task {
-                defer { changingLook = false }
-                do {
-                    let urls = try result.get()
-                    if let url = urls.first {
-                        let look = try await app.store.importLook(from: url, displayReferred: importingDisplayLook)
-                        try await app.store.setLook(movieID: movieID, look: look)
-                        looks = await app.store.availableLooks(); await app.refresh()
-                    }
-                } catch { camera.message = error.localizedDescription }
-                await prepareCamera()
-            }
         }
         .onChange(of: handsFreeStart) { _, _ in
             cancelCountdown()
@@ -281,6 +265,10 @@ struct CameraView: View {
         .sheet(isPresented: $showingRecovery, onDismiss: {
             Task { await prepareCamera() }
         }) { RecordingRecoveryView().environmentObject(app) }
+        .sheet(isPresented: $showingFalseColorGuide) { FalseColorGuideView() }
+        .sheet(isPresented: $showingLookPreview) {
+            LookPreviewSheet(app: app, movieID: movieID, previewMode: previewMode, canChangeLook: !camera.busy)
+        }
         .sheet(isPresented: $showingDollyHelp) { dollyHelp }
         .sheet(isPresented: $showingDollySettings) { dollySettings }
         .sheet(isPresented: $showingMovieSettings, onDismiss: { Task { await prepareCamera() } }) {
@@ -317,20 +305,11 @@ struct CameraView: View {
             }.accessibilityLabel("Back to Movies").disabled(camera.busy)
             Spacer(minLength: 8)
             if movie.captureProfile == .appleLog {
-                Menu {
-                    Button { UISelectionFeedbackGenerator().selectionChanged(); liveOriginal.toggle() } label: { Label("Original Log Preview", systemImage: liveOriginal ? "checkmark" : "circle") }
-                    Text("Preview only · Recordings stay in Apple Log.")
-                    Divider()
-                    Button { changeLiveLook(nil) } label: { Label("Apple Standard", systemImage: movie.look == nil ? "checkmark" : "circle") }
-                    ForEach(looks, id: \.id) { look in
-                        Button { changeLiveLook(look) } label: { Label(look.displayName, systemImage: movie.look?.id == look.id ? "checkmark" : "circle") }
-                    }
-                    Divider()
-                    Button("Add Apple Log Look…", systemImage: "plus") { importingDisplayLook = false; addingLook = true }.disabled(camera.busy)
-                    Button("Add Rec.709 Look…", systemImage: "plus") { importingDisplayLook = true; addingLook = true }.disabled(camera.busy)
-                } label: { MovieControlIcon(systemName: "camera.filters").homeGlass() }
-                    .accessibilityLabel("Live look: \(liveOriginal ? "Original Log" : movie.lookName)")
-                    .disabled(changingLook)
+                Button { showingLookPreview = true } label: {
+                    MovieControlIcon(systemName: "camera.filters").homeGlass()
+                }
+                .accessibilityLabel("Look and Preview")
+                .accessibilityValue("Movie look: \(movie.lookName). Viewfinder: \(previewMode.wrappedValue.title)")
             }
             Menu {
                 if let options = camera.options {
@@ -340,11 +319,6 @@ struct CameraView: View {
                         Text(options.canFlipWhileRecording ? "Switch cameras during a take. Log video and microphone recording stay continuous." :
                             options.canFlip ? "Camera flip is available before recording." : CameraCompatibility.logCameraExplanation)
                     }
-                    Divider()
-                }
-                if movie.captureProfile == .appleLog {
-                    Toggle("False Color", isOn: $falseColorEnabled.withSelectionFeedback())
-                    Text("Exposure guide · Preview only")
                     Divider()
                 }
                 Button("Movie Settings", systemImage: "film") { showingMovieSettings = true }
@@ -406,20 +380,8 @@ struct CameraView: View {
     private func captureIndicators(movie: Movie) -> some View {
         VStack(spacing: 6) {
             if showsFalseColor {
-                VStack(spacing: 3) {
-                    Text(liveLookStatus == .ready ? "False Color" : liveLookStatus == .unavailable ? "False Color unavailable" : "Loading False Color…")
-                        .font(.caption2.weight(.semibold))
-                    if liveLookStatus == .ready {
-                        HStack(spacing: 8) {
-                            Label("Low", systemImage: "circle.fill").foregroundStyle(Color(red: 0.35, green: 0.6, blue: 1))
-                            Label("Gray", systemImage: "circle.fill").foregroundStyle(.green)
-                            Label("High", systemImage: "circle.fill").foregroundStyle(.orange)
-                        }.font(.system(size: 10, weight: .medium))
-                    }
-                }.padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 6))
-                    .allowsHitTesting(false)
-                    .accessibilityLabel("False Color exposure guide. Blue: low exposure. Green: middle gray. Orange and red: high exposure. Preview only.")
+                FalseColorIndicator(status: liveLookStatus) { showingFalseColorGuide = true }
+                    .cameraControlRegion()
             } else if movie.captureProfile == .appleLog {
                 let wantsLook = !liveOriginal && camera.state.showsLiveLook
                 LogLookBadge(lookName: wantsLook ? (liveLookStatus == .ready ? movie.lookName : liveLookStatus == .unavailable ? "Preview unavailable" : "Loading look…") : "Original")
@@ -1166,15 +1128,6 @@ struct CameraView: View {
                 addedSceneID = nil; camera.savedScene = false
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             } catch { camera.message = error.localizedDescription }
-        }
-    }
-    private func changeLiveLook(_ look: LUTReference?) {
-        guard !changingLook else { return }
-        UISelectionFeedbackGenerator().selectionChanged()
-        changingLook = true
-        Task {
-            defer { changingLook = false }
-            await app.run { try await app.store.setLook(movieID: movieID, look: look) }
         }
     }
     private func zoomLabel(_ factor: CGFloat, multiplier: CGFloat) -> String {

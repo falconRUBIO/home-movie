@@ -1,9 +1,20 @@
 # False Color exposure preview
 
-Enable **False Color** in the camera menu or **Movie Settings → Live Preview**
-when recording Apple Log. It defaults off and remembers the preference. Standard
-movies ignore that preference. Turning it off restores the Cinema/Original Log
-selection. It may be toggled during recording without reconfiguring capture.
+Open **Look & Preview → Viewfinder → False Color**, or choose it under
+**Movie Settings → Viewfinder**, when recording Apple Log. With Look, Log and
+False Color are mutually exclusive preview choices. Existing preference keys are
+preserved; an older configuration with both preview switches enabled resolves to
+False Color until a new choice is made. Standard movies ignore these Log preview
+preferences. Preview choices may change during recording without reconfiguring capture.
+
+The small on-screen False Color button is a static key, not a live chart. It shows
+all six colors, including purple, pink and red, and opens a full guide when tapped.
+The guide is also available beside the Viewfinder picker. Green is explicitly
+labeled 18% middle gray; unmarked exposure ranges remain grayscale. The key's RGB
+values and the shader's thresholds/colors come from the same `FalseColorZone`
+definitions, so the legend cannot silently omit or substitute a different color.
+Movie Look is separate: it controls playback/export and With Look preview.
+Import Look opens a secondary screen for choosing Apple Log or Rec.709 LUT input.
 
 The map decodes verified Apple Log RGB to scene-linear values and computes
 BT.2020 luminance (0.2627 R + 0.6780 G + 0.0593 B). Exposure is
@@ -51,3 +62,21 @@ bright windows, faces, saturated colored lights, low-light noise, front/rear
 handoffs, orientation changes, and continuous PiP/dolly recording. Compare saved
 clips with monitoring on/off and measure preview latency/thermal behavior.
 Simulator checks cannot establish sensor limits or real-device performance.
+
+
+## Design references
+
+Apple's Final Cut Camera documents false color as a monitoring overlay and shows
+a full reference scale, including purple/blue, green/pink, and warm highlight
+colors: https://support.apple.com/guide/final-cut-camera/use-video-scopes-and-overlays-deva751720e2/ios
+
+ARRI's published specification distinguishes common color categories from
+camera-, encoding-, range- and EI-dependent thresholds:
+https://www.arri.com/resource/blob/390448/2d469ae1e98110562fe347cea50a284b/arri-logc-false-color-specification-data.pdf
+
+These references inform the complete, readable key and monitoring-only behavior.
+The app retains its stated Apple Log relative-stop ranges rather than applying
+another camera's sensor noise/clipping calibration or presenting an IRE scale
+that does not describe this mapping. A screenshot alone cannot establish whether
+a mostly purple image reflects actual exposure or a capture/metadata problem;
+verified Log source-frame testing remains required.

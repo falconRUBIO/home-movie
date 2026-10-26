@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 import UIKit
 
 struct LibraryView: View {
@@ -438,15 +437,12 @@ struct MovieSettingsView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     let movie: Movie
-    @AppStorage(FalseColorPreview.preferenceKey) private var falseColorEnabled = false
-    @State private var originalLogPreview = UserDefaults.standard.bool(forKey: "originalLogPreview")
+    @State private var previewMode = CameraPreviewMode.read()
     @State private var profile: CaptureProfile
     @State private var selectedLook: LUTReference?
     @State private var supportsLog = false
     @State private var checking = true
     @State private var looks: [LUTReference] = []
-    @State private var importingLook = false
-    @State private var importingDisplayLook = false
     @State private var loadingLook = false
     @State private var saving = false
     @State private var problem: String?
@@ -472,32 +468,24 @@ struct MovieSettingsView: View {
                 }
                 if profile == .appleLog {
                     Section {
-                        Picker("Preview Look", selection: $originalLogPreview.withSelectionFeedback()) {
-                            Text("Cinema").tag(false)
-                            Text("Log").tag(true)
-                        }.pickerStyle(.segmented)
-                        Toggle("False Color", isOn: $falseColorEnabled.withSelectionFeedback())
-                    } header: { Text("Live Preview") } footer: {
-                        Text("Cinema shows your selected look. Log shows the flat image. False Color temporarily replaces either preview with an exposure map. Blue/purple mark low exposure; green marks middle gray; orange/red mark high exposure. These are exposure guides, not guaranteed clipping limits. Recordings stay in Apple Log.")
-                    }
-                    Section {
-                        Menu {
-                            Button("Apple Standard") { UISelectionFeedbackGenerator().selectionChanged(); selectedLook = nil }
+                        Picker("Movie Look", selection: Binding<UUID?>(get: { selectedLook?.id }, set: { id in
+                            selectedLook = looks.first { $0.id == id }
+                        }).withSelectionFeedback()) {
+                            Text("Standard").tag(Optional<UUID>.none)
                             ForEach(looks, id: \.id) { look in
-                                Button(look.displayName) { UISelectionFeedbackGenerator().selectionChanged(); selectedLook = look }
+                                Text(look.displayName).tag(Optional(look.id))
                             }
-                        } label: {
-                            HStack {
-                                Text("Cinema Look")
-                                Spacer()
-                                Text(selectedLook?.displayName ?? "Apple Standard").foregroundStyle(.secondary)
+                        }.pickerStyle(.menu)
+                        NavigationLink {
+                            LookFileImportView(importing: $loadingLook) { url, displayReferred in
+                                selectedLook = try await app.store.importLook(from: url, displayReferred: displayReferred)
+                                looks = await app.store.availableLooks()
                             }
-                        }.foregroundStyle(.primary)
-                        Button("Add Apple Log Look…", systemImage: "plus") { importingDisplayLook = false; importingLook = true }
-                        Button("Add Rec.709 Look…", systemImage: "plus") { importingDisplayLook = true; importingLook = true }
-                    } header: { Text("Cinema Look") } footer: {
-                        Text("Applied to playback, export and Cinema preview. Your Apple Log originals stay intact.")
+                        } label: { Label("Import Look…", systemImage: "square.and.arrow.down") }
+                    } header: { Text("Movie Look") } footer: {
+                        Text("Used for playback, export and With Look preview. Your originals stay in Apple Log.")
                     }
+                    ViewfinderPreviewSection(mode: $previewMode)
                 }
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
             }
@@ -514,7 +502,7 @@ struct MovieSettingsView: View {
                             do {
                                 try await app.store.setMovieRecordingSettings(movieID: movie.id,
                                     profile: profile, look: selectedLook)
-                                UserDefaults.standard.set(originalLogPreview, forKey: "originalLogPreview")
+                                previewMode.store()
                                 await app.refresh(); dismiss()
                             } catch { problem = error.localizedDescription; saving = false }
                         }
@@ -526,23 +514,7 @@ struct MovieSettingsView: View {
                 looks = await app.store.availableLooks()
                 checking = false
             }
-            .fileImporter(isPresented: $importingLook,
-                allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data],
-                allowsMultipleSelection: false) { result in
-                switch result {
-                case .success(let urls):
-                    guard let url = urls.first else { return }
-                    loadingLook = true
-                    Task {
-                        defer { loadingLook = false }
-                        do {
-                            selectedLook = try await app.store.importLook(from: url, displayReferred: importingDisplayLook)
-                            looks = await app.store.availableLooks()
-                        } catch { problem = error.localizedDescription }
-                    }
-                case .failure(let error): problem = error.localizedDescription
-                }
-            }
+
         }.presentationDetents([.medium, .large]).interactiveDismissDisabled(saving || loadingLook)
     }
 }

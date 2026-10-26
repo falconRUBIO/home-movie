@@ -68,19 +68,20 @@ float particles(float2 p, float size, uint seed, uint salt) {
 
 extern "C" { namespace coreimage {
 // Preview-only exposure zones relative to 18% gray. These are not sensor clipping claims.
-float4 logFalseColor(sample_t input) {
+float4 logFalseColor(sample_t input, float4 purple, float4 blue, float4 green,
+                     float4 pink, float4 orange, float4 red) {
     float3 encoded = input.a > 0.0 ? input.rgb / input.a : float3(0.0);
     float3 linear = float3(decodeAppleLog(encoded.r), decodeAppleLog(encoded.g), decodeAppleLog(encoded.b));
     float y = dot(linear, float3(0.2627, 0.6780, 0.0593)); // BT.2020 linear luminance
     float stops = log2(max(y, 0.00000001) / 0.18);
     float gray = clamp(0.48 + stops * 0.075, 0.08, 0.92);
     float3 color = float3(gray);
-    if (stops < -6.0) color = float3(0.55, 0.0, 0.85);
-    else if (stops < -4.0) color = float3(0.0, 0.25, 1.0);
-    else if (stops >= 4.0) color = float3(1.0, 0.08, 0.03);
-    else if (stops >= 3.0) color = float3(1.0, 0.65, 0.0);
-    else if (abs(stops) <= 0.15) color = float3(0.1, 0.8, 0.2);
-    else if (abs(stops - 1.0) <= 0.15) color = float3(1.0, 0.45, 0.65);
+    if (stops < purple.w) color = purple.rgb;
+    else if (stops < blue.w) color = blue.rgb;
+    else if (stops >= red.w) color = red.rgb;
+    else if (stops >= orange.w) color = orange.rgb;
+    else if (abs(stops) <= green.w) color = green.rgb;
+    else if (abs(stops - pink.w) <= green.w) color = pink.rgb;
     return float4(color * input.a, input.a);
 }
 
