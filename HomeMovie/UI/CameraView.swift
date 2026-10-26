@@ -102,8 +102,6 @@ struct CameraView: View {
         guard interfaceFormat == .landscape else { return [] }
         return landscapeControlsOnLeading ? [.top, .bottom, .leading] : [.top, .bottom, .trailing]
     }
-    @State private var pipDragStart: CGPoint?
-    @State private var lastPiPDragPoint: CGPoint?
     @State private var pipConfiguring = false
     @State private var enablePiPAfterPreparation = false
     @AppStorage("dollyGuidanceLearned") private var dollyGuidanceLearned = false
@@ -1209,7 +1207,7 @@ struct CameraView: View {
                     onExposure: { bias, front in camera.exposure(bias, front: front) },
                     onMove: { point, finished in camera.dragPiP(to: point, finished: finished) })
                     .accessibilityLabel("Dual camera viewfinder")
-                    .accessibilityHint("Tap either camera to focus and expose. Drag the sun vertically to adjust its brightness. Hold and drag the inset to move it.")
+                    .accessibilityHint("Tap either camera to focus and expose. Drag the sun vertically to adjust its brightness. Drag the inset to move it. Release to snap to a corner.")
                     .accessibilityAction(named: "Focus Presenter") { _ = camera.focus(at: CGPoint(x: 0.5, y: 0.5), front: true) }
                     .accessibilityAction(named: "Move to Top Left") { movePiP(to: .topLeft) }
                     .accessibilityAction(named: "Move to Top Right") { movePiP(to: .topRight) }
@@ -1217,25 +1215,6 @@ struct CameraView: View {
                     .accessibilityAction(named: "Move to Bottom Right") { movePiP(to: .bottomRight) }
             } else { Color.clear.allowsHitTesting(false) }
         }.onGeometryChange(for: CGSize.self) { $0.size } action: { size in viewfinderSize = size; updatePiPObstacles() }
-    }
-    private func pipDragGesture(size: CGSize) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.25).sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("cameraViewfinder")))
-            .onChanged { value in
-                guard camera.options?.isPiPEnabled == true, size.width > 0, size.height > 0 else { return }
-                switch value {
-                case .first(true):
-                    if pipDragStart == nil { pipDragStart = CGPoint(x: camera.pipPresentation.rect.midX, y: camera.pipPresentation.rect.midY) }
-                case .second(true, let drag?):
-                    let anchor = pipDragStart ?? CGPoint(x: camera.pipPresentation.rect.midX, y: camera.pipPresentation.rect.midY)
-                    pipDragStart = anchor
-                    let point = CGPoint(x: anchor.x + drag.translation.width / size.width, y: anchor.y + drag.translation.height / size.height)
-                    lastPiPDragPoint = point; camera.dragPiP(to: point, finished: false)
-                default: break
-                }
-            }.onEnded { _ in
-                if let point = lastPiPDragPoint ?? pipDragStart { camera.dragPiP(to: point, finished: true) }
-                lastPiPDragPoint = nil; pipDragStart = nil
-            }
     }
     private func movePiP(to corner: PiPCorner) {
         let format = pipCanvasFormat

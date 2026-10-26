@@ -605,6 +605,34 @@ final class PictureInPictureTests: XCTestCase {
             }}
         }
     }
+    func testDraggingInsetSnapsToEveryCornerAndPreservesItsShape() throws {
+        for format in MovieFormat.allCases {
+            for orientation in PiPOrientation.allCases {
+                for start in PiPCorner.allCases {
+                    for destination in PiPCorner.allCases {
+                        let layout = PiPLayout(corner: start, size: .medium, orientation: orientation)
+                        var timeline = PiPTimeline(); timeline.setLayout(layout)
+                        timeline.setEnabled(true, at: .zero)
+                        let target = PiPGeometry.desiredCenter(corner: destination, canvas: format.canvas,
+                            size: layout.size, orientation: orientation)
+                        let release = CMTime(seconds: 1, preferredTimescale: 600)
+                        timeline.drag(to: target, at: release, canvas: format.canvas, obstacles: [])
+                        let saved = timeline.settle(at: release, canvas: format.canvas, obstacles: [])
+                        XCTAssertEqual(saved.corner, destination)
+                        XCTAssertEqual(saved.orientation, orientation); XCTAssertEqual(saved.size, .medium)
+                        let settled = timeline.presentation(at: CMTime(seconds: 1.3, preferredTimescale: 600), canvas: format.canvas)
+                        let expected = try XCTUnwrap(PiPGeometry.rect(layout: saved, canvas: format.canvas))
+                        XCTAssertEqual(settled.rect.minX, expected.minX, accuracy: 0.000001)
+                        XCTAssertEqual(settled.rect.minY, expected.minY, accuracy: 0.000001)
+                        XCTAssertEqual(settled.rect.width, expected.width, accuracy: 0.000001)
+                        XCTAssertEqual(settled.rect.height, expected.height, accuracy: 0.000001)
+                        XCTAssertTrue(settled.enabled)
+                    }
+                }
+            }
+        }
+    }
+
     func testDragClampsInsideMovieAndAvoidsExistingPreviewControls() throws {
         let canvas = MovieFormat.landscape.canvas
         let controls = [CGRect(x: 0, y: 0, width: 1, height: 0.1), CGRect(x: 0.2, y: 0.82, width: 0.6, height: 0.18), CGRect(x: 0.88, y: 0.35, width: 0.12, height: 0.3)]

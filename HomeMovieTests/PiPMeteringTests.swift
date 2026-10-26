@@ -1,9 +1,71 @@
 import XCTest
+import UIKit
 import CoreImage
 import MetalKit
 @testable import HomeMovie
 
 final class PiPMeteringTests: XCTestCase {
+    @MainActor func testInsetDragStartsWithoutHoldingAndKeepsItsOriginalAnchor() throws {
+        let canvas = CGSize(width: 390, height: 844)
+        let view = PreviewUIView(frame: CGRect(origin: .zero, size: canvas))
+        let state = PiPPresentation(rect: CGRect(x: 0.6, y: 0.6, width: 0.3, height: 0.2), opacity: 1, enabled: true)
+        var moves: [(CGPoint, Bool)] = []
+        func surface(_ presentation: PiPPresentation) -> PiPMeteringView {
+            PiPMeteringView(frames: LiveFrames(), presentation: presentation, useLivePresentation: false,
+                front: nil, rear: nil, protectedRegions: [], onFocus: { _, _, _ in true },
+                onExposure: { _, _ in }, onMove: { moves.append(($0, $1)) })
+        }
+        let coordinator = surface(state).makeCoordinator(); coordinator.view = view
+        let center = CGPoint(x: state.rect.midX * canvas.width, y: state.rect.midY * canvas.height)
+        XCTAssertTrue(coordinator.canBeginMove(at: center, canvas: canvas))
+        XCTAssertTrue(coordinator.gestureRecognizerShouldBegin(UIPanGestureRecognizer()))
+        coordinator.handleMove(state: .began, translation: CGPoint(x: -8, y: -3), canvas: canvas)
+        XCTAssertEqual(moves.count, 1) // First pan updates immediately, with no timer/hold.
+        var newer = state; newer.rect.origin = CGPoint(x: 0.4, y: 0.4)
+        coordinator.parent = surface(newer)
+        coordinator.handleMove(state: .changed, translation: CGPoint(x: -180, y: -350), canvas: canvas)
+        let point = try XCTUnwrap(moves.last?.0)
+        XCTAssertEqual(point.x, state.rect.midX - 180 / canvas.width, accuracy: 0.0001)
+        XCTAssertEqual(point.y, state.rect.midY - 350 / canvas.height, accuracy: 0.0001)
+        coordinator.handleMove(state: .ended, translation: CGPoint(x: -180, y: -350), canvas: canvas)
+        XCTAssertEqual(moves.last?.1, true)
+        let count = moves.count
+        coordinator.handleMove(state: .cancelled, translation: .zero, canvas: canvas)
+        XCTAssertEqual(moves.count, count)
+        view.detachPreview()
+    }
+
+    @MainActor func testInsetDragLeavesControlsExposureHandleAndSplitPanelsAlone() {
+        let canvas = CGSize(width: 390, height: 844)
+        let view = PreviewUIView(frame: CGRect(origin: .zero, size: canvas))
+        let state = PiPPresentation(rect: CGRect(x: 0.6, y: 0.6, width: 0.3, height: 0.2), opacity: 1, enabled: true)
+        func surface(_ state: PiPPresentation) -> PiPMeteringView {
+            PiPMeteringView(frames: LiveFrames(), presentation: state, useLivePresentation: false,
+                front: nil, rear: nil, protectedRegions: [], onFocus: { _, _, _ in true },
+                onExposure: { _, _ in }, onMove: { _, _ in })
+        }
+        let coordinator = surface(state).makeCoordinator(); coordinator.view = view
+        let center = CGPoint(x: state.rect.midX * canvas.width, y: state.rect.midY * canvas.height)
+        XCTAssertTrue(coordinator.canBeginMove(at: center, canvas: canvas))
+        XCTAssertFalse(coordinator.canBeginMove(at: CGPoint(x: 20, y: 20), canvas: canvas))
+        view.protectedRegions = [CGRect(x: center.x - 20, y: center.y - 20, width: 40, height: 40)]
+        XCTAssertFalse(coordinator.canBeginMove(at: center, canvas: canvas))
+        view.protectedRegions = []
+        view.meteringConversion = { _, _ in CGPoint(x: 0.5, y: 0.5) }
+        view.onFocus = { _, _ in true }
+        view.requestFocus(at: center, locked: false)
+        let sun = CGPoint(x: center.x + 50, y: center.y)
+        XCTAssertTrue(view.isExposureHandle(at: sun))
+        XCTAssertFalse(coordinator.canBeginMove(at: sun, canvas: canvas))
+        var off = state; off.enabled = false
+        coordinator.parent = surface(off)
+        XCTAssertFalse(coordinator.canBeginMove(at: center, canvas: canvas))
+        var split = state; split.composition = .sideBySide
+        coordinator.parent = surface(split)
+        XCTAssertFalse(coordinator.canBeginMove(at: center, canvas: canvas))
+        view.detachPreview()
+    }
+
     func testTouchMappingInvertsTheActualCropRotationAndFramingZoom() throws {
         let canvas = CGSize(width: 390, height: 844), source = CGSize(width: 128, height: 72)
         for panel in [CGRect(x: 0.65, y: 0.6, width: 0.3, height: 0.25), CGRect(x: 0, y: 0, width: 0.5, height: 1)] {

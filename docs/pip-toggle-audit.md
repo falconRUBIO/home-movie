@@ -53,3 +53,16 @@ Async On/Off preference writes capture the model's lifecycle identifier. If the
 page is suspended, closed or replaced while storage is busy, the old completion
 cannot reconfigure the new session or clear its pending request. Regression
 coverage verifies suspension invalidation and rejection of inactive commands.
+
+## Direct inset dragging
+
+A one-finger pan starting inside the visible inset now moves it immediately,
+without a long press. Releasing uses the existing 0.18-second corner settle and
+saves the selected corner. The pan keeps its original anchor as camera updates
+arrive; cancellation settles once. Taps still focus, and the visible sun handle
+retains brightness adjustment. Split panels, Off, preview controls, and touches
+outside the inset cannot start a move. VoiceOver corner actions remain.
+
+Regression coverage exercises the real coordinator's first-pan, moving-anchor,
+release/cancellation lifecycle and control/sun hit testing, plus all source and
+destination corners in portrait/landscape with both inset orientations.

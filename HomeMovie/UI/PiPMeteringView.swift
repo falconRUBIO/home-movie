@@ -46,9 +46,9 @@ struct PiPMeteringView: UIViewRepresentable {
         view.isOpaque = false; view.backgroundColor = .clear
         view.layer.backgroundColor = UIColor.clear.cgColor
         context.coordinator.view = view
-        let move = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.move(_:)))
-        move.minimumPressDuration = 0.35; move.delegate = context.coordinator
-        for gesture in view.gestureRecognizers ?? [] where gesture is UILongPressGestureRecognizer { gesture.require(toFail: move) }
+        let move = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.move(_:)))
+        move.maximumNumberOfTouches = 1; move.delegate = context.coordinator
+        for gesture in view.gestureRecognizers ?? [] where gesture is UITapGestureRecognizer { gesture.require(toFail: move) }
         view.addGestureRecognizer(move)
         return view
     }
@@ -56,6 +56,10 @@ struct PiPMeteringView: UIViewRepresentable {
         let coordinator = context.coordinator
         coordinator.parent = self
         view.protectedRegions = protectedRegions
+        view.insetDragHitTest = { [weak view, weak coordinator] point in
+            guard let view else { return false }
+            return coordinator?.canBeginMove(at: point, canvas: view.bounds.size) == true
+        }
         view.meteringConversion = { point, size in
             guard let hit = coordinator.resolve(point, canvas: size) else { return nil }
             coordinator.selectedFront = hit.front
@@ -71,8 +75,8 @@ struct PiPMeteringView: UIViewRepresentable {
         var parent: PiPMeteringView
         weak var view: PreviewUIView?
         var selectedFront = false
-        private var moveStart: CGPoint?
         private var initialCenter: CGPoint?
+        private let moveFeedback = UISelectionFeedbackGenerator()
         init(_ parent: PiPMeteringView) { self.parent = parent }
         func applyCapabilities() {
             guard let view, let options = selectedFront ? parent.front : parent.rear else { return }
@@ -96,24 +100,47 @@ struct PiPMeteringView: UIViewRepresentable {
                 source: CGSize(width: CVPixelBufferGetWidth(buffer), height: CVPixelBufferGetHeight(buffer)),
                 angle: angle, panel: panel, zoom: isFront ? state.zoom : 1, front: isFront)
         }
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-            guard let view, parent.presentation.composition == .inset,
-                  view.permitsPreviewInteraction(at: touch.location(in: view)) else { return false }
-            return resolve(touch.location(in: view), canvas: view.bounds.size)?.front == true
+        private var currentPresentation: PiPPresentation {
+            parent.useLivePresentation ? parent.frames.snapshot()?.pip?.presentation ?? parent.presentation : parent.presentation
         }
-        @objc func move(_ gesture: UILongPressGestureRecognizer) {
-            guard let view, view.bounds.width > 0, view.bounds.height > 0 else { return }
-            let location = gesture.location(in: view)
-            if gesture.state == .began {
-                moveStart = location; initialCenter = CGPoint(x: parent.presentation.rect.midX, y: parent.presentation.rect.midY)
-                view.resetMeteringIndicator(); UISelectionFeedbackGenerator().selectionChanged()
+        func canBeginMove(at point: CGPoint, canvas: CGSize) -> Bool {
+            let state = currentPresentation
+            guard state.enabled, state.opacity > 0.001, state.composition == .inset,
+                  canvas.width > 0, canvas.height > 0, let view,
+                  view.permitsPreviewInteraction(at: point), !view.isExposureHandle(at: point) else { return false }
+            return state.rect.contains(CGPoint(x: point.x / canvas.width, y: point.y / canvas.height))
+        }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard let view else { return false }
+            return canBeginMove(at: touch.location(in: view), canvas: view.bounds.size)
+        }
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            // This pan moves an inset, independent of the preview's exposure-pan heuristic.
+            let state = currentPresentation
+            return state.enabled && state.opacity > 0.001 && state.composition == .inset
+        }
+        @objc func move(_ gesture: UIPanGestureRecognizer) {
+            guard let view else { return }
+            handleMove(state: gesture.state, translation: gesture.translation(in: view), canvas: view.bounds.size)
+        }
+        // The UIKit pan and regression tests share the same drag lifecycle.
+        func handleMove(state: UIGestureRecognizer.State, translation: CGPoint, canvas: CGSize) {
+            guard canvas.width > 0, canvas.height > 0 else { initialCenter = nil; return }
+            if state == .began {
+                let presentation = currentPresentation
+                guard presentation.enabled, presentation.composition == .inset else { return }
+                initialCenter = CGPoint(x: presentation.rect.midX, y: presentation.rect.midY)
+                view?.resetMeteringIndicator(); moveFeedback.prepare()
             }
-            guard let moveStart, let initialCenter else { return }
-            let point = CGPoint(x: initialCenter.x + (location.x - moveStart.x) / view.bounds.width,
-                y: initialCenter.y + (location.y - moveStart.y) / view.bounds.height)
-            let finished = gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed
+            guard let initialCenter else { return }
+            let point = CGPoint(x: initialCenter.x + translation.x / canvas.width,
+                y: initialCenter.y + translation.y / canvas.height)
+            let finished = state == .ended || state == .cancelled || state == .failed
             parent.onMove(point, finished)
-            if finished { self.moveStart = nil; self.initialCenter = nil }
+            if finished {
+                if state == .ended { moveFeedback.selectionChanged() }
+                self.initialCenter = nil
+            }
         }
     }
 }
