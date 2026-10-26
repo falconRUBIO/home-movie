@@ -96,7 +96,7 @@ struct LibraryView: View {
                         }
                         .contentShape(RoundedRectangle(cornerRadius: 22))
                 }.buttonStyle(.plain).accessibilityLabel("Record into \(movie.name), \(durationLabel(movie.duration))")
-                    .accessibilityHint("Opens the camera to add scenes")
+                    .accessibilityHint("Opens the camera to add clips")
                 HStack {
                     if !movie.activeScenes.isEmpty {
                         Button { playingMovie = movie } label: {
@@ -118,13 +118,13 @@ struct LibraryView: View {
                 Button { openMovie(movie) } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(movie.name).font(.headline)
-                        Text(movie.activeScenes.count == 1 ? "1 scene" : "\(movie.activeScenes.count) scenes").font(.caption).foregroundStyle(.secondary)
+                        Text(movie.activeScenes.count == 1 ? "1 clip" : "\(movie.activeScenes.count) clips").font(.caption).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }.buttonStyle(.plain)
                     .accessibilityLabel("Record into \(movie.name)")
-                    .accessibilityHint("Opens the camera to add scenes")
+                    .accessibilityHint("Opens the camera to add clips")
                 Menu { movieActions(movie) } label: {
                     Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle())
                 }.menuOrder(.fixed).accessibilityLabel("Manage \(movie.name)")
@@ -257,7 +257,7 @@ struct LibraryView: View {
                         } catch { app.error = error.localizedDescription }
                     }
                 }
-            } message: { Text("You can restore these movies and their original scenes in Settings.") }
+            } message: { Text("You can restore these movies and their original clips in Settings.") }
             .navigationDestination(for: UUID.self) { id in CameraView(app: app, movieID: id) }
             .sheet(isPresented: $settings) { SettingsView() }
             .sheet(isPresented: $backups) { BackupView() }
@@ -284,7 +284,7 @@ struct LibraryView: View {
                     if let movie = deleteMovie { Task { await app.run { try await app.store.setMovieDeleted(movie.id, deleted: true) } } }
                     deleteMovie = nil
                 }
-            } message: { Text("You can restore the movie and its original scenes in Settings.") }
+            } message: { Text("You can restore the movie and its original clips in Settings.") }
             .task { if !app.loaded { await app.load() } }
             .onChange(of: app.loaded) { _, ready in
                 if ready && openLastMovie, let id = UUID(uuidString: lastMovieID), app.activeMovies.contains(where: { $0.id == id }) { app.prewarmCamera(movieID: id); path = [id] }
@@ -405,19 +405,19 @@ private struct MovieCoverPicker: View {
                             if current.coverSceneID == nil { Image(systemName: "checkmark").accessibilityLabel("Selected") }
                         }.frame(minHeight: 44)
                     }
-                } footer: { Text("Choose a scene for the cover. Automatic uses the first scene. Your movie stays the same.") }
-                Section("Scenes") {
+                } footer: { Text("Choose a clip for the cover. Automatic uses the first clip. Your movie stays the same.") }
+                Section("Clips") {
                     ForEach(Array(current.activeScenes.enumerated()), id: \.element.id) { index, scene in
                         if !scene.missing {
                             Button { save(scene.id) } label: {
                                 HStack(spacing: 12) {
                                     SceneThumbnail(scene: scene, root: app.store.root, movie: current)
                                         .frame(width: 96, height: 68).clipShape(RoundedRectangle(cornerRadius: 8))
-                                    Text("Scene \(index + 1)").foregroundStyle(.primary)
+                                    Text("Clip \(index + 1)").foregroundStyle(.primary)
                                     Spacer()
                                     if current.coverSceneID == scene.id { Image(systemName: "checkmark").accessibilityLabel("Selected") }
                                 }
-                            }.accessibilityLabel("Scene \(index + 1)")
+                            }.accessibilityLabel("Clip \(index + 1)")
                                 .accessibilityAddTraits(current.coverSceneID == scene.id ? [.isSelected] : [])
                         }
                     }
@@ -437,13 +437,10 @@ struct MovieSettingsView: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.dismiss) private var dismiss
     let movie: Movie
-    @State private var previewMode = CameraPreviewMode.read()
     @State private var profile: CaptureProfile
     @State private var selectedLook: LUTReference?
     @State private var supportsLog = false
     @State private var checking = true
-    @State private var looks: [LUTReference] = []
-    @State private var loadingLook = false
     @State private var saving = false
     @State private var problem: String?
     init(movie: Movie) {
@@ -463,37 +460,16 @@ struct MovieSettingsView: View {
                         .disabled(hasRecordedScenes || checking || !supportsLog || saving)
                 } header: { Text("Recording") } footer: {
                     Text(hasRecordedScenes
-                        ? "The recording format is set by your first scene."
-                        : supportsLog ? "Choose Standard or Apple Log before your first recording." : "Apple Log is unavailable on this iPhone.")
-                }
-                if profile == .appleLog {
-                    Section {
-                        Picker("Movie Look", selection: Binding<UUID?>(get: { selectedLook?.id }, set: { id in
-                            selectedLook = looks.first { $0.id == id }
-                        }).withSelectionFeedback()) {
-                            Text("Standard").tag(Optional<UUID>.none)
-                            ForEach(looks, id: \.id) { look in
-                                Text(look.displayName).tag(Optional(look.id))
-                            }
-                        }.pickerStyle(.menu)
-                        NavigationLink {
-                            LookFileImportView(importing: $loadingLook) { url, displayReferred in
-                                selectedLook = try await app.store.importLook(from: url, displayReferred: displayReferred)
-                                looks = await app.store.availableLooks()
-                            }
-                        } label: { Label("Import Look…", systemImage: "square.and.arrow.down") }
-                    } header: { Text("Movie Look") } footer: {
-                        Text("Used for playback, export and With Look preview. Your originals stay in Apple Log.")
-                    }
-                    ViewfinderPreviewSection(mode: $previewMode)
+                        ? "The recording format is set by your first clip."
+                        : supportsLog ? "Choose Standard or Apple Log before your first recording. In Apple Log, use the Look & Preview button on the camera to choose a look." : "Apple Log is unavailable on this iPhone.")
                 }
                 if let problem { Section { Text(problem).foregroundStyle(.red) } }
             }
-            .disabled(saving || loadingLook)
-            .navigationTitle("Movie Settings").navigationBarTitleDisplayMode(.inline)
+            .disabled(saving)
+            .navigationTitle("Recording Settings").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.disabled(saving || loadingLook)
+                    Button("Cancel") { dismiss() }.disabled(saving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
@@ -502,20 +478,18 @@ struct MovieSettingsView: View {
                             do {
                                 try await app.store.setMovieRecordingSettings(movieID: movie.id,
                                     profile: profile, look: selectedLook)
-                                previewMode.store()
                                 await app.refresh(); dismiss()
                             } catch { problem = error.localizedDescription; saving = false }
                         }
-                    }.disabled(checking || saving || loadingLook)
+                    }.disabled(checking || saving)
                 }
             }
             .task {
                 supportsLog = await Task.detached { CaptureService.supportsAppleLog() }.value
-                looks = await app.store.availableLooks()
                 checking = false
             }
 
-        }.presentationDetents([.medium, .large]).interactiveDismissDisabled(saving || loadingLook)
+        }.presentationDetents([.medium, .large]).interactiveDismissDisabled(saving)
     }
 }
 
@@ -560,7 +534,7 @@ struct SettingsView: View {
                 LabeledContent("Latest Files Backup") { Text(date, format: .dateTime.month(.abbreviated).day().hour().minute()) }
             } else { LabeledContent("Latest Files Backup", value: "Not yet saved") }
             LabeledContent("Movies Needing Backup", value: "\(summary.moviesNeedingBackup)")
-            Toggle("Copy Original Scenes to Photos", isOn: $copyScenesToPhotos.withSelectionFeedback())
+            Toggle("Copy Original Clips to Photos", isOn: $copyScenesToPhotos.withSelectionFeedback())
                 .onChange(of: copyScenesToPhotos) { _, enabled in
                     if enabled { app.retryPhotosCopies() } else { app.stopPhotosRetries() }
                 }
@@ -583,12 +557,11 @@ struct SettingsView: View {
                 Label("Contact Support", systemImage: "bubble.left.and.bubble.right")
             }.accessibilityHint("Opens the public support page with email contact information.")
             NavigationLink("Diagnostics", destination: DiagnosticsView())
-            NavigationLink("Privacy", destination: PrivacyView())
             Button("App Permissions", systemImage: "hand.raised") {
                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
             }
-        } header: { Text("Help & Privacy") }
-        footer: { Text("Contact Support opens our public help page. Tap Email MOVIE MODE Support there, or copy the contact address into your email service. App Permissions opens iPhone Settings for camera, microphone, and Photos access.") }
+        } header: { Text("Support") }
+        footer: { Text("App Permissions opens iPhone Settings for camera, microphone, and Photos access.") }
     }
     var body: some View {
         NavigationStack {
@@ -596,9 +569,25 @@ struct SettingsView: View {
                 Section("General") {
                     Toggle("Open Last Movie", isOn: $openLastMovie.withSelectionFeedback())
                 }
-                storageSection
-                backupSection
-                helpSection
+                Section("Movies") {
+                    NavigationLink {
+                        Form { storageSection }.navigationTitle("Storage").navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        LabeledContent("Storage", value: bytes(summary.activeBytes + summary.deletedBytes))
+                    }
+                    NavigationLink {
+                        Form { backupSection }.navigationTitle("Backup & Recovery").navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        LabeledContent("Backup & Recovery", value: summary.moviesNeedingBackup == 0
+                            ? "Up to date" : "\(summary.moviesNeedingBackup) needing backup")
+                    }
+                }
+                Section {
+                    NavigationLink {
+                        Form { helpSection }.navigationTitle("Help & Support").navigationBarTitleDisplayMode(.inline)
+                    } label: { Label("Help & Support", systemImage: "questionmark.circle") }
+                    NavigationLink("Privacy", destination: PrivacyView())
+                }
                 Section("About") {
                     LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")
                     LabeledContent("Build", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")
@@ -630,7 +619,7 @@ struct PrivacyView: View {
                 Text("A bounded support log and Apple performance/crash reports stay on this iPhone. Reports can include technical device information and stack traces. They are shared only when you choose Share Diagnostics; no developer analytics endpoint receives them automatically.")
             }
             Section("Permissions") {
-                Text("Camera and microphone access record video and sound. Photos access only adds copies when you choose to save a movie or enable original-scene copies. MOVIE MODE does not request access to read your photo library.")
+                Text("Camera and microphone access record video and sound. Photos access only adds copies when you choose to save a movie or enable original-clip copies. MOVIE MODE does not request access to read your photo library.")
             }
             Section("Copies and backups") {
                 Text("When you save or share, the destination you choose handles that copy. Files backups include original recordings and project metadata. iCloud Drive and iCloud Photos follow your Apple settings; MOVIE MODE does not confirm completed cloud syncing.")

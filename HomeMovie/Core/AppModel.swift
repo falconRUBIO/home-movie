@@ -58,7 +58,7 @@ import AVFoundation
               let scene = movies.flatMap(\.scenes).first(where: { $0.id == id }), scene.photosAssetID == nil else { return }
         Task {
             guard UserDefaults.standard.bool(forKey: "copyScenesToPhotos") else { return }
-            do { try await photosSafety.copy(scene: scene, store: store); await refresh(); photosCopyStatus = "Original scene copied to Photos." }
+            do { try await photosSafety.copy(scene: scene, store: store); await refresh(); photosCopyStatus = "Original clip copied to Photos." }
             catch { photosCopyStatus = "\(error.localizedDescription) Retry from Settings." }
         }
     }
@@ -68,13 +68,13 @@ import AVFoundation
         photosRetryTask = Task {
             defer { photosRetryTask = nil }
             guard !Task.isCancelled, UserDefaults.standard.bool(forKey: "copyScenesToPhotos") else { return }
-            guard await photosSafety.authorize() else { photosCopyStatus = "Allow add-only Photos access in Settings to create separate scene copies."; return }
+            guard await photosSafety.authorize() else { photosCopyStatus = "Allow add-only Photos access in Settings to create separate clip copies."; return }
             for scene in pending {
                 guard !Task.isCancelled, UserDefaults.standard.bool(forKey: "copyScenesToPhotos") else { return }
                 do { try await photosSafety.copy(scene: scene, store: store); await refresh() }
                 catch { if !(error is CancellationError) { photosCopyStatus = error.localizedDescription }; return }
             }
-            photosCopyStatus = pending.isEmpty ? "No scenes awaiting a Photos copy." : "Saved original scenes were copied to Photos."
+            photosCopyStatus = pending.isEmpty ? "No clips awaiting a Photos copy." : "Saved original clips were copied to Photos."
         }
     }
     func stopPhotosRetries() { photosRetryTask?.cancel() }

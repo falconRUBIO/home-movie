@@ -82,7 +82,7 @@ struct LightCurve: Codable, Equatable, Sendable {
         guard legacyValid, (2...Self.maximumPoints).contains(p.count),
               p.allSatisfy({ $0.x.isFinite && $0.y.isFinite && (0...1).contains($0.x) && (0...1).contains($0.y) }),
               zip(p, p.dropFirst()).allSatisfy({ $0.1.x - $0.0.x >= 0.0005 }) else {
-            throw HomeMovieError.message("This scene’s tonal curve is invalid.")
+            throw HomeMovieError.message("This clip’s tonal curve is invalid.")
         }
     }
     mutating func move(_ index: Int, to value: Double) {
@@ -110,7 +110,7 @@ struct LightCurve: Codable, Equatable, Sendable {
     func apply(to image: CIImage, fade: Double) throws -> CIImage {
         try validate()
         guard fade.isFinite, (0...1).contains(fade) else {
-            throw HomeMovieError.message("This scene’s fade adjustment is invalid.")
+            throw HomeMovieError.message("This clip’s fade adjustment is invalid.")
         }
         guard isActive || fade != 0 else { return image }
         let p = controlPoints, m = pointSlopes
@@ -122,7 +122,7 @@ struct LightCurve: Codable, Equatable, Sendable {
         arguments.append(Double(p.count)); arguments.append(fade)
         let kernel = try Self.kernel.get()
         guard let result = kernel.apply(extent: image.extent, arguments: arguments) else {
-            throw HomeMovieError.message("This scene’s tonal curve could not be rendered.")
+            throw HomeMovieError.message("This clip’s tonal curve could not be rendered.")
         }
         return result
     }

@@ -1,7 +1,6 @@
 import SwiftUI
 import AVKit
 import UIKit
-import UniformTypeIdentifiers
 
 struct WatchMovieView: View {
     @EnvironmentObject private var app: AppModel
@@ -19,10 +18,7 @@ struct WatchMovieView: View {
     @State private var problem: String?
     @State private var review: Scene?
     @State private var exporting = false
-    @State private var looks: [LUTReference] = []
-    @State private var importingLook = false
-    @State private var importingDisplayLook = false
-    @State private var changingLook = false
+    @State private var showingLookPreview = false
     @State private var showOriginalLog = false
     @State private var reordering = false
     @State private var undoOrder: [UUID]?
@@ -65,51 +61,21 @@ struct WatchMovieView: View {
                 .toolbar {
                     if movie.captureProfile == .appleLog {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Menu {
-                                Button { UISelectionFeedbackGenerator().selectionChanged(); showOriginalLog.toggle() } label: {
-                                    Label("Show Original", systemImage: showOriginalLog ? "checkmark" : "circle")
-                                }
-                                Divider()
-                                Button { selectLook(nil) } label: {
-                                    Label("Apple Standard", systemImage: movie.look == nil ? "checkmark" : "circle")
-                                }
-                                ForEach(looks, id: \.id) { look in
-                                    Button { selectLook(look) } label: {
-                                        Label(look.displayName, systemImage: movie.look?.id == look.id ? "checkmark" : "circle")
-                                    }
-                                }
-                                Divider()
-                                Button("Add Apple Log Look…", systemImage: "plus") { importingDisplayLook = false; importingLook = true }
-                                Button("Add Rec.709 Look…", systemImage: "plus") { importingDisplayLook = true; importingLook = true }
-                            } label: { MovieControlIcon(systemName: "camera.filters") }
-                                .accessibilityLabel("Movie Looks")
+                            Button { showingLookPreview = true } label: { MovieControlIcon(systemName: "camera.filters") }
+                                .accessibilityLabel("Look and Preview")
                                 .accessibilityValue(showOriginalLog ? "Original Log" : movie.lookName)
-                                .disabled(changingLook)
                         }
                     }
                     ToolbarItem(placement: .cancellationAction) { Button("Done") { player?.pause(); dismiss() } }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { player?.pause(); exporting = true } label: { MovieControlIcon(systemName: "square.and.arrow.up") }
-                            .accessibilityLabel("Export Movie").disabled(movie.activeScenes.isEmpty || loading || changingLook || problem != nil)
+                            .accessibilityLabel("Export Movie").disabled(movie.activeScenes.isEmpty || loading || problem != nil)
                     }
                 }
-                .fileImporter(isPresented: $importingLook, allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data], allowsMultipleSelection: false) { result in
-                    switch result {
-                    case .success(let urls):
-                        guard let url = urls.first else { return }
-                        changingLook = true
-                        Task {
-                            defer { changingLook = false }
-                            do {
-                                let look = try await app.store.importLook(from: url, displayReferred: importingDisplayLook)
-                                try await app.store.setLook(movieID: movieID, look: look)
-                                looks = await app.store.availableLooks(); showOriginalLog = false; await app.refresh()
-                            } catch { app.error = error.localizedDescription }
-                        }
-                    case .failure(let error): app.error = error.localizedDescription
-                    }
+                .sheet(isPresented: $showingLookPreview) {
+                    LookPreviewSheet(app: app, movieID: movieID, previewMode: .constant(.look),
+                        canChangeLook: true, playbackOriginal: $showOriginalLog)
                 }
-                .task { looks = await app.store.availableLooks() }
                 .task(id: "\(movie.revision)-\(showOriginalLog)") {
                     let requestID = UUID(); playbackRequestID = requestID
                     let position = player?.currentTime() ?? .zero
@@ -173,19 +139,10 @@ struct WatchMovieView: View {
         }
     }
 
-    private func selectLook(_ look: LUTReference?) {
-        guard !changingLook else { return }
-        UISelectionFeedbackGenerator().selectionChanged()
-        changingLook = true; showOriginalLog = false
-        Task {
-            defer { changingLook = false }
-            await app.run { try await app.store.setLook(movieID: movieID, look: look) }
-        }
-    }
     private func sceneTimeline(movie: Movie) -> some View {
         VStack(spacing: verticalSizeClass == .compact ? 8 : 12) {
             HStack {
-                Text("Scenes").font(.headline); Spacer()
+                Text("Clips").font(.headline); Spacer()
                 Text("\(movie.activeScenes.count) · \(durationLabel(movie.duration))").font(.caption).foregroundStyle(.secondary)
             }.padding(.horizontal, 20).padding(.top, 12)
             ReorderableSceneStrip(movie: movie, root: app.store.root,
@@ -196,7 +153,7 @@ struct WatchMovieView: View {
                 .frame(height: verticalSizeClass == .compact ? 94 : 117)
             if let undoOrder, let reorderedOrder, movie.activeScenes.map(\.id) == reorderedOrder {
                 HStack {
-                    Text("Scenes reordered").font(.caption).foregroundStyle(.secondary)
+                    Text("Clips reordered").font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("Undo") { saveOrder(undoOrder, expected: reorderedOrder, undo: true) }
                         .disabled(reordering)
@@ -331,13 +288,13 @@ private struct ReorderableSceneStrip: UIViewRepresentable {
                     SceneThumbnail(scene: scene, root: parent.root, movie: parent.movie)
                         .frame(width: 100, height: parent.compact ? 44 : 67)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
-                    Text("Scene \(path.item + 1)").font(.caption)
+                    Text("Clip \(path.item + 1)").font(.caption)
                     Text(durationLabel(scene.playableDuration))
                         .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 }.frame(width: 100, alignment: .topLeading)
             }.margins(.all, 0)
             cell.isAccessibilityElement = true
-            cell.accessibilityLabel = "Review scene \(path.item + 1)"
+            cell.accessibilityLabel = "Review clip \(path.item + 1)"
             cell.accessibilityHint = "Tap to review. Touch and hold, then drag to reorder."
             cell.accessibilityTraits = .button
             cell.accessibilityCustomActions = [

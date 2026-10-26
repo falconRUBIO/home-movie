@@ -24,7 +24,7 @@ struct HSLAdjustments: Codable, Equatable, Sendable {
     func validate() throws {
         guard bands.count == 8, bands.allSatisfy({ value in
             [value.hue, value.saturation, value.lightness].allSatisfy { $0.isFinite && (-1...1).contains($0) }
-        }) else { throw HomeMovieError.message("This scene’s HSL adjustments are invalid.") }
+        }) else { throw HomeMovieError.message("This clip’s HSL adjustments are invalid.") }
     }
     func apply(to image: CIImage) throws -> CIImage {
         try validate()
@@ -36,7 +36,7 @@ struct HSLAdjustments: Codable, Equatable, Sendable {
         }
         let kernel = try Self.kernel.get()
         guard let output = kernel.apply(extent: image.extent, arguments: arguments) else {
-            throw HomeMovieError.message("This scene’s HSL adjustments could not be rendered.")
+            throw HomeMovieError.message("This clip’s HSL adjustments could not be rendered.")
         }
         return output
     }

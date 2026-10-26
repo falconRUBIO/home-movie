@@ -57,7 +57,7 @@ import UIKit
     }
     static func singleSceneMovie(movie: Movie, scene: Scene) throws -> Movie {
         guard movie.activeScenes.contains(where: { $0.id == scene.id }), scene.deletedAt == nil,
-              !scene.missing, scene.validTrim else { throw HomeMovieError.message("This scene is unavailable.") }
+              !scene.missing, scene.validTrim else { throw HomeMovieError.message("This clip is unavailable.") }
         try scene.lightAdjustments.validate()
         try scene.filmEffectsTweaks?.validate()
         var clip = movie
@@ -140,7 +140,7 @@ import UIKit
         }
     }
     private func updateProgress(_ value: Double) { progress = value }
-    func cancel() { if running && notice == nil { notice = "Export canceled. Your original scenes are safe." }; session?.cancelExport(); job?.cancel() }
+    func cancel() { if running && notice == nil { notice = "Export canceled. Your original clips are safe." }; session?.cancelExport(); job?.cancel() }
     func saveToPhotos() async {
         guard !savingPhotos else { return }
         guard let exportedURL else {

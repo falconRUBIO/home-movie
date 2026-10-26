@@ -179,7 +179,7 @@ struct CameraView: View {
                     return try ColorCube.appleStandard.get()
                 }.value
                 guard !Task.isCancelled else { return }; liveCube = loaded
-            } catch { if !Task.isCancelled { liveCube = nil; liveLookStatus = .unavailable; camera.message = "This look could not be loaded. Choose Apple Standard." } }
+            } catch { if !Task.isCancelled { liveCube = nil; liveLookStatus = .unavailable; camera.message = "This look could not be loaded. Choose Natural in Look & Preview." } }
         }
         .onChange(of: handsFreeStart) { _, _ in
             cancelCountdown()
@@ -201,7 +201,7 @@ struct CameraView: View {
         .onChange(of: camera.savedScene) { _, saved in
             if saved {
                 addedSceneID = movie?.latestTake?.id
-                UIAccessibility.post(notification: .announcement, argument: "Scene saved")
+                UIAccessibility.post(notification: .announcement, argument: "Clip saved")
             }
         }
         .task(id: addedSceneID) {
@@ -318,23 +318,12 @@ struct CameraView: View {
             Menu {
                 if let options = camera.options {
                     Text(options.recordingFormat)
-                    if options.profile == .appleLog {
-                        Text(options.canFlipWhileRecording ? "Switch cameras during a take. Log video and microphone recording stay continuous." :
-                            options.canFlip ? "Camera flip is available before recording." : CameraCompatibility.logCameraExplanation)
-                    }
                     Divider()
                 }
-                Button("Movie Settings", systemImage: "film") { showingMovieSettings = true }
+                Button("Recording Settings", systemImage: "record.circle") { showingMovieSettings = true }
                     .disabled(camera.busy)
                 Button("Dolly Settings", systemImage: "slider.horizontal.3") { showingDollySettings = true }
                     .disabled(camera.busy)
-                Button("Dolly Help", systemImage: "questionmark.circle") { showingDollyHelp = true }
-                    .disabled(camera.busy)
-                if let last = movie.latestTake {
-                    Divider()
-                    Button("Undo Last Take", systemImage: "arrow.uturn.backward") { undoLastTake(last.id) }
-                        .disabled(camera.busy || undoingTake)
-                }
             } label: { MovieControlIcon(systemName: "gearshape").homeGlass() }
                 .accessibilityLabel("Camera settings")
             if let options = camera.options, options.hasTorch {
@@ -634,35 +623,41 @@ struct CameraView: View {
                 } footer: {
                     Text("Keeps manual zoom on the current physical camera when supported. Tapping another lens can switch cameras for an automatic Dolly.")
                 }
+                Section {
+                    NavigationLink("How to Use Dolly", destination: dollyHelpContent)
+                }
             }.navigationTitle("Dolly Settings").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingDollySettings = false } } }
         }.preferredColorScheme(.dark).presentationDetents([.large]).presentationDragIndicator(.visible)
     }
     private var dollyHelp: some View {
         NavigationStack {
-            List {
-                Section("Move between lenses") {
-                    Text("Tap Start or End, then choose a lens. Yellow shows the point you’re editing. Tap a point on the track to select it, or drag to adjust it. Go runs the move; the moving dot shows actual zoom.")
-                    Text("Go becomes Stop during a move. Stop holds the current view and keeps End ready for another move. Reverse Direction swaps Start and End and previews the new start.")
-                    Text("Changing Start previews that framing. Changing End sets the destination and keeps the camera still until Go. Selecting a point alone never changes the view. Pinching the video takes over manual zoom.")
-                    Text("Record controls recording; Go controls the zoom move. Delay waits only before the move, without delaying recording. Tap Cancel to cancel a pending move; use the red record control to stop recording.")
-                    Text("Tap the video to focus, including during a Dolly move. Lens and Dolly controls adjust zoom without changing focus.")
-                }
-                Section("Automatic duration") {
-                    Text("Choose the seconds in the Dolly bar to set how long the next lens-to-lens move takes, including its gentle start and finish.")
-                }
-                Section("Manual Dolly Response") {
-                    Text("Drag faster or slower to control zoom. Slow gives a gentler response, Normal is balanced, and Fast responds more quickly. This setting does not change the automatic duration.")
-                }
-                Section("Start Delay") {
-                    Text("Delay sets an optional 3, 5 or 7 second wait before the Dolly move. Duration controls the move itself. Record starts immediately, including during a Dolly countdown. Tap Cancel to cancel the pending move without stopping recording.")
-                }
-                Section {
-                    Button("Show Dolly Tips Again") { dollyGuidanceLearned = false; showingDollyHelp = false }
-                }
-            }.navigationTitle("Dolly").navigationBarTitleDisplayMode(.inline)
+            dollyHelpContent
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingDollyHelp = false } } }
         }.preferredColorScheme(.dark).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    }
+    private var dollyHelpContent: some View {
+        List {
+            Section("Move between lenses") {
+                Text("Tap Start or End, then choose a lens. Yellow shows the point you’re editing. Tap a point on the track to select it, or drag to adjust it. Go runs the move; the moving dot shows actual zoom.")
+                Text("Go becomes Stop during a move. Stop holds the current view and keeps End ready for another move. Reverse Direction swaps Start and End and previews the new start.")
+                Text("Changing Start previews that framing. Changing End sets the destination and keeps the camera still until Go. Selecting a point alone never changes the view. Pinching the video takes over manual zoom.")
+                Text("Record controls recording; Go controls the zoom move. Delay waits only before the move, without delaying recording. Tap Cancel to cancel a pending move; use the red record control to stop recording.")
+                Text("Tap the video to focus, including during a Dolly move. Lens and Dolly controls adjust zoom without changing focus.")
+            }
+            Section("Automatic duration") {
+                Text("Choose the seconds in the Dolly bar to set how long the next lens-to-lens move takes, including its gentle start and finish.")
+            }
+            Section("Manual Dolly Response") {
+                Text("Drag faster or slower to control zoom. Slow gives a gentler response, Normal is balanced, and Fast responds more quickly. This setting does not change the automatic duration.")
+            }
+            Section("Start Delay") {
+                Text("Delay sets an optional 3, 5 or 7 second wait before the Dolly move. Duration controls the move itself. Record starts immediately, including during a Dolly countdown. Tap Cancel to cancel the pending move without stopping recording.")
+            }
+            Section {
+                Button("Show Dolly Tips Again") { dollyGuidanceLearned = false; showingDollyHelp = false; showingDollySettings = false }
+            }
+        }.navigationTitle("Dolly").navigationBarTitleDisplayMode(.inline)
     }
     private func dollyMinimum(_ options: CameraOptions) -> CGFloat {
         min(options.minimum, options.lenses.map(\.factor).min() ?? options.minimum)
@@ -919,7 +914,7 @@ struct CameraView: View {
     @ViewBuilder private func status(movie: Movie) -> some View {
         if camera.state == .failed || camera.state == .interrupted {
             VStack(spacing: 8) {
-                Text(camera.hasRecoverableTake ? "Take couldn’t be added" : "Camera paused")
+                Text(camera.hasRecoverableTake ? "Clip couldn’t be added" : "Camera paused")
                     .font(.footnote.weight(.semibold))
                 Text(camera.hasRecoverableTake ? "The recording file was kept for recovery." : (camera.message ?? "Try again to reconnect the camera."))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -941,7 +936,7 @@ struct CameraView: View {
         Button("Try Again") { Task { await prepareCamera() } }
             .frame(minHeight: 44).buttonStyle(.borderedProminent)
         if camera.hasRecoverableTake {
-            Button("Recover Take") {
+            Button("Recover Clip") {
                 Task { await camera.pauseForPlayback(); showingRecovery = true }
             }.frame(minHeight: 44).buttonStyle(.bordered)
         }
@@ -1036,13 +1031,20 @@ struct CameraView: View {
             .disabled(camera.switchingCamera && !camera.recordingSessionActive || pipConfiguring || undoingTake ||
                 !camera.recordingSessionActive && camera.state != .ready)
             .opacity(!camera.recordingSessionActive && camera.state != .ready ? 0.4 : 1)
-            .accessibilityLabel(recordingCountdown.remaining != nil ? "Cancel recording countdown" : camera.state == .starting ? "Cancel starting recording" : camera.state == .finalizing ? "Saving recording" : camera.recordingSessionActive ? "Stop recording" : "Record next scene")
+            .accessibilityLabel(recordingCountdown.remaining != nil ? "Cancel recording countdown" : camera.state == .starting ? "Cancel starting recording" : camera.state == .finalizing ? "Saving recording" : camera.recordingSessionActive ? "Stop recording" : "Record next clip")
     }
     @ViewBuilder private func reviewControls(movie: Movie, landscape: Bool) -> some View {
         let recent = Button { openWatch(sceneID: movie.activeScenes.last?.id) } label: {
             SceneThumbnail(scene: movie.activeScenes.last, root: app.store.root, movie: movie)
                 .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
-        }.accessibilityLabel("Review recent scene").disabled(camera.busy || movie.activeScenes.isEmpty)
+        }.accessibilityLabel("Review recent clip").disabled(camera.busy || movie.activeScenes.isEmpty)
+            .contextMenu {
+                if let last = movie.latestTake {
+                    Button("Undo Last Clip", systemImage: "arrow.uturn.backward") { undoLastTake(last.id) }
+                        .disabled(camera.busy || undoingTake)
+                }
+            }
+            .accessibilityHint("Opens the latest clip. Touch and hold for Undo Last Clip.")
         let flip = Button { camera.flip() } label: {
             ZStack {
                 MovieControlIcon(systemName: "arrow.triangle.2.circlepath.camera")
@@ -1051,7 +1053,7 @@ struct CameraView: View {
             }.background(.white.opacity(0.15), in: Circle())
         }.accessibilityLabel(camera.switchingCamera || camera.recordingFlip != nil ? "Switching camera" : "Switch camera")
             .accessibilityHint(movie.captureProfile == .appleLog ?
-                (camera.options?.canFlipWhileRecording == true ? "Switch cameras while keeping this Log take and microphone recording continuous." : camera.state == .recording ? CameraCompatibility.logRecordingFlipExplanation : camera.options?.canFlip == true ? "Switch cameras before recording." : CameraCompatibility.logCameraExplanation) : "Switch between the front and rear cameras.")
+                (camera.options?.canFlipWhileRecording == true ? "Switch cameras while keeping this Log clip and microphone recording continuous." : camera.state == .recording ? CameraCompatibility.logRecordingFlipExplanation : camera.options?.canFlip == true ? "Switch cameras before recording." : CameraCompatibility.logCameraExplanation) : "Switch between the front and rear cameras.")
             .disabled(!camera.canFlipCamera)
         let watch = VStack(spacing: 0) {
             Button { openWatch() } label: {
@@ -1100,15 +1102,15 @@ struct CameraView: View {
                     ProgressView().controlSize(.small).tint(.white)
                     Text("Saving…").font(.caption2)
                 }.frame(minWidth: 44, minHeight: 44)
-                    .accessibilityElement(children: .ignore).accessibilityLabel("Saving scene")
+                    .accessibilityElement(children: .ignore).accessibilityLabel("Saving clip")
                     .transition(.opacity)
             } else if let id = addedSceneID, movie.latestTake?.id == id, !camera.busy {
                 VStack(spacing: 0) {
                     Label("Saved", systemImage: "checkmark").font(.caption2).foregroundStyle(.secondary)
                     Button("Undo") { undoLastTake(id) }
                         .font(.caption.weight(.medium)).frame(minWidth: 44, minHeight: 44)
-                        .disabled(undoingTake).accessibilityLabel("Undo last take")
-                        .accessibilityHint("Moves the latest scene to Recently Deleted. You can restore it in Settings.")
+                        .disabled(undoingTake).accessibilityLabel("Undo last clip")
+                        .accessibilityHint("Moves the latest clip to Recently Deleted. You can restore it in Settings.")
                 }.transition(.opacity)
             }
         }.animation(.easeInOut(duration: 0.2), value: camera.state == .finalizing)

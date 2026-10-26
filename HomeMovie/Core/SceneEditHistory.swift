@@ -69,7 +69,7 @@ struct SceneAdjustmentClipboard {
     func applying(to target: SceneAdjustments) throws -> SceneAdjustments {
         try target.validate()
         guard source.pipelineVersion == target.pipelineVersion || !target.isActive else {
-            throw HomeMovieError.message("Reset this scene’s adjustments before pasting edits from a different processing version.")
+            throw HomeMovieError.message("Reset this clip’s adjustments before pasting edits from a different processing version.")
         }
         var result = target
         if !target.isActive { result.pipelineVersion = source.pipelineVersion }

@@ -364,7 +364,7 @@ struct RecordingFlipHandoff {
             pipLayout = layout
             if let app, let movieID = preferencesMovieID {
                 do { try await app.store.setPiPLayout(movieID: movieID, layout: layout); await app.refresh() }
-                catch { message = "The inset moved for this take, but its default position could not be saved." }
+                catch { message = "The inset moved for this clip, but its default position could not be saved." }
             }
         case .pipSetupFailed(let text):
             pipSetupFailed = true; enablePiPWhenReady = false; message = text

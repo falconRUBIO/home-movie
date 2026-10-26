@@ -33,7 +33,7 @@ import UIKit
             player = AVPlayer(playerItem: item)
             statusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
                 guard item.status == .failed else { return }
-                let message = item.error?.localizedDescription ?? "This scene could not be played."
+                let message = item.error?.localizedDescription ?? "This clip could not be played."
                 Task { @MainActor in
                     guard let self, self.requestID == request else { return }
                     self.error = message; self.player?.pause()
@@ -219,7 +219,7 @@ struct SceneReviewView: View {
                 NavigationStack {
                     ContentUnavailableView("No Clips", systemImage: "film",
                         description: Text("The clip was moved to Recently Deleted. You can restore it from Settings."))
-                        .navigationTitle("Edit Scene")
+                        .navigationTitle("Edit Clip")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
                             ToolbarItem(placement: .confirmationAction) {
@@ -382,7 +382,7 @@ private struct SceneReviewSession: View {
             }
             .safeAreaInset(edge: .bottom) { editorFooter }
             .saveStatusToast($export.saveFeedback)
-            .navigationTitle("Edit Scene").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Edit Clip").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -411,9 +411,9 @@ private struct SceneReviewSession: View {
                             .disabled(preview.loading || preview.error != nil)
                         Button("Duplicate", systemImage: "plus.square.on.square") { duplicateScene() }
                         Divider()
-                        Button("Delete Scene", systemImage: "trash", role: .destructive) { confirmRemove = true }
+                        Button("Delete Clip", systemImage: "trash", role: .destructive) { confirmRemove = true }
                     } label: { Image(systemName: "ellipsis.circle").frame(minWidth: 44, minHeight: 44) }
-                        .accessibilityLabel("Scene actions").disabled(busy)
+                        .accessibilityLabel("Clip actions").disabled(busy)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { saveEditsAndClose() }.disabled(committing)
@@ -425,7 +425,7 @@ private struct SceneReviewSession: View {
             .sheet(isPresented: $showingCopyAdjustments) {
                 CopySceneAdjustmentsView(source: adjustments) { clipboard in
                     app.copiedSceneAdjustments = clipboard
-                    notice = "Adjustments copied. Open another scene to paste."
+                    notice = "Adjustments copied. Open another clip to paste."
                     UISelectionFeedbackGenerator().selectionChanged()
                 }
             }
@@ -434,7 +434,7 @@ private struct SceneReviewSession: View {
                 Button("Discard Changes", role: .destructive) { preview.stop(); dismiss() }
                 Button("Keep Editing", role: .cancel) { }
             }
-            .alert("Delete this scene?", isPresented: $confirmRemove) {
+            .alert("Delete this clip?", isPresented: $confirmRemove) {
                 Button("Cancel", role: .cancel) { }
                 Button("Move to Recently Deleted", role: .destructive) {
                     deleteScene()
@@ -591,7 +591,7 @@ private struct SceneReviewSession: View {
         }
         .overlay(alignment: .topLeading) {
             if (scene.profile ?? movie?.captureProfile) == .appleLog {
-                LogLookBadge(lookName: movie?.lookName ?? "Apple Standard").padding(12)
+                LogLookBadge(lookName: movie?.lookName ?? "Natural").padding(12)
             }
         }
     }
@@ -761,7 +761,7 @@ private struct SceneReviewSession: View {
                 adjustments.warmth = result.warmth; adjustments.tint = result.tint
                 editingChanged(false)
                 UISelectionFeedbackGenerator().selectionChanged()
-                notice = "White balance set for this scene."
+                notice = "White balance set for this clip."
             } catch {
                 if !Task.isCancelled, whiteBalanceRequest == request { self.error = error.localizedDescription }
             }
@@ -828,12 +828,12 @@ private struct SceneReviewSession: View {
     private func saveClip() {
         guard !busy else { return }
         saving = true; error = nil; notice = nil; comparing = false; preview.player?.pause()
-        export.saveFeedback = SaveToast(kind: .saving, message: "Preparing scene…")
+        export.saveFeedback = SaveToast(kind: .saving, message: "Preparing clip…")
         Task {
             do {
                 try await persistEdits()
                 guard let movie, let currentScene = movie.activeScenes.first(where: { $0.id == scene.id }) else {
-                    throw HomeMovieError.message("This scene is unavailable.")
+                    throw HomeMovieError.message("This clip is unavailable.")
                 }
                 let clip = try ExportModel.singleSceneMovie(movie: movie, scene: currentScene)
                 waitingForExport = true; saving = false
@@ -847,7 +847,7 @@ private struct SceneReviewSession: View {
                 }
             } catch {
                 self.error = error.localizedDescription; saving = false
-                export.saveFeedback = SaveToast(kind: .failure, message: "Couldn’t prepare the scene. Please try again.")
+                export.saveFeedback = SaveToast(kind: .failure, message: "Couldn’t prepare the clip. Please try again.")
             }
         }
     }
@@ -856,7 +856,7 @@ private struct SceneReviewSession: View {
         savingPhotos = true
         Task {
             await export.saveToPhotos()
-            if export.error == nil { notice = "Scene saved to Photos." }
+            if export.error == nil { notice = "Clip saved to Photos." }
             savingPhotos = false
         }
     }

@@ -16,7 +16,7 @@ struct RecentlyDeletedView: View {
         let movie: Movie
         let scene: Scene?
         var title: String { movie.name }
-        var detail: String { scene.map { "Scene · \($0.capturedAt.formatted(date: .abbreviated, time: .shortened))" } ?? "Movie · \(movie.scenes.count) scenes" }
+        var detail: String { scene.map { "Clip · \($0.capturedAt.formatted(date: .abbreviated, time: .shortened))" } ?? "Movie · \(movie.scenes.count) clips" }
     }
     private var items: [Item] {
         app.movies.flatMap { movie -> [Item] in
@@ -87,7 +87,7 @@ struct RecentlyDeletedView: View {
     }
     @ViewBuilder private var contents: some View {
         if items.isEmpty {
-            ContentUnavailableView("No Recently Deleted Items", systemImage: "trash", description: Text("Deleted movies and scenes appear here."))
+            ContentUnavailableView("No Recently Deleted Items", systemImage: "trash", description: Text("Deleted movies and clips appear here."))
         } else {
             List {
                 Section {

@@ -59,7 +59,7 @@ actor MediaAssembler {
         let effects: FilmEffectsSettings = showOriginalLog ? .off : (filmEffects ?? movie.exportEffects)
         try effects.validate()
         let scenes = movie.activeScenes
-        guard !scenes.isEmpty else { throw HomeMovieError.message("Record a scene first.") }
+        guard !scenes.isEmpty else { throw HomeMovieError.message("Record a clip first.") }
         let usesLog = movie.captureProfile == .appleLog || scenes.contains { $0.profile == .appleLog }
         let cube: ColorCube? = usesLog && !showOriginalLog ? try movie.look.map { try ColorCube.load($0, root: root) } ?? ColorCube.appleStandard.get() : nil
         let usesCustomCompositor = usesLog || effects.isActive || forFilmEffectsPreview || scenes.contains {
@@ -80,17 +80,17 @@ actor MediaAssembler {
             try scene.filmEffectsTweaks?.validate()
             let sceneEffects = showOriginalLog ? FilmEffectsSettings.off : scene.resolvedEffects(movie: effects)
             try sceneEffects.validate()
-            guard !scene.missing, scene.validTrim else { throw HomeMovieError.message("A scene is missing or has an invalid trim. Restore or remove it before playing this movie.") }
+            guard !scene.missing, scene.validTrim else { throw HomeMovieError.message("A clip is missing or has an invalid trim. Restore or remove it before playing this movie.") }
             let asset = AVURLAsset(url: root.appendingPathComponent(scene.source))
-            guard let sourceVideo = try await asset.loadTracks(withMediaType: .video).first else { throw HomeMovieError.message("A scene has no video track.") }
+            guard let sourceVideo = try await asset.loadTracks(withMediaType: .video).first else { throw HomeMovieError.message("A clip has no video track.") }
             let sourceRange = try await sourceVideo.load(.timeRange)
             guard sourceRange.isValid, sourceRange.start.isNumeric, sourceRange.start.seconds.isFinite,
                   sourceRange.duration.isNumeric, sourceRange.duration.seconds.isFinite, sourceRange.duration.seconds > 0 else {
-                throw HomeMovieError.message("A scene has an invalid video time range. Its original file has been preserved.")
+                throw HomeMovieError.message("A clip has an invalid video time range. Its original file has been preserved.")
             }
             let start = CMTimeAdd(sourceRange.start, scene.trimStart.cmTime)
             let selected = CMTimeRange(start: start, duration: scene.playableDuration)
-            guard CMTimeCompare(CMTimeRangeGetEnd(selected), CMTimeRangeGetEnd(sourceRange)) <= 0 else { throw HomeMovieError.message("A scene trim extends beyond the video track.") }
+            guard CMTimeCompare(CMTimeRangeGetEnd(selected), CMTimeRangeGetEnd(sourceRange)) <= 0 else { throw HomeMovieError.message("A clip trim extends beyond the video track.") }
             try videoTrack.insertTimeRange(selected, of: sourceVideo, at: cursor)
             if let sourceAudio = try await asset.loadTracks(withMediaType: .audio).first {
                 let audioRange = try await sourceAudio.load(.timeRange)
@@ -111,7 +111,7 @@ actor MediaAssembler {
             let naturalSize = try await sourceVideo.load(.naturalSize)
             let preferred = try await sourceVideo.load(.preferredTransform)
             guard Self.hasValidGeometry(size: naturalSize, preferred: preferred) else {
-                throw HomeMovieError.message("A scene has invalid video dimensions. Its original file has been preserved.")
+                throw HomeMovieError.message("A clip has invalid video dimensions. Its original file has been preserved.")
             }
             let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
             layer.setTransform(Self.fitTransform(size: naturalSize, preferred: preferred, canvas: movie.format.canvas), at: cursor)

@@ -7,6 +7,7 @@ import UIKit
     let movieID: UUID
     @Binding var previewMode: CameraPreviewMode
     let canChangeLook: Bool
+    var playbackOriginal: Binding<Bool>? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var looks: [LUTReference] = []
@@ -22,7 +23,7 @@ import UIKit
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Section {
-                    lookRow("Standard", reference: nil)
+                    lookRow("Natural", reference: nil)
                     ForEach(looks, id: \.id) { look in
                         lookRow(look.displayName, reference: look)
                     }
@@ -30,8 +31,18 @@ import UIKit
                     Text(canChangeLook ? "Used for playback and export."
                          : "Used for playback and export. Stop recording to change it.")
                 }
-                ViewfinderPreviewSection(mode: $previewMode)
-                    .disabled(working)
+                if let playbackOriginal {
+                    Section {
+                        Picker("Playback", selection: playbackOriginal.withSelectionFeedback()) {
+                            Text("With Look").tag(false)
+                            Text("Log").tag(true)
+                        }.pickerStyle(.inline)
+                    } header: { Text("Playback Preview") } footer: {
+                        Text("Preview only. Export uses the selected movie look. Your originals stay in Apple Log.")
+                    }.disabled(working)
+                } else {
+                    ViewfinderPreviewSection(mode: $previewMode).disabled(working)
+                }
                 Section {
                     NavigationLink {
                         LookFileImportView(importing: $working) { url, displayReferred in
@@ -39,6 +50,7 @@ import UIKit
                             let look = try await app.store.importLook(from: url, displayReferred: displayReferred)
                             try await app.store.setLook(movieID: movieID, look: look)
                             looks = await app.store.availableLooks()
+                            if let playbackOriginal { playbackOriginal.wrappedValue = false }
                             await app.refresh()
                         }
                     } label: {
@@ -76,6 +88,7 @@ import UIKit
                 defer { working = false }
                 do {
                     try await app.store.setLook(movieID: movieID, look: reference)
+                    if let playbackOriginal { playbackOriginal.wrappedValue = false }
                     await app.refresh()
                 } catch { problem = error.localizedDescription }
             }

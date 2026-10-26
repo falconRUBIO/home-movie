@@ -62,7 +62,7 @@ struct BackupView: View {
         NavigationStack {
             Form {
                 Section("Protect your movies") {
-                    Text("A project backup includes every saved original scene, movie name, scene order, trim and recoverable deletion.").font(.footnote)
+                    Text("A project backup includes every saved original clip, movie name, clip order, trim and recoverable deletion.").font(.footnote)
                     Text("Save it to iCloud Drive or another location outside MOVIE MODE. A copy inside this app can disappear if the app is deleted.").font(.footnote).foregroundStyle(.secondary)
                     Text("Unfinished recovery files are separate; export them from Recording Recovery.").font(.footnote).foregroundStyle(.secondary)
                 }
