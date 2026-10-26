@@ -97,6 +97,48 @@ import UIKit
         }
     }
 
+    func testRegrabContinuesFromVisibleTargetAndHasNewOwnership() {
+        let view = ZoomDialControlView(frame: CGRect(x: 0, y: 0, width: 360, height: 104))
+        var sessions: [UUID] = []
+        configure(view, onBegin: { sessions.append($0) })
+        view.handlePan(state: .began, translation: 0)
+        view.handlePan(state: .ended, translation: -48)
+        // Capture is still behind. A second touch must not reset 2x to 1.2x.
+        configure(view, zoom: 1.2, onBegin: { sessions.append($0) })
+        view.handlePan(state: .began, translation: 0)
+        XCTAssertEqual(view.displayedZoom, 2, accuracy: 0.00001)
+        view.handlePan(state: .changed, translation: 24)
+        XCTAssertEqual(view.displayedZoom, sqrt(2), accuracy: 0.00001)
+        XCTAssertEqual(sessions.count, 2)
+        XCTAssertNotEqual(sessions[0], sessions[1])
+        view.cancelInput()
+    }
+
+    func testManualTrackingSettlesPromptlyWithoutOvershootAtDifferentFrameRates() {
+        for hz in [30.0, 60.0, 120.0] {
+            var filter = SmoothZoomFilter(current: 1, minimum: 0.5, maximum: 24)!
+            filter.setTarget(2)
+            var previous = 1.0
+            for _ in 0..<Int(hz * 0.3) {
+                let next = filter.advance(seconds: 1 / hz, rate: ManualZoomScale.trackingRate,
+                    response: ManualZoomScale.responseTime)
+                XCTAssertGreaterThanOrEqual(next, previous)
+                XCTAssertLessThanOrEqual(next, 2)
+                previous = next
+            }
+            XCTAssertEqual(filter.value, 2, accuracy: 0.01)
+            filter.setTarget(0.5)
+            for _ in 0..<Int(hz * 0.4) {
+                let next = filter.advance(seconds: 1 / hz, rate: ManualZoomScale.trackingRate,
+                    response: ManualZoomScale.responseTime)
+                XCTAssertLessThanOrEqual(next, previous)
+                XCTAssertGreaterThanOrEqual(next, 0.5)
+                previous = next
+            }
+            XCTAssertEqual(filter.value, 0.5, accuracy: 0.01)
+        }
+    }
+
     func testCompactTravelAndImmediateReversalAtBothRangeLimits() {
         var drag = ManualZoomDrag(start: 1)
         XCTAssertEqual(drag.update(translation: -144, minimum: 0.5, maximum: 24), 8, accuracy: 0.00001)
