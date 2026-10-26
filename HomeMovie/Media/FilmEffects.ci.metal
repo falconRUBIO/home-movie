@@ -83,13 +83,19 @@ float4 grainResponse(float4 input, float4 local, float noise, float2 colorNoise,
     float3 color = float3(colorNoise.x, 0.0, colorNoise.y);
     color -= luminance(color);
     color *= envelope * colorStrength;
+    // Soft-limit rare particle coincidences: color stays a quiet component even
+    // at maximum Amount. A shared gain preserves the zero-luminance direction.
+    float colorPeak = max(abs(color[0]), max(abs(color[1]), abs(color[2])));
+    float colorLimit = max(amount * detail * colorStrength * 0.065, 0.000001);
+    color *= 1.0 / (1.0 + colorPeak / colorLimit);
     // Symmetric headroom avoids a positive/negative clipping bias near gamut edges.
     float3 room = min(result, 1.0 - result);
     float gain = 1.0;
     for (int c = 0; c < 3; ++c) {
         if (abs(color[c]) > 0.000001) gain = min(gain, room[c] / abs(color[c]));
     }
-    return float4((result + color * clamp(gain, 0.0, 1.0)) * input.a, input.a);
+    // Remove floating-point residue at a gamut boundary after the shared fit.
+    return float4(clamp(result + color * clamp(gain, 0.0, 1.0), 0.0, 1.0) * input.a, input.a);
 }
 
 extern "C" { namespace coreimage {
