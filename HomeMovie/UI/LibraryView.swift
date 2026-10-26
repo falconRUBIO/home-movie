@@ -186,8 +186,7 @@ struct LibraryView: View {
         libraryContent
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle("Movies").navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            // Keep the bar background system-owned so it cannot cover the soft scroll edge.
             .overlay(alignment: .bottom) {
                 if !selecting {
                     newMovieButton
