@@ -8,7 +8,7 @@ False Color until a new choice is made. Standard movies ignore these Log preview
 preferences. Preview choices may change during recording without reconfiguring capture.
 
 The small on-screen False Color button is a static key, not a live chart. It shows
-all six colors, including purple, pink and red, and opens a full guide when tapped.
+all six colors, including purple, pink and red, with dark-to-bright labels and a tap-for-help prompt. It opens a practical guide when tapped.
 The guide is also available beside the Viewfinder picker. Green is explicitly
 labeled 18% middle gray; unmarked exposure ranges remain grayscale. The key's RGB
 values and the shader's thresholds/colors come from the same `FalseColorZone`
@@ -80,3 +80,15 @@ another camera's sensor noise/clipping calibration or presenting an IRE scale
 that does not describe this mapping. A screenshot alone cannot establish whether
 a mostly purple image reflects actual exposure or a capture/metadata problem;
 verified Log source-frame testing remains required.
+
+## Understanding the key
+
+The on-screen key now labels each color Very dark / Dark / Mid-gray / +1 stop /
+Bright / Very bright and asks the user to check their subject. The guide leads
+with the goal: retain useful detail in the main subject, rather than making the
+whole scene green. It explains that this is a static key, what to do for dark
+subjects and bright highlights, the window/person tradeoff, and how to use a gray
+card. Green and pink are references, not universal targets for faces. Each color
+has an action-oriented explanation before its technical relative-stop range.
+
+The map, thresholds, exposure controls, recording and export paths are unchanged.
