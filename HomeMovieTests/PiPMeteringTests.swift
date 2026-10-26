@@ -124,15 +124,18 @@ final class PiPMeteringTests: XCTestCase {
         for composition in PiPComposition.allCases {
             for swapped in [false, true] {
                 let layout = PiPLayout(composition: composition, splitSwapped: swapped)
-                let surface = PiPMeteringView(frames: rear,
-                    presentation: layout.previewPresentation(enabled: false, canvas: canvas),
-                    presenterFrames: front, useLivePresentation: false,
-                    front: nil, rear: nil, protectedRegions: [], onFocus: { _, _, _ in true },
-                    onExposure: { _, _ in }, onMove: { _, _ in })
-                let coordinator = surface.makeCoordinator()
-                for point in [CGPoint(x: 30, y: 30), CGPoint(x: 195, y: 422), CGPoint(x: 360, y: 800)] {
-                    let hit = try XCTUnwrap(coordinator.resolve(point, canvas: canvas))
-                    XCTAssertFalse(hit.front)
+                for opacity: CGFloat in [0, 0.5] {
+                    var state = layout.previewPresentation(enabled: false, canvas: canvas)
+                    state.opacity = opacity // Off must also target rear during the fade-out.
+                    let surface = PiPMeteringView(frames: rear, presentation: state,
+                        presenterFrames: front, useLivePresentation: false,
+                        front: nil, rear: nil, protectedRegions: [], onFocus: { _, _, _ in true },
+                        onExposure: { _, _ in }, onMove: { _, _ in })
+                    let coordinator = surface.makeCoordinator()
+                    for point in [CGPoint(x: 30, y: 30), CGPoint(x: 195, y: 422), CGPoint(x: 360, y: 800)] {
+                        let hit = try XCTUnwrap(coordinator.resolve(point, canvas: canvas))
+                        XCTAssertFalse(hit.front)
+                    }
                 }
             }
         }

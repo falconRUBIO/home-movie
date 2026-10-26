@@ -95,7 +95,7 @@ struct PiPMeteringView: UIViewRepresentable {
         func resolve(_ point: CGPoint, canvas: CGSize) -> PiPMeteringHit? {
             guard let snapshot = parent.backgroundFrames?.snapshot() ?? parent.frames.snapshot() else { return nil }
             let state = parent.useLivePresentation ? snapshot.pip?.presentation ?? parent.presentation : parent.presentation
-            let presenterVisible = state.opacity > 0.001 && state.isPlaceable
+            let presenterVisible = state.enabled && state.opacity > 0.001 && state.isPlaceable
             let presenter = state.composition == .inset ? state.rect : state.composition.presenterRect(swapped: state.splitSwapped) ?? state.rect
             let unit = CGPoint(x: point.x / max(1, canvas.width), y: point.y / max(1, canvas.height))
             let isFront = presenterVisible && presenter.contains(unit)
