@@ -110,3 +110,54 @@ final class FalseColorTests: XCTestCase {
         }
     }
 }
+
+
+extension FalseColorTests {
+    func testViewfinderChoiceResolvesLegacySwitchesWithoutConflictingModes() {
+        XCTAssertEqual(CameraPreviewMode(originalLog: false, falseColor: false), .look)
+        XCTAssertEqual(CameraPreviewMode(originalLog: true, falseColor: false), .log)
+        XCTAssertEqual(CameraPreviewMode(originalLog: false, falseColor: true), .falseColor)
+        XCTAssertEqual(CameraPreviewMode(originalLog: true, falseColor: true), .falseColor)
+    }
+    func testViewfinderChoiceRoundTripsAndOnlyChangesPreviewPreferences() throws {
+        let suite = "LookPreviewTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("Cinema", forKey: "fixtureMovieLook")
+        defaults.set("appleLog", forKey: "fixtureCaptureProfile")
+        for original in [false, true] { for falseColor in [false, true] {
+            defaults.set(original, forKey: CameraPreviewMode.originalLogPreferenceKey)
+            defaults.set(falseColor, forKey: FalseColorPreview.preferenceKey)
+            for choice in CameraPreviewMode.allCases {
+                choice.store(in: defaults)
+                XCTAssertEqual(CameraPreviewMode.read(from: defaults), choice)
+                XCTAssertFalse(defaults.bool(forKey: CameraPreviewMode.originalLogPreferenceKey)
+                    && defaults.bool(forKey: FalseColorPreview.preferenceKey))
+                XCTAssertEqual(defaults.string(forKey: "fixtureMovieLook"), "Cinema")
+                XCTAssertEqual(defaults.string(forKey: "fixtureCaptureProfile"), "appleLog")
+            }
+        } }
+    }
+}
+
+
+extension FalseColorTests {
+    func testAllSixLegendColorsMatchTheRenderedMapInFullAndVideoRange() throws {
+        let probes: [(FalseColorZone, Double)] = [(.purple, -7), (.blue, -5), (.middleGray, 0),
+            (.pink, 1), (.orange, 3.5), (.red, 4.5)]
+        XCTAssertEqual(probes.map(\.0), FalseColorZone.allCases)
+        for fullRange in [false, true] {
+            for (zone, stops) in probes {
+                let actual = sample(try FalseColorPreview.image(neutral(stops, fullRange: fullRange)))
+                assertColor(actual, [zone.rgb.x, zone.rgb.y, zone.rgb.z, 1])
+            }
+        }
+    }
+    func testUnmarkedExposureRangesStayGrayscaleRatherThanImplyingAWarning() throws {
+        for stops in [-3.0, -1, 0.5, 2, 2.5] {
+            let actual = sample(try FalseColorPreview.image(neutral(stops)))
+            XCTAssertEqual(actual[0], actual[1], accuracy: 0.002)
+            XCTAssertEqual(actual[1], actual[2], accuracy: 0.002)
+        }
+    }
+}
