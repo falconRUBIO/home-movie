@@ -5,25 +5,22 @@ import UIKit
 
 struct PiPControl: View {
     let enabled: Bool
-    var unavailableReason: String? = nil
     let disabled: Bool
-    let onToggle: () -> Void
-    let onLayout: () -> Void
+    let recording: Bool
+    let onActivate: () -> Void
     var body: some View {
-        MovieControlIcon(systemName: "rectangle.on.rectangle")
-            .foregroundStyle(enabled ? .yellow : .white)
-            .background(enabled ? Color.white.opacity(0.15) : .clear, in: Circle())
-            .opacity(disabled || unavailableReason != nil ? 0.4 : 1).contentShape(Rectangle())
-            .gesture(LongPressGesture(minimumDuration: 0.45).exclusively(before: TapGesture()).onEnded { value in
-                guard !disabled else { return }
-                UISelectionFeedbackGenerator().selectionChanged()
-                switch value { case .first: onLayout(); case .second: onToggle() }
-            })
-            .accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton)
-            .accessibilityLabel("Picture-in-Picture").accessibilityValue(enabled ? "On" : "Off")
-            .accessibilityHint(unavailableReason ?? (disabled ? "Prepare a compatible Dual Camera configuration before the next take." : "Tap to toggle. Hold for PiP Layout while idle."))
-            .accessibilityAction { if !disabled { UISelectionFeedbackGenerator().selectionChanged(); onToggle() } }
-            .accessibilityAction(named: "PiP Layout") { if !disabled { onLayout() } }
+        Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            onActivate()
+        } label: {
+            MovieControlIcon(systemName: "rectangle.on.rectangle")
+                .foregroundStyle(enabled ? .yellow : .white)
+                .background(enabled ? Color.white.opacity(0.15) : .clear, in: Circle())
+        }
+        .disabled(disabled)
+        .accessibilityLabel("Picture in Picture")
+        .accessibilityValue(enabled ? "On" : "Off")
+        .accessibilityHint(recording ? "Turn Picture in Picture on or off for this take" : "Choose a layout and turn Picture in Picture on or off")
     }
 }
 
@@ -34,6 +31,10 @@ struct PiPLayoutView: View {
     let frontFrames: LiveFrames
     let ready: Bool
     let canPrepare: Bool
+    let enabled: Bool
+    let configuring: Bool
+    let setupFailed: Bool
+    let onEnabledChange: (Bool) -> Void
     let logMode: Bool
     var logCube: ColorCube? = nil
     var obstacles: [CGRect] = []
@@ -64,19 +65,32 @@ struct PiPLayoutView: View {
                     .background(Color.black)
                     ScrollViewReader { scroll in
                         Form {
+                            Section {
+                                Toggle("Picture in Picture", isOn: Binding(
+                                    get: { enabled }, set: onEnabledChange))
+                                    .disabled(configuring || !enabled && !canPrepare && !ready)
+                                if configuring {
+                                    HStack(spacing: 10) {
+                                        ProgressView()
+                                        Text("Preparing cameras…").foregroundStyle(.secondary)
+                                    }
+                                }
+                            } footer: {
+                                Text(logMode ? "1080p · 30 fps · Apple Log · 10-bit. Your movie stays in Log." : "1080p · 30 fps · Standard. Uses the rear wide camera and front camera.")
+                            }
                             ForEach(PiPComposition.allCases) { composition in
                                 Section {
                                     compositionButton(composition)
                                         .id(composition)
                                     if expandedComposition == composition {
-                                        compositionSettings
+                                        compositionSettings.disabled(configuring)
                                     }
                                 }
                             }
-                            if !ready {
+                            if !ready, !configuring, setupFailed || !canPrepare {
                                 Section {
                                     if logMode {
-                                        Text(CameraCompatibility.logPiPExplanation)
+                                        Text(canPrepare ? "The live preview could not start. Retry or check this iPhone’s Log support." : "Picture in Picture is unavailable for this iPhone’s Log camera formats.")
                                         Button {
                                             guard !checkingLogSupport else { return }
                                             checkingLogSupport = true
@@ -121,8 +135,9 @@ struct PiPLayoutView: View {
                 }
             }
             .navigationTitle("Picture in Picture").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-        }.presentationDetents([.large]).presentationDragIndicator(.visible)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(configuring) } }
+        }.interactiveDismissDisabled(configuring)
+            .presentationDetents([.large]).presentationDragIndicator(.visible)
             .sensoryFeedback(.selection, trigger: layout.composition)
             .task {
                 if !ready, canPrepare { onPrepare() }
@@ -156,6 +171,7 @@ struct PiPLayoutView: View {
                     .foregroundStyle(.secondary).rotationEffect(.degrees(expanded ? 90 : 0))
             }.frame(minHeight: 44).contentShape(Rectangle())
         }.buttonStyle(.plain)
+            .disabled(configuring)
             .accessibilityLabel(composition.title)
             .accessibilityValue("\(selected ? "Selected, " : "")\(expanded ? "expanded" : "collapsed")")
             .accessibilityHint(expanded ? "Tap to collapse settings" : "Tap to select this layout and show settings beneath it")
