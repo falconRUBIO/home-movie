@@ -149,6 +149,16 @@ struct LibraryView: View {
             }
         }
     }
+    private var libraryHeading: some View {
+        Text("Movies")
+            .font(.largeTitle.bold())
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
+    }
+
     private var libraryContent: some View {
         Group {
             if !app.loaded {
@@ -168,14 +178,18 @@ struct LibraryView: View {
                 } description: { Text("Record a moment. Come back for the next.") }
             } else {
                 ScrollView {
-                    LazyVGrid(columns: movieColumns, alignment: .leading, spacing: 24) {
-                        ForEach(sortedMovies) { movie in
-                            movieCard(movie)
+                    VStack(alignment: .leading, spacing: 0) {
+                        // The title belongs to the content; only toolbar actions stay fixed.
+                        libraryHeading
+                        LazyVGrid(columns: movieColumns, alignment: .leading, spacing: 24) {
+                            ForEach(sortedMovies) { movie in
+                                movieCard(movie)
+                            }
                         }
+                        .padding(.horizontal, 20)
+                        // The last row can scroll fully above the floating create control.
+                        .padding(.bottom, selecting ? 24 : 96)
                     }
-                    .padding(.horizontal, 20).padding(.top, 8)
-                    // The last row can scroll fully above the floating create control.
-                    .padding(.bottom, selecting ? 24 : 96)
                 }
                 .modifier(LibraryScrollEdgeStyle())
             }
@@ -185,7 +199,11 @@ struct LibraryView: View {
     private var libraryPage: some View {
         libraryContent
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle("Movies").navigationBarTitleDisplayMode(.inline)
+            // No collapsed title: Settings and Library Options keep their native glass.
+            .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+            .overlay(alignment: .topLeading) {
+                if !app.loaded || app.activeMovies.isEmpty { libraryHeading }
+            }
             // Keep the bar background system-owned so it cannot cover the soft scroll edge.
             .overlay(alignment: .bottom) {
                 if !selecting {
