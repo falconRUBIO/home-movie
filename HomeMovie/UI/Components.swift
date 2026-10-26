@@ -97,6 +97,10 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     var meteringConversion: ((CGPoint, CGSize) -> CGPoint?)?
+    var insetDragHitTest: ((CGPoint) -> Bool)?
+    func isExposureHandle(at point: CGPoint) -> Bool {
+        sun.alpha > 0.1 && sun.frame.insetBy(dx: -12, dy: -12).contains(point)
+    }
     private var customFocusPosition: CGPoint?
     var onFocus: ((CGPoint, Bool) -> Bool)?
     var onExposure: ((Float) -> Void)?
@@ -109,7 +113,11 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         super.point(inside: point, with: event) && permitsPreviewInteraction(at: point)
     }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        permitsPreviewInteraction(at: touch.location(in: self))
+        let point = touch.location(in: self)
+        // In PiP, dragging the image moves it. Only the visible sun handle takes
+        // an exposure drag; ordinary camera exposure gestures keep their behavior.
+        if gestureRecognizer is UIPanGestureRecognizer, insetDragHitTest?(point) == true { return false }
+        return permitsPreviewInteraction(at: point)
     }
     var exposureBias: Float = 0
     var exposureRange: ClosedRange<Float> = -2...2

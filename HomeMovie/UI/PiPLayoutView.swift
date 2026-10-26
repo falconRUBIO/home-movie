@@ -5,22 +5,38 @@ import UIKit
 
 struct PiPControl: View {
     let enabled: Bool
+    let composition: PiPComposition
+    let canEnable: Bool
     let disabled: Bool
     let recording: Bool
-    let onActivate: () -> Void
+    let onSelect: (PiPQuickMode) -> Void
+    let onSwap: () -> Void
+    let onSettings: () -> Void
+    private var selection: PiPQuickMode { PiPQuickMode(enabled: enabled, composition: composition) }
     var body: some View {
-        Button {
-            UISelectionFeedbackGenerator().selectionChanged()
-            onActivate()
+        Menu {
+            Picker("Layout", selection: Binding(get: { selection }, set: onSelect)) {
+                ForEach(PiPQuickMode.allCases) { mode in
+                    Label(mode.title, systemImage: mode.symbol).tag(mode)
+                }
+            }.pickerStyle(.inline).disabled(!canEnable)
+            if enabled, composition != .inset {
+                Button("Swap Cameras", systemImage: composition == .topAndBottom
+                    ? "arrow.up.arrow.down" : "arrow.left.arrow.right", action: onSwap)
+            }
+            Divider()
+            Button("PiP Settings…", systemImage: "slider.horizontal.3", action: onSettings)
+                .disabled(recording)
         } label: {
-            MovieControlIcon(systemName: "rectangle.on.rectangle")
+            MovieControlIcon(systemName: enabled ? composition.symbol : "rectangle.on.rectangle")
                 .foregroundStyle(enabled ? .yellow : .white)
                 .background(enabled ? Color.white.opacity(0.15) : .clear, in: Circle())
         }
+        .menuOrder(.fixed)
         .disabled(disabled)
         .accessibilityLabel("Picture in Picture")
-        .accessibilityValue(enabled ? "On" : "Off")
-        .accessibilityHint(recording ? "Turn Picture in Picture on or off for this clip" : "Choose a layout and turn Picture in Picture on or off")
+        .accessibilityValue(selection.title)
+        .accessibilityHint("Show layout choices. Choose Off to use one camera.")
     }
 }
 
@@ -32,6 +48,7 @@ struct PiPLayoutView: View {
     let ready: Bool
     let canPrepare: Bool
     let enabled: Bool
+    var requestedEnabled: Bool? = nil
     let configuring: Bool
     let setupFailed: Bool
     let onEnabledChange: (Bool) -> Void
@@ -67,12 +84,12 @@ struct PiPLayoutView: View {
                         Form {
                             Section {
                                 Toggle("Picture in Picture", isOn: Binding(
-                                    get: { enabled }, set: onEnabledChange))
+                                    get: { requestedEnabled ?? enabled }, set: onEnabledChange))
                                     .disabled(configuring || !enabled && !canPrepare && !ready)
                                 if configuring {
                                     HStack(spacing: 10) {
                                         ProgressView()
-                                        Text("Preparing cameras…").foregroundStyle(.secondary)
+                                        Text(ready ? "Updating Picture in Picture…" : "Preparing cameras…").foregroundStyle(.secondary)
                                     }
                                 }
                             } footer: {
@@ -272,12 +289,10 @@ struct PiPLayoutView: View {
     private var preview: some View {
         ZStack {
             PiPCompositionPreview(rearFrames: rearFrames, frontFrames: frontFrames,
-                layout: layout, format: format, obstacles: obstacles, profile: logMode ? .appleLog : .standard, cube: logCube)
+                layout: layout, format: format, enabled: enabled, obstacles: obstacles, profile: logMode ? .appleLog : .standard, cube: logCube)
             if ready, let liveFrames, let onFocus, let onExposure {
                 PiPMeteringView(frames: liveFrames,
-                    presentation: PiPPresentation(composition: layout.composition, splitSwapped: layout.splitSwapped,
-                        rect: layout.splitPresenterRect ?? PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero,
-                        opacity: 1, enabled: true, zoom: layout.framingZoom),
+                    presentation: layout.previewPresentation(enabled: enabled, canvas: format.canvas, obstacles: obstacles),
                     presenterFrames: frontFrames, backgroundFrames: rearFrames, useLivePresentation: false,
                     front: frontMetering, rear: rearMetering, protectedRegions: [],
                     onFocus: onFocus, onExposure: onExposure, onMove: { point, finished in
@@ -291,15 +306,17 @@ struct PiPLayoutView: View {
                         Color(white: 0.12)
                         Image(systemName: format == .portrait ? "rectangle.portrait" : "rectangle")
                             .font(.largeTitle).foregroundStyle(.white.opacity(0.3))
-                        RoundedRectangle(cornerRadius: layout.composition == .inset ? 6 : 0).fill(.white.opacity(0.2))
-                            .overlay { Image(systemName: "person.fill").foregroundStyle(.white) }
-                            .frame(width: rect.width * geometry.size.width, height: rect.height * geometry.size.height)
-                            .position(x: rect.midX * geometry.size.width, y: rect.midY * geometry.size.height)
+                        if enabled {
+                            RoundedRectangle(cornerRadius: layout.composition == .inset ? 6 : 0).fill(.white.opacity(0.2))
+                                .overlay { Image(systemName: "person.fill").foregroundStyle(.white) }
+                                .frame(width: rect.width * geometry.size.width, height: rect.height * geometry.size.height)
+                                .position(x: rect.midX * geometry.size.width, y: rect.midY * geometry.size.height)
+                        }
                     }
                 }
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityLabel(layout.composition == .inset
+            .accessibilityLabel(!enabled ? "Picture in Picture off. Rear camera preview." : layout.composition == .inset
                 ? "\(format == .portrait ? "Portrait" : "Landscape") video with \(layout.orientation.title.lowercased()) presenter inset at \(layout.corner.title.lowercased())"
                 : "\(layout.composition.title) preview. \(splitDescription)")
     }
@@ -311,6 +328,7 @@ struct PiPCompositionPreview: UIViewRepresentable {
     let frontFrames: LiveFrames
     let layout: PiPLayout
     let format: MovieFormat
+    var enabled = true
     var obstacles: [CGRect] = []
     var liveFrames: LiveFrames? = nil
     var paused = false
@@ -335,6 +353,7 @@ struct PiPCompositionPreview: UIViewRepresentable {
         context.coordinator?.rear = rearFrames; context.coordinator?.front = frontFrames
         context.coordinator?.layout = layout; context.coordinator?.format = format
         context.coordinator?.obstacles = obstacles
+        context.coordinator?.previewEnabled = enabled
         context.coordinator?.live = liveFrames
         context.coordinator?.sourceFront = sourceFront
         context.coordinator?.falseColor = falseColor && profile == .appleLog
@@ -362,6 +381,7 @@ final class PiPMetalView: MTKView {
     private let context: CIContext
     private var rendering = false
     var sourceFront = false
+    var previewEnabled = true
     var falseColor = false { didSet { if oldValue != falseColor { presentationID = UUID() } } }
     private var presentationID = UUID()
     var profile: CaptureProfile = .standard
@@ -411,8 +431,7 @@ final class PiPMetalView: MTKView {
                 presenterAngle: liveSource?.pip?.presenterAngle ??
                     (MovieFormat.captureFormat(angle: presenter?.angle ?? 90) ?? .portrait).recordingAngle(observed: presenter?.angle ?? 90),
                 presentation: live != nil ? (liveSource?.pip?.presentation ?? PiPPresentation()) :
-                    PiPPresentation(composition: layout.composition, splitSwapped: layout.splitSwapped, rect: PiPGeometry.rect(layout: layout, canvas: format.canvas, obstacles: obstacles) ?? .zero,
-                        opacity: 1, enabled: true, corner: layout.corner, zoom: layout.framingZoom))
+                    layout.previewPresentation(enabled: previewEnabled, canvas: format.canvas, obstacles: obstacles))
             if live != nil, sourceFront, liveSource?.pip == nil {
                 image = image.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: canvas.width, ty: 0))
             }

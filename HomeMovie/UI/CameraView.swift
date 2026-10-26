@@ -102,8 +102,6 @@ struct CameraView: View {
         guard interfaceFormat == .landscape else { return [] }
         return landscapeControlsOnLeading ? [.top, .bottom, .leading] : [.top, .bottom, .trailing]
     }
-    @State private var pipDragStart: CGPoint?
-    @State private var lastPiPDragPoint: CGPoint?
     @State private var pipConfiguring = false
     @State private var enablePiPAfterPreparation = false
     @AppStorage("dollyGuidanceLearned") private var dollyGuidanceLearned = false
@@ -284,7 +282,8 @@ struct CameraView: View {
                 rearFrames: camera.service.pipRearFrames, frontFrames: camera.service.pipPresenterFrames,
                 ready: camera.options?.piPAvailable == true, canPrepare: camera.options?.canPreparePiP == true,
                 enabled: camera.options?.isPiPEnabled == true,
-                configuring: pipConfiguring || camera.state == .preparing,
+                requestedEnabled: camera.pendingPiPEnabled,
+                configuring: pipConfiguring || camera.pendingPiPEnabled != nil || camera.state == .preparing,
                 setupFailed: camera.pipSetupFailed || camera.state == .failed,
                 onEnabledChange: { enabled in
                     if enabled { enableDualCamera() } else { disableDualCamera() }
@@ -450,14 +449,42 @@ struct CameraView: View {
                 .accessibilityAddTraits(smoothZoomOpen ? .isSelected : [])
                 .disabled(countdown != nil || !smoothZoomOpen && camera.state != .ready && camera.state != .recording)
         }
-        PiPControl(enabled: options.isPiPEnabled,
-            disabled: countdown != nil || pipConfiguring || camera.state != .ready && camera.state != .recording || camera.state == .recording && !options.piPAvailable,
+        PiPControl(enabled: options.isPiPEnabled, composition: camera.pipLayout.composition,
+            canEnable: options.piPAvailable || options.canPreparePiP,
+            disabled: countdown != nil || pipConfiguring || camera.pendingPiPEnabled != nil || camera.state != .ready && camera.state != .recording || camera.state == .recording && !options.piPAvailable,
             recording: camera.state == .recording,
-            onActivate: {
-                if camera.state == .recording { camera.togglePiP() }
-                else { showingPiPLayout = true }
-            })
+            onSelect: { selectPiPMode($0) }, onSwap: { swapPiPCameras() },
+            onSettings: { showingPiPLayout = true })
     }
+    private func selectPiPMode(_ mode: PiPQuickMode) {
+        guard countdown == nil, !pipConfiguring, camera.pendingPiPEnabled == nil,
+              !camera.switchingCamera, camera.state == .ready || camera.state == .recording,
+              let options = camera.options else { return }
+        let current = PiPQuickMode(enabled: options.isPiPEnabled, composition: camera.pipLayout.composition)
+        guard current != mode else { return }
+        if let composition = mode.composition {
+            guard options.piPAvailable || camera.state == .ready && options.canPreparePiP else { return }
+            var layout = camera.pipLayout
+            layout.composition = composition
+            camera.updatePiPLayout(layout, movieID: movieID, canvasFormat: pipCanvasFormat)
+            if !options.isPiPEnabled {
+                if camera.state == .recording { camera.setPiPEnabled(true) }
+                else { enableDualCamera() }
+            }
+        } else if camera.state == .recording {
+            camera.setPiPEnabled(false)
+        } else { disableDualCamera() }
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+    private func swapPiPCameras() {
+        guard countdown == nil, !pipConfiguring, camera.pendingPiPEnabled == nil,
+              camera.options?.isPiPEnabled == true, camera.pipLayout.composition != .inset else { return }
+        var layout = camera.pipLayout
+        layout.splitSwapped.toggle()
+        camera.updatePiPLayout(layout, movieID: movieID, canvasFormat: pipCanvasFormat)
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
     private func finishDollyIfIdle() async {
         guard camera.options?.smoothMoving == false else { return }
         let observedRouteID = activeDolly?.id
@@ -1028,8 +1055,8 @@ struct CameraView: View {
                 }
             }
         }.buttonStyle(.plain)
-            .disabled(camera.switchingCamera && !camera.recordingSessionActive || pipConfiguring || undoingTake ||
-                !camera.recordingSessionActive && camera.state != .ready)
+            .disabled(!camera.recordingSessionActive && (camera.switchingCamera || pipConfiguring ||
+                camera.pendingPiPEnabled != nil || undoingTake || camera.state != .ready))
             .opacity(!camera.recordingSessionActive && camera.state != .ready ? 0.4 : 1)
             .accessibilityLabel(recordingCountdown.remaining != nil ? "Cancel recording countdown" : camera.state == .starting ? "Cancel starting recording" : camera.state == .finalizing ? "Saving recording" : camera.recordingSessionActive ? "Stop recording" : "Record next clip")
     }
@@ -1134,7 +1161,7 @@ struct CameraView: View {
         String(format: "%g×", Double((factor * multiplier * 10).rounded() / 10))
     }
     private func startRecording() {
-        guard !pipConfiguring, camera.state == .ready, recordingCountdown.remaining == nil, scenePhase == .active else { return }
+        guard !pipConfiguring, camera.pendingPiPEnabled == nil, camera.state == .ready, recordingCountdown.remaining == nil, scenePhase == .active else { return }
         camera.record(movieID: movieID)
     }
     private func cancelCountdown() {
@@ -1180,7 +1207,7 @@ struct CameraView: View {
                     onExposure: { bias, front in camera.exposure(bias, front: front) },
                     onMove: { point, finished in camera.dragPiP(to: point, finished: finished) })
                     .accessibilityLabel("Dual camera viewfinder")
-                    .accessibilityHint("Tap either camera to focus and expose. Drag the sun vertically to adjust its brightness. Hold and drag the inset to move it.")
+                    .accessibilityHint("Tap either camera to focus and expose. Drag the sun vertically to adjust its brightness. Drag the inset to move it. Release to snap to a corner.")
                     .accessibilityAction(named: "Focus Presenter") { _ = camera.focus(at: CGPoint(x: 0.5, y: 0.5), front: true) }
                     .accessibilityAction(named: "Move to Top Left") { movePiP(to: .topLeft) }
                     .accessibilityAction(named: "Move to Top Right") { movePiP(to: .topRight) }
@@ -1188,25 +1215,6 @@ struct CameraView: View {
                     .accessibilityAction(named: "Move to Bottom Right") { movePiP(to: .bottomRight) }
             } else { Color.clear.allowsHitTesting(false) }
         }.onGeometryChange(for: CGSize.self) { $0.size } action: { size in viewfinderSize = size; updatePiPObstacles() }
-    }
-    private func pipDragGesture(size: CGSize) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.25).sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("cameraViewfinder")))
-            .onChanged { value in
-                guard camera.options?.isPiPEnabled == true, size.width > 0, size.height > 0 else { return }
-                switch value {
-                case .first(true):
-                    if pipDragStart == nil { pipDragStart = CGPoint(x: camera.pipPresentation.rect.midX, y: camera.pipPresentation.rect.midY) }
-                case .second(true, let drag?):
-                    let anchor = pipDragStart ?? CGPoint(x: camera.pipPresentation.rect.midX, y: camera.pipPresentation.rect.midY)
-                    pipDragStart = anchor
-                    let point = CGPoint(x: anchor.x + drag.translation.width / size.width, y: anchor.y + drag.translation.height / size.height)
-                    lastPiPDragPoint = point; camera.dragPiP(to: point, finished: false)
-                default: break
-                }
-            }.onEnded { _ in
-                if let point = lastPiPDragPoint ?? pipDragStart { camera.dragPiP(to: point, finished: true) }
-                lastPiPDragPoint = nil; pipDragStart = nil
-            }
     }
     private func movePiP(to corner: PiPCorner) {
         let format = pipCanvasFormat
@@ -1230,34 +1238,55 @@ struct CameraView: View {
         }
     }
     private func enableDualCamera() {
-        guard !camera.busy, !pipConfiguring, countdown == nil, let movie, camera.options?.canPreparePiP == true else { return }
+        guard !camera.busy, !pipConfiguring, camera.pendingPiPEnabled == nil,
+              countdown == nil, let movie, camera.options?.canPreparePiP == true else { return }
         pipConfiguring = true
+        camera.beginPiPChange(to: true)
         enablePiPAfterPreparation = true
+        let lifecycle = camera.lifecycleID
         Task {
             defer { pipConfiguring = false }
             do {
                 let destination = movie.id
                 try await app.store.setDualCameraCapture(movieID: destination, enabled: true)
-                await app.refresh(); movieID = destination
+                await app.refresh()
+                guard camera.lifecycleID == lifecycle else { return }
+                movieID = destination
                 preparedPiPForSettings = false
-                if scenePhase == .active { await prepareCamera() }
-            } catch { enablePiPAfterPreparation = false; camera.message = error.localizedDescription }
+                if scenePhase == .active {
+                    if camera.options?.piPAvailable == true { camera.setPiPEnabled(true) }
+                    else {
+                        await camera.prepare(profile: movie.captureProfile, movieID: destination, dualCamera: true,
+                            layout: camera.pipLayout, canvasFormat: pipCanvasFormat, enablePiP: true)
+                    }
+                } else { camera.cancelPiPChange() }
+            } catch {
+                guard camera.lifecycleID == lifecycle else { return }
+                camera.cancelPiPChange(); enablePiPAfterPreparation = false; camera.message = error.localizedDescription
+            }
         }
     }
     private func disableDualCamera() {
-        guard !camera.busy, !pipConfiguring, countdown == nil else { return }
+        guard !camera.busy, !pipConfiguring, camera.pendingPiPEnabled == nil, countdown == nil else { return }
         pipConfiguring = true; enablePiPAfterPreparation = false
+        camera.beginPiPChange(to: false)
+        let lifecycle = camera.lifecycleID
         Task {
             defer { pipConfiguring = false }
             do {
                 try await app.store.setDualCameraCapture(movieID: movieID, enabled: false)
                 await app.refresh()
+                guard camera.lifecycleID == lifecycle else { return }
                 // Keep both live feeds available while choosing a layout with PiP off.
                 // Dismissal restores the ordinary camera without persisting preview preparation.
-                preparedPiPForSettings = true
-                if camera.options?.isPiPEnabled == true { camera.togglePiP() }
+                preparedPiPForSettings = showingPiPLayout
+                camera.setPiPEnabled(false)
+                if !showingPiPLayout, scenePhase == .active { await prepareCamera() }
             }
-            catch { camera.message = error.localizedDescription }
+            catch {
+                guard camera.lifecycleID == lifecycle else { return }
+                camera.cancelPiPChange(); camera.message = error.localizedDescription
+            }
         }
     }
 }

@@ -52,6 +52,31 @@ enum PiPComposition: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
 }
+// One explicit choice for the camera's native quick menu. Re-selecting a
+// layout never toggles it off or swaps cameras; those are separate actions.
+enum PiPQuickMode: String, CaseIterable, Identifiable {
+    case off, inset, topAndBottom, sideBySide
+    var id: Self { self }
+    init(enabled: Bool, composition: PiPComposition) {
+        guard enabled else { self = .off; return }
+        switch composition {
+        case .inset: self = .inset
+        case .topAndBottom: self = .topAndBottom
+        case .sideBySide: self = .sideBySide
+        }
+    }
+    var composition: PiPComposition? {
+        switch self {
+        case .off: nil
+        case .inset: .inset
+        case .topAndBottom: .topAndBottom
+        case .sideBySide: .sideBySide
+        }
+    }
+    var title: String { composition?.title ?? "Off" }
+    var symbol: String { composition?.symbol ?? "pip.remove" }
+}
+
 struct PiPLayout: Codable, Equatable, Sendable {
     var corner = PiPCorner.bottomRight
     var size = PiPSize.small
@@ -67,6 +92,12 @@ struct PiPLayout: Codable, Equatable, Sendable {
         self.corner = corner; self.size = size; self.orientation = orientation; self.zoom = Self.clampedZoom(zoom)
     }
     var splitPresenterRect: CGRect? { composition.presenterRect(swapped: splitSwapped) }
+    // Settings rendering and metering must agree with the actual On/Off state.
+    func previewPresentation(enabled: Bool, canvas: CGSize, obstacles: [CGRect] = []) -> PiPPresentation {
+        PiPPresentation(composition: composition, splitSwapped: splitSwapped,
+            rect: PiPGeometry.rect(layout: self, canvas: canvas, obstacles: obstacles) ?? .zero,
+            opacity: enabled ? 1 : 0, enabled: enabled, corner: corner, zoom: framingZoom)
+    }
     private enum CodingKeys: String, CodingKey { case corner, size, orientation, zoom, composition, splitSwapped }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)

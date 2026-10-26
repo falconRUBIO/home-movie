@@ -6,6 +6,119 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    private func preparedOptions(profile: CaptureProfile = .standard, enabled: Bool = false) -> CameraOptions {
+        var options = CameraOptions(lenses: [], zoom: 1, minimum: 1, maximum: 8, multiplier: 1,
+            isFront: false, angle: 90, profile: profile, canMeter: false, canLock: false,
+            focusLocked: false, exposureBias: 0, minimumExposureBias: -2, maximumExposureBias: 2,
+            canFlip: true, hasTorch: false, torchOn: false, canStayOnLens: false,
+            smoothMoving: false, recordingFormat: "Test")
+        options.canPreparePiP = true; options.piPAvailable = true
+        options.dualCameraPrepared = true; options.isPiPEnabled = enabled
+        return options
+    }
+
+    @MainActor func testSamePreparedSessionCanEnableAgainAfterOffForBothProfiles() async {
+        for profile in [CaptureProfile.standard, .appleLog] {
+            var commands: [Bool] = []
+            let app = AppModel()
+            let camera = CameraModel(app: app, applyPiPEnabled: { commands.append($0) })
+            var options = preparedOptions(profile: profile)
+            camera.options = options; camera.state = .ready
+            await camera.prepare(profile: profile, dualCamera: true, enablePiP: true)
+            XCTAssertEqual(camera.state, .ready)
+            XCTAssertEqual(camera.pendingPiPEnabled, true)
+            options.isPiPEnabled = true; await camera.receive(.ready(options))
+            XCTAssertNil(camera.pendingPiPEnabled)
+            camera.setPiPEnabled(false)
+            options.isPiPEnabled = false; await camera.receive(.ready(options))
+            // Identical to the first configuration, but the live switch is now Off.
+            await camera.prepare(profile: profile, dualCamera: true, enablePiP: true)
+            XCTAssertEqual(commands, [true, false, true])
+            XCTAssertEqual(camera.pendingPiPEnabled, true)
+            XCTAssertEqual(camera.state, .ready)
+            options.isPiPEnabled = true; await camera.receive(.ready(options))
+            XCTAssertNil(camera.pendingPiPEnabled)
+        }
+    }
+
+    @MainActor func testPiPToggleWaitsForConfirmationAndRecoversFromFailure() async {
+        var commands: [Bool] = []
+        let app = AppModel()
+        let camera = CameraModel(app: app, applyPiPEnabled: { commands.append($0) })
+        var options = preparedOptions()
+        camera.options = options; camera.state = .ready
+        camera.setPiPEnabled(true)
+        await camera.receive(.ready(options)) // A stale Off publication is not an acknowledgement.
+        XCTAssertEqual(camera.pendingPiPEnabled, true)
+        XCTAssertFalse(camera.canFlipCamera)
+        camera.togglePiP()
+        XCTAssertEqual(commands, [true])
+        options.isPiPEnabled = true; await camera.receive(.ready(options))
+        XCTAssertNil(camera.pendingPiPEnabled)
+        camera.setPiPEnabled(false)
+        XCTAssertEqual(commands, [true, false])
+        await camera.receive(.notice("The camera was interrupted."))
+        XCTAssertNil(camera.pendingPiPEnabled)
+        camera.setPiPEnabled(false)
+        options.isPiPEnabled = false; await camera.receive(.ready(options))
+        XCTAssertNil(camera.pendingPiPEnabled)
+        camera.beginPiPChange(to: true)
+        await camera.receive(.interrupted("Interrupted"))
+        XCTAssertNil(camera.pendingPiPEnabled)
+    }
+
+    @MainActor func testSuspendingInvalidatesPendingPiPAndRejectsOldCommands() {
+        var commands: [Bool] = []
+        let app = AppModel()
+        let camera = CameraModel(app: app, applyPiPEnabled: { commands.append($0) })
+        camera.options = preparedOptions(); camera.state = .ready
+        let lifecycle = camera.lifecycleID
+        camera.beginPiPChange(to: true)
+        camera.suspend()
+        XCTAssertNotEqual(camera.lifecycleID, lifecycle)
+        XCTAssertNil(camera.pendingPiPEnabled)
+        camera.setPiPEnabled(true)
+        XCTAssertTrue(commands.isEmpty)
+        XCTAssertNil(camera.pendingPiPEnabled)
+    }
+
+    @MainActor func testRecordingPiPToggleKeepsRecordingAndUsesExplicitTargets() async {
+        var commands: [Bool] = []
+        let app = AppModel()
+        let camera = CameraModel(app: app, applyPiPEnabled: { commands.append($0) })
+        var options = preparedOptions()
+        camera.options = options; camera.state = .recording
+        for enabled in [true, false, true, false] {
+            camera.setPiPEnabled(enabled)
+            options.isPiPEnabled = enabled; await camera.receive(.ready(options))
+            XCTAssertEqual(camera.state, .recording)
+            XCTAssertNil(camera.pendingPiPEnabled)
+        }
+        XCTAssertEqual(commands, [true, false, true, false])
+    }
+
+    func testSettingsPreviewOffShowsOnlyRearForInsetAndBothSplitOrders() throws {
+        let rear = try frame(red: 0, green: 0, blue: 220)
+        let front = try frame(red: 220, green: 0, blue: 0)
+        let canvas = CGSize(width: 180, height: 320)
+        for composition in PiPComposition.allCases {
+            for swapped in [false, true] {
+                let layout = PiPLayout(composition: composition, splitSwapped: swapped)
+                for enabled in [true, false, true, false] {
+                    let state = layout.previewPresentation(enabled: enabled, canvas: canvas)
+                    let image = PiPCompositor.image(background: rear, presenter: front, canvas: canvas,
+                        backgroundAngle: 0, presenterAngle: 0, presentation: state)
+                    // Convert the presenter's UIKit rectangle to Core Image coordinates.
+                    let point = CGPoint(x: state.rect.midX * canvas.width,
+                        y: (1 - state.rect.midY) * canvas.height)
+                    let pixel = sample(image, point: point)
+                    XCTAssertGreaterThan(pixel[enabled ? 0 : 2], 180)
+                    XCTAssertLessThan(pixel[enabled ? 2 : 0], 40)
+                }
+            }
+        }
+    }
+
     func testNewInsetSizesStartAtFormerMediumAndFitEveryCanvas() throws {
         XCTAssertEqual(PiPSize.small.fraction, 0.36, accuracy: 0.0001)
         XCTAssertGreaterThan(PiPSize.medium.fraction, PiPSize.small.fraction)
@@ -492,6 +605,34 @@ final class PictureInPictureTests: XCTestCase {
             }}
         }
     }
+    func testDraggingInsetSnapsToEveryCornerAndPreservesItsShape() throws {
+        for format in MovieFormat.allCases {
+            for orientation in PiPOrientation.allCases {
+                for start in PiPCorner.allCases {
+                    for destination in PiPCorner.allCases {
+                        let layout = PiPLayout(corner: start, size: .medium, orientation: orientation)
+                        var timeline = PiPTimeline(); timeline.setLayout(layout)
+                        timeline.setEnabled(true, at: .zero)
+                        let target = PiPGeometry.desiredCenter(corner: destination, canvas: format.canvas,
+                            size: layout.size, orientation: orientation)
+                        let release = CMTime(seconds: 1, preferredTimescale: 600)
+                        timeline.drag(to: target, at: release, canvas: format.canvas, obstacles: [])
+                        let saved = timeline.settle(at: release, canvas: format.canvas, obstacles: [])
+                        XCTAssertEqual(saved.corner, destination)
+                        XCTAssertEqual(saved.orientation, orientation); XCTAssertEqual(saved.size, .medium)
+                        let settled = timeline.presentation(at: CMTime(seconds: 1.3, preferredTimescale: 600), canvas: format.canvas)
+                        let expected = try XCTUnwrap(PiPGeometry.rect(layout: saved, canvas: format.canvas))
+                        XCTAssertEqual(settled.rect.minX, expected.minX, accuracy: 0.000001)
+                        XCTAssertEqual(settled.rect.minY, expected.minY, accuracy: 0.000001)
+                        XCTAssertEqual(settled.rect.width, expected.width, accuracy: 0.000001)
+                        XCTAssertEqual(settled.rect.height, expected.height, accuracy: 0.000001)
+                        XCTAssertTrue(settled.enabled)
+                    }
+                }
+            }
+        }
+    }
+
     func testDragClampsInsideMovieAndAvoidsExistingPreviewControls() throws {
         let canvas = MovieFormat.landscape.canvas
         let controls = [CGRect(x: 0, y: 0, width: 1, height: 0.1), CGRect(x: 0.2, y: 0.82, width: 0.6, height: 0.18), CGRect(x: 0.88, y: 0.35, width: 0.12, height: 0.3)]
@@ -632,7 +773,7 @@ final class PictureInPictureTests: XCTestCase {
         let writer = try ContinuousTakeWriter(url: try await store.url(ticket.staging), angle: 0)
         let rear = try frame(red: 0, green: 0, blue: 220), front = try frame(red: 220, green: 0, blue: 0)
         let renderer = PiPFrameRenderer(); var timeline = PiPTimeline()
-        for index in 0..<36 {
+        for index in 0..<84 {
             let time = CMTime(value: Int64(index), timescale: 30)
             if index == 6 { timeline.setEnabled(true, at: time) }
             if index == 18 {
@@ -640,6 +781,12 @@ final class PictureInPictureTests: XCTestCase {
                 timeline.settle(at: time, canvas: writer.canvas, obstacles: [])
             }
             if index == 27 { timeline.setEnabled(false, at: time) }
+            if index == 36 { timeline.setEnabled(true, at: time) }
+            if index == 42 { timeline.setLayout(PiPLayout(composition: .topAndBottom)) }
+            if index == 48 { timeline.setLayout(PiPLayout(composition: .topAndBottom, splitSwapped: true)) }
+            if index == 54 { timeline.setLayout(PiPLayout(composition: .sideBySide)) }
+            if index == 60 { timeline.setLayout(PiPLayout(composition: .sideBySide, splitSwapped: true)) }
+            if index == 66 { timeline.setEnabled(false, at: time) }
             let image = PiPCompositor.image(background: rear, presenter: front, canvas: writer.canvas, backgroundAngle: 0,
                 presenterAngle: 0, presentation: timeline.presentation(at: time, canvas: writer.canvas))
             let buffer = try XCTUnwrap(renderer.render(image, canvas: writer.canvas))
@@ -661,7 +808,7 @@ final class PictureInPictureTests: XCTestCase {
         let videoTracks = try await asset.loadTracks(withMediaType: .video), audioTracks = try await asset.loadTracks(withMediaType: .audio)
         XCTAssertEqual(videoTracks.count, 1); XCTAssertEqual(audioTracks.count, 1)
         let audioRange = try await XCTUnwrap(audioTracks.first).load(.timeRange)
-        XCTAssertGreaterThan(audioRange.duration.seconds, 1.1)
+        XCTAssertGreaterThan(audioRange.duration.seconds, 2.7)
         let composition = try await MediaAssembler().build(movie: saved, root: root, filmEffects: settings)
         let output = root.appendingPathComponent("PiP-export.mp4")
         let export = try XCTUnwrap(AVAssetExportSession(asset: composition.asset, presetName: AVAssetExportPresetHighestQuality))
@@ -681,6 +828,17 @@ final class PictureInPictureTests: XCTestCase {
         let hidden = try await pixel(at: 35 / 30, corner: .topLeft)
         XCTAssertGreaterThan(before[2], 150); XCTAssertGreaterThan(visible[0], 150)
         XCTAssertGreaterThan(moved[0], 150); XCTAssertGreaterThan(hidden[2], 150)
+        func panelPixel(frame: Int, x: CGFloat, y: CGFloat) async throws -> [UInt8] {
+            let (cg, _) = try await generator.image(at: CMTime(value: Int64(frame), timescale: 30))
+            return sample(CIImage(cgImage: cg), point: CGPoint(x: x * writer.canvas.width, y: (1 - y) * writer.canvas.height))
+        }
+        let lowerPresenter = try await panelPixel(frame: 45, x: 0.25, y: 0.75)
+        let upperPresenter = try await panelPixel(frame: 51, x: 0.25, y: 0.25)
+        let rightPresenter = try await panelPixel(frame: 57, x: 0.75, y: 0.25)
+        let leftPresenter = try await panelPixel(frame: 63, x: 0.25, y: 0.25)
+        let offAgain = try await panelPixel(frame: 80, x: 0.25, y: 0.25)
+        for pixel in [lowerPresenter, upperPresenter, rightPresenter, leftPresenter] { XCTAssertGreaterThan(pixel[0], 150) }
+        XCTAssertGreaterThan(offAgain[2], 150)
     }
 }
 
