@@ -33,7 +33,7 @@ actor PhotosSafetyService {
         let current = await store.snapshot().flatMap(\.scenes).first { $0.id == scene.id }
         guard let current, current.photosAssetID == nil, !copying.contains(scene.id) else { return }
         copying.insert(scene.id); defer { copying.remove(scene.id) }
-        guard await authorize() else { throw HomeMovieError.message("Photos copy is not enabled by permission. The scene remains saved in MOVIE MODE.") }
+        guard await authorize() else { throw HomeMovieError.message("Photos copy is not enabled by permission. The clip remains saved in MOVIE MODE.") }
         try Task.checkCancellation()
         let source = try await store.url(scene.source)
         let identifier = try await PhotosVideoWriter.write(source)

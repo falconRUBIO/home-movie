@@ -14,7 +14,7 @@ struct CopySceneAdjustmentsView: View {
                     Toggle("Color", isOn: selected(.color))
                     Toggle("HSL", isOn: selected(.hsl))
                 } header: { Text("Adjustments") }
-                footer: { Text("Replace selected adjustments in the destination scene. Light includes curves and fade; Color includes saturation and vibrance.") }
+                footer: { Text("Replace selected adjustments in the destination clip. Light includes curves and fade; Color includes saturation and vibrance.") }
                 Section {
                     Toggle("Exposure", isOn: selected(.exposure))
                     Toggle("White Balance", isOn: selected(.whiteBalance))

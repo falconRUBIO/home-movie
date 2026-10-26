@@ -598,7 +598,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                     guard !self.pressureStopReported else { return }
                     self.pressureStopReported = true
                     ReliabilityDiagnostics.shared.record(.resourcePressure)
-                    self.onEvent?(.notice("The camera is under heavy system pressure. Finishing this take safely; let your iPhone cool before recording again."))
+                    self.onEvent?(.notice("The camera is under heavy system pressure. Finishing this clip safely; let your iPhone cool before recording again."))
                     self.requestStop()
                 } else if level == .nominal { self.pressureStopReported = false }
             }
@@ -1153,7 +1153,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         if configuredProfile == .appleLog, !LogPiPColor.verifyCapture(sample) {
             // Never relabel SDR data as Log or feed it into a 10-bit Log take.
             if continuousTake != nil, !stopRequested {
-                onEvent?(.notice("The camera did not deliver a valid 10-bit Log frame. Finishing the current take safely."))
+                onEvent?(.notice("The camera did not deliver a valid 10-bit Log frame. Finishing the current clip safely."))
                 requestStop()
             }
             return
@@ -1205,7 +1205,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                 self?.queue.async { [weak self, weak take] in
                     guard let self else { return }; self.continuousStorageCheckPending = false
                     guard let take, self.continuousTake === take, let available, available.int64Value < 100_000_000 else { return }
-                    self.onEvent?(.notice("Storage is nearly full. Finishing this take safely.")); self.requestStop()
+                    self.onEvent?(.notice("Storage is nearly full. Finishing this clip safely.")); self.requestStop()
                 }
             }
         }

@@ -1,7 +1,7 @@
 # False Color exposure preview
 
-Open **Look & Preview → Viewfinder → False Color**, or choose it under
-**Movie Settings → Viewfinder**, when recording Apple Log. With Look, Log and
+Open the camera’s **Look & Preview → Viewfinder → False Color** when recording
+Apple Log. Recording Settings contains only recording-format choices. With Look, Log and
 False Color are mutually exclusive preview choices. Existing preference keys are
 preserved; an older configuration with both preview switches enabled resolves to
 False Color until a new choice is made. Standard movies ignore these Log preview

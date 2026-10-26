@@ -68,7 +68,7 @@ actor BackupService {
             guard looks.isDirectory == true, looks.isSymbolicLink != true else { throw HomeMovieError.message("The backup’s Looks folder is invalid.") }
         }
         guard Set(scenes.map(\.source)).union(lookPaths) == Set(value.files.keys), value.files.values.allSatisfy({ $0.bytes >= 0 && $0.bytes < Int64.max / 4 && $0.sha256.count == 64 }) else {
-            throw HomeMovieError.message("The backup file list does not match its scenes.")
+            throw HomeMovieError.message("The backup file list does not match its clips.")
         }
         return value
     }
@@ -76,7 +76,7 @@ actor BackupService {
         try await store.beginMaintenance()
         let snapshot = await store.catalogSnapshot()
         let scenes = snapshot.movies.flatMap(\.scenes)
-        guard !scenes.isEmpty else { await store.endMaintenance(); throw HomeMovieError.message("Record a scene before making a project backup.") }
+        guard !scenes.isEmpty else { await store.endMaintenance(); throw HomeMovieError.message("Record a clip before making a project backup.") }
         let folder = store.root.appendingPathComponent("OutgoingBackups", isDirectory: true)
         let package = folder.appendingPathComponent("MOVIE MODE-\(UUID()).homemovie", isDirectory: true)
         do {
@@ -184,7 +184,7 @@ actor BackupService {
                 for c in restored[m].scenes.indices {
                     try Task.checkCancellation()
                     let old = restored[m].scenes[c]
-                    guard let expected = backup.files[old.source], old.bytes == expected.bytes else { throw HomeMovieError.message("Backup scene sizes disagree.") }
+                    guard let expected = backup.files[old.source], old.bytes == expected.bytes else { throw HomeMovieError.message("Backup clip sizes disagree.") }
                     let newID = UUID(), copied = staging.appendingPathComponent("\(newID).mov")
                     let before = completed
                     var entry: BackupEntry?
@@ -203,7 +203,7 @@ actor BackupService {
                         throw HomeMovieError.message("A backup video's duration or dimensions do not match its metadata.")
                     }
                     if let declared = old.profile, declared != (media.profile ?? .standard) {
-                        throw HomeMovieError.message("A backup recording’s color format does not match its scene metadata. Existing movies have not been changed.")
+                        throw HomeMovieError.message("A backup recording’s color format does not match its clip metadata. Existing movies have not been changed.")
                     }
                     restored[m].scenes[c].id = newID; restored[m].scenes[c].source = "Originals/\(newID).mov"
                     restored[m].scenes[c].missing = false

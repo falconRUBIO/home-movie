@@ -99,7 +99,7 @@ struct Movie: Codable, Identifiable, Equatable, Sendable {
     var preferredPiPLayout: PiPLayout { pipLayout ?? PiPLayout() }
     var exportEffects: FilmEffectsSettings { filmEffects ?? .off }
     var captureProfile: CaptureProfile { profile ?? .standard }
-    var lookName: String { look?.displayName ?? "Apple Standard" }
+    var lookName: String { look?.displayName ?? "Natural" }
     // Deleted scenes still lock the movie; removing a scene never changes its canvas.
     var recordingFormat: MovieFormat? { scenes.isEmpty && lastRecordedAt == nil ? nil : format }
     var activeScenes: [Scene] { scenes.filter { $0.deletedAt == nil }.sorted { $0.sequence < $1.sequence } }

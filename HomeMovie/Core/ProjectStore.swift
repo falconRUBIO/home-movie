@@ -58,7 +58,7 @@ actor ProjectStore {
                 guard scene.validTrim, scene.sequence >= 0 && scene.sequence < 1_000_000_000,
                       scene.source == "Originals/\(scene.id.uuidString).mov",
                       scene.width.isFinite && scene.height.isFinite && scene.width > 0 && scene.height > 0 && scene.bytes >= 0 && scene.bytes <= Int64.max / 4 else {
-                    throw HomeMovieError.message("A scene has invalid metadata. The catalog has been preserved.")
+                    throw HomeMovieError.message("A clip has invalid metadata. The catalog has been preserved.")
                 }
                 let (sum, overflow) = totalBytes.addingReportingOverflow(scene.bytes)
                 guard !overflow, sum <= Int64.max / 4 else {
@@ -216,7 +216,7 @@ actor ProjectStore {
         let movie = catalog.movies[i]
         guard movie.deletedAt == nil else { throw HomeMovieError.message("This movie is unavailable.") }
         guard movie.captureProfile == profile || movie.scenes.isEmpty && movie.lastRecordedAt == nil else {
-            throw HomeMovieError.message("The recording format is set by the first scene.")
+            throw HomeMovieError.message("The recording format is set by the first clip.")
         }
         let selected = profile == .appleLog ? look : nil
         if let selected { _ = try ColorCube.load(selected, root: root) }
@@ -316,7 +316,7 @@ actor ProjectStore {
         guard catalog.movies[i].deletedAt == nil else { throw HomeMovieError.message("Restore this movie before recording.") }
         if let profile, profile != catalog.movies[i].captureProfile { throw HomeMovieError.message("The camera’s recording profile does not match this movie.") }
         if let format, let locked = catalog.movies[i].recordingFormat, format != locked {
-            throw HomeMovieError.message("This scene must use the movie’s saved format.")
+            throw HomeMovieError.message("This clip must use the movie’s saved format.")
         }
         try requireSpace(bytes: catalog.movies[i].captureProfile == .appleLog ? 1_000_000_000 : 300_000_000)
         let ticket = CaptureTicket(movieID: movieID, sequence: catalog.movies[i].nextSequence, format: format, profile: profile)
@@ -369,14 +369,14 @@ actor ProjectStore {
         let m = try index(movieID)
         guard catalog.movies[m].deletedAt == nil,
               let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID && $0.deletedAt == nil }) else {
-            throw HomeMovieError.message("This scene is no longer available.")
+            throw HomeMovieError.message("This clip is no longer available.")
         }
         var next = catalog
         next.movies[m].scenes[c].trimStart = MediaTime(start)
         next.movies[m].scenes[c].trimEnd = MediaTime(end)
         next.movies[m].scenes[c].adjustments = adjustments.isActive ? adjustments : nil
         if updateClipEffects { next.movies[m].scenes[c].filmEffectsTweaks = clipEffects?.normalized }
-        guard next.movies[m].scenes[c].validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
+        guard next.movies[m].scenes[c].validTrim else { throw HomeMovieError.message("The trim must stay inside the original clip.") }
         if let filmEffects { next.movies[m].filmEffects = filmEffects }
         guard next.movies[m] != catalog.movies[m] else { return }
         next.movies[m].revision += 1; try write(next)
@@ -384,10 +384,10 @@ actor ProjectStore {
     func trim(movieID: UUID, sceneID: UUID, start: CMTime, end: CMTime) throws {
         try requireIdle()
         let m = try index(movieID)
-        guard let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID }) else { throw HomeMovieError.message("Scene not found.") }
+        guard let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID }) else { throw HomeMovieError.message("Clip not found.") }
         var next = catalog
         next.movies[m].scenes[c].trimStart = MediaTime(start); next.movies[m].scenes[c].trimEnd = MediaTime(end)
-        guard next.movies[m].scenes[c].validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
+        guard next.movies[m].scenes[c].validTrim else { throw HomeMovieError.message("The trim must stay inside the original clip.") }
         next.movies[m].revision += 1; try write(next)
     }
     /// Save current edits and insert an independently owned copy directly after this scene.
@@ -400,13 +400,13 @@ actor ProjectStore {
         guard catalog.movies[m].deletedAt == nil,
               let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID && $0.deletedAt == nil }),
               !catalog.movies[m].scenes[c].missing else {
-            throw HomeMovieError.message("This scene is unavailable.")
+            throw HomeMovieError.message("This clip is unavailable.")
         }
         var edited = catalog.movies[m].scenes[c]
         edited.trimStart = MediaTime(start); edited.trimEnd = MediaTime(end)
         edited.adjustments = adjustments.isActive ? adjustments : nil
         if updateClipEffects { edited.filmEffectsTweaks = clipEffects?.normalized }
-        guard edited.validTrim else { throw HomeMovieError.message("The trim must stay inside the original scene.") }
+        guard edited.validTrim else { throw HomeMovieError.message("The trim must stay inside the original clip.") }
         try requireSpace(bytes: edited.bytes + 100_000_000)
         var copy = edited
         copy.id = UUID()
@@ -439,7 +439,7 @@ actor ProjectStore {
         let active = catalog.movies[m].activeScenes
         guard catalog.movies[m].deletedAt == nil, active.map(\.id) == expected,
               order.count == active.count, Set(order) == Set(expected) else {
-            throw HomeMovieError.message("The scenes have changed. Please try reordering again.")
+            throw HomeMovieError.message("The clips have changed. Please try reordering again.")
         }
         guard order != expected else { return }
         let slots = active.map(\.sequence)
@@ -461,7 +461,7 @@ actor ProjectStore {
         guard catalog.movies[m].deletedAt == nil,
               let source = ordered.firstIndex(where: { $0.id == sceneID }),
               let target = ordered.firstIndex(where: { $0.id == targetID }) else {
-            throw HomeMovieError.message("This scene is no longer available.")
+            throw HomeMovieError.message("This clip is no longer available.")
         }
         guard source != target else { return }
         let moved = ordered.remove(at: source)
@@ -483,14 +483,14 @@ actor ProjectStore {
         let m = try index(movieID)
         guard catalog.movies[m].deletedAt == nil,
               catalog.movies[m].latestTake?.id == expectedSceneID else {
-            throw HomeMovieError.message("The latest take has changed. Please try again.")
+            throw HomeMovieError.message("The latest clip has changed. Please try again.")
         }
         try setSceneDeleted(movieID: movieID, sceneID: expectedSceneID, deleted: true)
     }
     func setSceneDeleted(movieID: UUID, sceneID: UUID, deleted: Bool) throws {
         try requireIdle()
         let m = try index(movieID)
-        guard let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID }) else { throw HomeMovieError.message("Scene not found.") }
+        guard let c = catalog.movies[m].scenes.firstIndex(where: { $0.id == sceneID }) else { throw HomeMovieError.message("Clip not found.") }
         var next = catalog; next.movies[m].scenes[c].deletedAt = deleted ? Date() : nil
         next.movies[m].revision += 1; try write(next)
     }
@@ -530,7 +530,7 @@ actor ProjectStore {
         let i = try index(id)
         guard catalog.movies[i].deletedAt == nil,
               sceneID == nil || catalog.movies[i].activeScenes.contains(where: { $0.id == sceneID && !$0.missing }) else {
-            throw HomeMovieError.message("Choose an available scene for the cover.")
+            throw HomeMovieError.message("Choose an available clip for the cover.")
         }
         var next = catalog; next.movies[i].coverSceneID = sceneID
         next.movies[i].revision += 1; try write(next)
@@ -628,7 +628,7 @@ actor ProjectStore {
         return capacity
     }
     func requireSpace(bytes: Int64) throws {
-        guard try availableBytes() > bytes else { throw HomeMovieError.message("Not enough free storage. Free space on your iPhone and try again. Your saved scenes are safe.") }
+        guard try availableBytes() > bytes else { throw HomeMovieError.message("Not enough free storage. Free space on your iPhone and try again. Your saved clips are safe.") }
     }
     private func requireIdle() throws {
         guard !maintenance else { throw HomeMovieError.message("Wait for backup or restore to finish before changing movies.") }
@@ -704,7 +704,7 @@ actor ProjectStore {
                 try write(next); return
             }
         }
-        throw HomeMovieError.message("The scene was copied to Photos but its receipt could not be attached.")
+        throw HomeMovieError.message("The clip was copied to Photos but its receipt could not be attached.")
     }
     func recoveryFiles() throws -> [RecoveryFile] {
         try ensureDirectories()

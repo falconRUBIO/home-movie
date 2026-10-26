@@ -18,18 +18,18 @@ enum WhiteBalanceSampler {
     }
     static func sample(url: URL, time: CMTime, point: CGPoint, canvas: CGSize, logEncoded: Bool) async throws -> (warmth: Double, tint: Double) {
         let asset = AVURLAsset(url: url)
-        guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw HomeMovieError.message("The scene is unavailable.") }
+        guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw HomeMovieError.message("The clip is unavailable.") }
         let range = try await track.load(.timeRange)
         let size = try await track.load(.naturalSize)
         let preferred = try await track.load(.preferredTransform)
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
             kCVPixelBufferPixelFormatTypeKey as String: logEncoded ? GradedMovieExporter.pixelFormat : kCVPixelFormatType_32BGRA])
-        guard reader.canAdd(output) else { throw HomeMovieError.message("The scene could not be sampled.") }
+        guard reader.canAdd(output) else { throw HomeMovieError.message("The clip could not be sampled.") }
         reader.add(output)
         let position = CMTimeMinimum(CMTimeMaximum(.zero, time), CMTimeSubtract(range.duration, CMTime(value: 1, timescale: 30)))
         reader.timeRange = CMTimeRange(start: CMTimeAdd(range.start, position), duration: CMTime(value: 1, timescale: 15))
-        guard reader.startReading() else { throw reader.error ?? HomeMovieError.message("The scene could not be sampled.") }
+        guard reader.startReading() else { throw reader.error ?? HomeMovieError.message("The clip could not be sampled.") }
         defer { reader.cancelReading() }
         try Task.checkCancellation()
         guard let sample = output.copyNextSampleBuffer(), let buffer = CMSampleBufferGetImageBuffer(sample) else {

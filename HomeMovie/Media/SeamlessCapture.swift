@@ -118,13 +118,13 @@ final class ContinuousTakeWriter {
             writer.cancelWriting(); completion(HomeMovieError.message("No camera frames were recorded.")); return
         }
         guard writer.status == .writing else {
-            completion(failure ?? writer.error ?? HomeMovieError.message("The take could not be finished.")); return
+            completion(failure ?? writer.error ?? HomeMovieError.message("The clip could not be finished.")); return
         }
         video.markAsFinished(); audio.markAsFinished()
         let priorFailure = failure
         let recordedProfile = profile, canvas = size, url = writer.outputURL
         writer.finishWriting { [writer] in
-            let error = priorFailure ?? (writer.status == .completed ? nil : writer.error ?? HomeMovieError.message("The take could not be finished."))
+            let error = priorFailure ?? (writer.status == .completed ? nil : writer.error ?? HomeMovieError.message("The clip could not be finished."))
             guard error == nil, recordedProfile == .appleLog else { completion(error); return }
             Task {
                 do { try await LogPiPValidation.verifySavedFile(url: url, expectedCanvas: canvas); completion(nil) }

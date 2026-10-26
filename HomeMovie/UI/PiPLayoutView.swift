@@ -20,7 +20,7 @@ struct PiPControl: View {
         .disabled(disabled)
         .accessibilityLabel("Picture in Picture")
         .accessibilityValue(enabled ? "On" : "Off")
-        .accessibilityHint(recording ? "Turn Picture in Picture on or off for this take" : "Choose a layout and turn Picture in Picture on or off")
+        .accessibilityHint(recording ? "Turn Picture in Picture on or off for this clip" : "Choose a layout and turn Picture in Picture on or off")
     }
 }
 

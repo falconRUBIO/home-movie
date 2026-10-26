@@ -31,10 +31,10 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
         try hsl.validate()
         try curve.validate()
         guard fade.isFinite, (0...1).contains(fade) else {
-            throw HomeMovieError.message("This scene’s fade adjustment is invalid.")
+            throw HomeMovieError.message("This clip’s fade adjustment is invalid.")
         }
         guard (1...3).contains(pipelineVersion), values.allSatisfy({ $0.isFinite && (-1...1).contains($0) }) else {
-            throw HomeMovieError.message("This scene’s light adjustments are invalid.")
+            throw HomeMovieError.message("This clip’s light adjustments are invalid.")
         }
     }
     // Decode to scene-linear, balance, and re-encode into the LUT's ORIGINAL
@@ -44,7 +44,7 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
         guard pipelineVersion >= 2, exposure != 0 || warmth != 0 || tint != 0 else { return source }
         guard let kernel = try Self.balanceKernel.get(), let output = kernel.apply(extent: source.extent,
             arguments: [source, exposure, warmth, tint, logEncoded ? 1.0 : 0.0]) else {
-            throw HomeMovieError.message("This scene’s source balance could not be rendered.")
+            throw HomeMovieError.message("This clip’s source balance could not be rendered.")
         }
         return output
     }
@@ -63,7 +63,7 @@ struct SceneAdjustments: Codable, Equatable, Sendable {
         guard let kernel = try Self.kernel.get(), let output = kernel.apply(extent: source.extent,
             arguments: [source, local, exposure, shadows, highlights, warmth, tint, brightness, brilliance, pushPull,
                 contrast, blackPoint, whitePoint, saturation, vibrance, Double(pipelineVersion)]) else {
-            throw HomeMovieError.message("This scene’s light adjustments could not be rendered.")
+            throw HomeMovieError.message("This clip’s light adjustments could not be rendered.")
         }
         return try curve.apply(to: output, fade: fade)
     }
