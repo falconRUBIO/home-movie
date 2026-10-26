@@ -24,7 +24,7 @@ struct ManualZoomControl: UIViewRepresentable {
 
 final class ZoomDialControlView: UIView, UIGestureRecognizerDelegate {
     static let height: CGFloat = 104
-    private let sessionID = UUID()
+    private var sessionID = UUID()
     private let stack = UIStackView()
     private let wheel = ZoomWheelView()
     private var buttons: [UIButton] = []
@@ -129,15 +129,19 @@ final class ZoomDialControlView: UIView, UIGestureRecognizerDelegate {
         ]
     }
     @objc private func tapped(_ button: UIButton) {
-        guard drag == nil, factors.indices.contains(button.tag) else { return }
+        guard drag == nil, !isDialVisible, factors.indices.contains(button.tag) else { return }
         hideDial(); onLens(factors[button.tag])
     }
     /// Shared by real pan/hold actions and native view regression tests.
     func beginScrub() {
         guard drag == nil, isUserInteractionEnabled, maximum > minimum else { return }
         hideWork?.cancel(); hideWork = nil
-        drag = ManualZoomDrag(start: Double(zoom)); previousValue = Double(zoom)
-        wheel.zoom = Double(zoom)
+        // Re-grabbing the still-visible wheel continues from its last target, even
+        // while capture is finishing the previous drag. Never jump to a stale sample.
+        let start = isDialVisible ? wheel.zoom : Double(zoom)
+        sessionID = UUID()
+        drag = ManualZoomDrag(start: start); previousValue = start
+        wheel.zoom = start
         // Synchronous UIKit visibility: this happens before the first zoom callback.
         wheel.isHidden = false; stack.layer.opacity = 0; wheel.setNeedsDisplay(); layoutIfNeeded()
         onVisibilityChanged(true); feedback.prepare(); onBegin(sessionID)
@@ -203,6 +207,11 @@ final class ZoomDialControlView: UIView, UIGestureRecognizerDelegate {
         default: break
         }
     }
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === pan else { return true }
+        let velocity = pan.velocity(in: self)
+        return abs(velocity.x) > abs(velocity.y)
+    }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         (gestureRecognizer === pan && otherGestureRecognizer === hold) ||
@@ -228,12 +237,15 @@ private final class ZoomWheelView: UIView {
         #endif
         guard let context = UIGraphicsGetCurrentContext(), zoom.isFinite, zoom > 0,
               minimum > 0, maximum.isFinite, maximum > minimum else { return }
-        let radius: CGFloat = 154
-        let center = CGPoint(x: bounds.midX, y: 166)
+        // A broad, shallow arc fits the control row in portrait and landscape.
+        let radius: CGFloat = max(210, bounds.width * 0.7)
+        let center = CGPoint(x: bounds.midX, y: radius + 12)
         let cap = UIBezierPath(ovalIn: CGRect(x: center.x - radius - 8, y: 4,
             width: (radius + 8) * 2, height: (radius + 8) * 2))
         UIColor.black.withAlphaComponent(0.86).setFill(); cap.fill()
+        // Match gesture travel at the fixed index: no separate visual sensitivity.
         let anglePerDoubling = ManualZoomScale.pointsPerDoubling / Double(radius)
+        var occupiedLabels: [CGRect] = []
         func point(_ factor: Double, radius r: CGFloat) -> CGPoint {
             let angle = log2(factor / zoom) * anglePerDoubling
             return CGPoint(x: center.x + CGFloat(sin(angle)) * r, y: center.y - CGFloat(cos(angle)) * r)
@@ -255,7 +267,10 @@ private final class ZoomWheelView: UIView {
                     width: size.width, height: size.height)
                 let actions = CGRect(x: bounds.width - reservedTrailingWidth, y: bounds.height - 52,
                     width: reservedTrailingWidth, height: 52).insetBy(dx: -4, dy: 0)
-                guard !labelFrame.intersects(actions) else { return }
+                guard bounds.insetBy(dx: 4, dy: 0).contains(labelFrame),
+                      !labelFrame.intersects(actions),
+                      !occupiedLabels.contains(where: { $0.insetBy(dx: -5, dy: -3).intersects(labelFrame) }) else { return }
+                occupiedLabels.append(labelFrame)
                 #if DEBUG
                 renderedLabelFrames.append(labelFrame)
                 #endif
@@ -267,9 +282,15 @@ private final class ZoomWheelView: UIView {
             let value = minimum * pow(2, Double(index) / 12)
             if value <= maximum { tick(value, major: false, label: false) }
         }
-        for value in Set(stops + [minimum, maximum]).sorted() { tick(value, major: true, label: true) }
+        // Include readable intermediate magnifications, especially above the last
+        // physical lens. Prioritize labels near the index and avoid crowded edges.
+        let displayedMarks = [0.5, 0.7, 1, 1.5, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 32, 48, 64, 96, 120]
+        let marks = Set(stops + [minimum, maximum] + displayedMarks.map { $0 / multiplier })
+            .filter { $0 >= minimum && $0 <= maximum }
+            .sorted { abs(log2($0 / zoom)) < abs(log2($1 / zoom)) }
+        for value in marks { tick(value, major: true, label: true) }
         context.setStrokeColor(UIColor.systemYellow.cgColor); context.setLineWidth(2); context.setLineCap(.round)
-        context.move(to: CGPoint(x: bounds.midX, y: 5)); context.addLine(to: CGPoint(x: bounds.midX, y: 19)); context.strokePath()
+        context.move(to: CGPoint(x: bounds.midX, y: 6)); context.addLine(to: CGPoint(x: bounds.midX, y: 24)); context.strokePath()
         let value = ManualZoomScale.label(zoom * multiplier)
         let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.monospacedDigitSystemFont(ofSize: 18, weight: .semibold), .foregroundColor: UIColor.systemYellow]
         let size = value.size(withAttributes: attrs)

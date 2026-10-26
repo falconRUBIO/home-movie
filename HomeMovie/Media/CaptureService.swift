@@ -934,7 +934,11 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             let now = ProcessInfo.processInfo.systemUptime
             let seconds = smoothClock.step(at: now)
             guard seconds > 0 else { return }
-            let next = filter.advance(seconds: seconds, rate: smoothInput.rate(baseline: smoothSpeed.rate), response: smoothSpeed.responseTime); smoothFilter = filter
+            let manual = manualZoomSession.isOpen
+            let next = filter.advance(seconds: seconds,
+                rate: manual ? ManualZoomScale.trackingRate : smoothInput.rate(baseline: smoothSpeed.rate),
+                response: manual ? ManualZoomScale.responseTime : smoothSpeed.responseTime)
+            smoothFilter = filter
             try camera.lockForConfiguration()
             let target = min(camera.maxAvailableVideoZoomFactor, max(camera.minAvailableVideoZoomFactor, CGFloat(next)))
             // One trajectory owns zoom. Restarting native ramps on every sample caused stepping.

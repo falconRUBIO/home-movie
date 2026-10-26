@@ -211,6 +211,10 @@ struct SmoothZoomInput: Sendable {
 /// Compact proportional wheel: 48 points doubles magnification at every focal length.
 /// This is our interaction tuning, not a claim about Apple's private implementation.
 enum ManualZoomScale {
+    // Ordinary camera framing should track the finger; Dolly's deliberately
+    // slower response setting must not add a long tail to the on-screen dial.
+    static let responseTime = 0.075
+    static let trackingRate: Float = 20
     static let pointsPerDoubling = 48.0
     static func factor(start: Double, translation: Double, minimum: Double, maximum: Double) -> Double {
         guard start.isFinite, start > 0, translation.isFinite,

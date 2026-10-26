@@ -46,3 +46,26 @@ These travel, hold, drawing and dismissal constants are our tuning. Apple docume
 Added native UIView regression coverage for first-pan visibility before release or camera publication, live scale updates while dragging, camera-update isolation, centered placement at narrow/regular widths, stable lens geometry, preview/action hit testing, hold-without-zoom, cancellation and disabled input. Added compact-travel and immediate boundary-reversal coverage. Existing manual session ownership and range/display tests remain.
 
 Dolly setup, endpoint preview/return-to-start, countdown and playback implementations are compared against main and remain unchanged. Source/project checks run locally. Xcode compilation and XCTest run in macOS CI; actual touch feel and physical lens transitions still need an iPhone check.
+
+## Follow-up: repeated-drag continuity and response
+
+Hardware feedback still reported an off feel. The audit found that the dial used
+Dolly's 0.28–0.55 second spring response, even though the visible index tracked the
+finger immediately. Ordinary manual sessions now use a 0.075-second critically
+damped response with 20 doublings/second headroom, including the final settle.
+Dolly retains its existing speed settings and timed trajectories. This is our
+response tuning, not an Apple-published value.
+
+Re-grabbing a visible dial starts from its last requested framing rather than a
+lagging capture publication. Each drag receives a fresh ownership token, so an old
+cancellation cannot end a later drag. Hidden preset buttons no longer accept taps
+through the open wheel. Predominantly vertical pans do not open the dial.
+
+The wheel uses a broader shallow arc, with intermediate magnifications through
+high zoom ranges and collision-tested labels at narrow widths. Gesture travel
+and the tick scale still share the same 48 points per doubling. No snapping,
+inertia, or extra zoom animation is introduced.
+
+Regression coverage checks repeated-touch continuity and session identity, and
+monotonic, prompt settling at 30/60/120Hz. Native rendering attachments cover the
+revised arc. Physical iPhone touch feel and lens handoffs require device testing.
