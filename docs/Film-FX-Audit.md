@@ -77,3 +77,22 @@ do not establish physical-device memory, heat or sustained export performance.
 - [Apple explicit transform quality](https://developer.apple.com/documentation/coreimage/ciimage/transformed(by:highqualitydownsample:)): selecting downsampling quality at the image transform.
 - [Apple image intermediate](https://developer.apple.com/documentation/coreimage/ciimage/insertingintermediate(cache:)): an explicit processing boundary with cache control.
 
+
+## Grain refinement (engine 9)
+
+Both existing 35mm-inspired and 16mm-inspired textures now use a shared response.
+The original deterministic particle fields, timeline seeds, size controls, and
+format-dependent strength remain. Two particle differences add a restrained color
+component, projected to zero Rec.709 luminance. Symmetric per-channel headroom
+limits color variation near gamut boundaries without an asymmetric clipping bias.
+A small Gaussian neighborhood measures image detail and reduces added grain by at
+most 35% on strong detail. The sharp base image is never replaced by that sample.
+Grain remains the last stage, shared by preview and export; engine-version cache
+invalidation ensures existing previews regenerate. No additional user controls or
+film-stock accuracy claims are introduced.
+
+Added native checks cover channel means, restrained chroma versus luminance energy,
+amount scaling, finite bounded output, fine-detail protection without blurred black
+stripes, plus existing alpha, animation, endpoints, and combined-effect regressions.
+Physical iPhone texture, export performance, and final encoded-video review remain
+necessary; these automated checks cannot establish aesthetic film-stock fidelity.

@@ -46,7 +46,7 @@ final class FilmEffectsTests: XCTestCase {
         XCTAssertNotEqual(a, FilmEffectsSettings.frameSeed(time: CMTime(value: 31, timescale: 30), seed: seed))
         XCTAssertEqual(a, FilmEffectsSettings.frameSeed(time: CMTime(value: 600, timescale: 600), seed: seed))
     }
-    func testMetalGrainIsDeterministicAnimatedAndNeutral() throws {
+    func testMetalGrainIsDeterministicAnimatedAndBrightnessNeutral() throws {
         let input = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)).cropped(to: CGRect(x: 0, y: 0, width: 256, height: 256))
         var settings = FilmEffectsSettings.off; settings.grainEnabled = true; settings.grainAmount = 1
         let renderer = FilmEffectsRenderer()
@@ -58,8 +58,8 @@ final class FilmEffectsTests: XCTestCase {
         XCTAssertGreaterThan((red.max() ?? 0) - (red.min() ?? 0), 0.00001)
         XCTAssertEqual(red.reduce(0, +) / Float(red.count), 0.5, accuracy: 0.002)
         for index in stride(from: 0, to: a.count, by: 4) {
-            XCTAssertEqual(a[index], a[index + 1], accuracy: 0.000001)
-            XCTAssertEqual(a[index], a[index + 2], accuracy: 0.000001)
+            XCTAssertLessThan(abs(a[index] - a[index + 1]), 0.015)
+            XCTAssertLessThan(abs(a[index] - a[index + 2]), 0.015)
         }
     }
     func testFineGrainDoesNotLiftBlackCrushWhiteOrShiftPatchBrightness() throws {
@@ -118,8 +118,8 @@ final class FilmEffectsTests: XCTestCase {
                 XCTAssertNotEqual(a, next)
             }
             for index in stride(from: 0, to: a.count, by: 4) {
-                XCTAssertEqual(a[index], a[index + 1], accuracy: 0.00001)
-                XCTAssertEqual(a[index], a[index + 2], accuracy: 0.00001)
+                XCTAssertLessThan(abs(a[index] - a[index + 1]), 0.025)
+                XCTAssertLessThan(abs(a[index] - a[index + 2]), 0.025)
             }
         }
     }
@@ -387,4 +387,68 @@ extension FilmEffectsTests {
         for c in 0..<4 { XCTAssertEqual(pixels(unchanged)[c], pixels(base)[c], accuracy: 0.001) }
     }
 
+}
+
+extension FilmEffectsTests {
+    func testGrainColorIsSubtleUnbiasedAndAmountScalesTexture() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)
+        let source = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)).cropped(to: bounds)
+        let renderer = FilmEffectsRenderer()
+        for texture in FilmGrainTexture.allCases {
+            var settings = FilmEffectsSettings.off
+            settings.grainEnabled = true; settings.grainTexture = texture; settings.grainSize = 2
+            settings.grainAmount = 1
+            let full = pixels(try renderer.render(source, settings: settings, time: .zero))
+            settings.grainAmount = 0.5
+            let half = pixels(try renderer.render(source, settings: settings, time: .zero))
+            settings.grainAmount = 0
+            XCTAssertTrue(try renderer.render(source, settings: settings, time: .zero) === source)
+            var lumaEnergy = 0.0, chromaEnergy = 0.0
+            var means = [Double](repeating: 0, count: 3)
+            for i in stride(from: 0, to: full.count, by: 4) {
+                let luma = full[i] * 0.2126 + full[i + 1] * 0.7152 + full[i + 2] * 0.0722
+                lumaEnergy += pow(Double(luma - 0.5), 2)
+                for c in 0..<3 {
+                    means[c] += Double(full[i + c])
+                    chromaEnergy += pow(Double(full[i + c] - luma), 2) / 3
+                    XCTAssertEqual(half[i + c] - 0.5, (full[i + c] - 0.5) * 0.5, accuracy: 0.00001)
+                    XCTAssertTrue(full[i + c].isFinite && (0...1).contains(full[i + c]))
+                }
+                XCTAssertEqual(full[i + 3], 1, accuracy: 0.000001)
+            }
+            XCTAssertGreaterThan(chromaEnergy, 0.00000001, "Color grain should be present")
+            XCTAssertLessThan(chromaEnergy, lumaEnergy * 0.15, "Luminance texture must dominate")
+            for mean in means { XCTAssertEqual(mean / Double(full.count / 4), 0.5, accuracy: 0.002) }
+        }
+    }
+
+    func testGrainProtectsFineImageDetailWithoutBlurringTheBase() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 256, height: 128)
+        let flat = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)).cropped(to: bounds)
+        var stripes = flat
+        let dark = CIImage(color: .black)
+        for x in stride(from: 0, to: 256, by: 2) {
+            stripes = dark.cropped(to: CGRect(x: x, y: 0, width: 1, height: 128)).composited(over: stripes)
+        }
+        let renderer = FilmEffectsRenderer()
+        for texture in FilmGrainTexture.allCases {
+            var settings = FilmEffectsSettings.off
+            settings.grainEnabled = true; settings.grainTexture = texture
+            settings.grainAmount = 1; settings.grainSize = 2
+            let a = pixels(try renderer.render(flat, settings: settings, time: .zero))
+            let b = pixels(try renderer.render(stripes, settings: settings, time: .zero))
+            var flatEnergy = 0.0, detailEnergy = 0.0
+            for y in 2..<126 {
+                for x in stride(from: 3, to: 253, by: 2) {
+                    let i = (y * 256 + x) * 4
+                    flatEnergy += pow(Double(a[i] - 0.5), 2)
+                    detailEnergy += pow(Double(b[i] - 0.5), 2)
+                    // Adjacent black pixels stay black: the detail pass isn't a softener.
+                    for c in 0..<3 { XCTAssertEqual(b[i - 4 + c], 0, accuracy: 0.00001) }
+                }
+            }
+            XCTAssertGreaterThan(detailEnergy, flatEnergy * 0.35, "Texture should remain present")
+            XCTAssertLessThan(detailEnergy, flatEnergy * 0.99, "Fine detail should restrain grain")
+        }
+    }
 }

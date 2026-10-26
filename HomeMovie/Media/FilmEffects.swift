@@ -12,7 +12,7 @@ enum FilmGrainTexture: String, Codable, CaseIterable, Identifiable, Sendable {
 
 // Stored separately from capture profile and LUT selection. Optional on Movie for old catalogs.
 struct FilmEffectsSettings: Codable, Equatable, Sendable {
-    static let engineVersion = 8
+    static let engineVersion = 9
     static let off = FilmEffectsSettings()
     var version = 1
     var grainEnabled = false
@@ -168,8 +168,13 @@ final class FilmEffectsRenderer {
         }
         if settings.grainEnabled && settings.grainAmount > 0 {
             let seed = FilmEffectsSettings.frameSeed(time: time, seed: settings.seed)
-            image = try apply(settings.grainTexture == .coarse16 ? "filmGrain16" : "filmGrain", extent: bounds, arguments: [image,
-                settings.grainAmount, settings.grainSize * settings.grainTexture.referenceSize * scale,
+            let size = settings.grainSize * settings.grainTexture.referenceSize * scale
+            // One small shared neighborhood pass measures detail without softening
+            // the image or changing the grain's timeline-dependent random fields.
+            let local = image.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [
+                "inputRadius": max(0.5, size * 0.8)]).cropped(to: bounds)
+            image = try apply(settings.grainTexture == .coarse16 ? "filmGrain16" : "filmGrain", extent: bounds, arguments: [image, local,
+                settings.grainAmount, size,
                 Float(seed & 65535), Float(seed >> 16), CIVector(cgRect: content)])
         }
         return image.cropped(to: bounds)
