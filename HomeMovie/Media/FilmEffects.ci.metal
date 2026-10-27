@@ -398,7 +398,7 @@ float4 logFalseColor(sample_t input, float4 purple, float4 blue, float4 green,
         float spectral = mix(1.0, clamp(input.r / max(l, 0.001), 0.15, 1.0), warm);
         return float4(input.rgb * gate * spectral, 1.0);
     }
-    float4 filmOptics(sample_t base, sample_t bloom, sample_t red, sample_t orange, sample_t halationSource, float bloomAmount, float halationAmount) {
+    float4 filmOptics(sample_t base, sample_t bloom, sample_t bloomSource, sample_t red, sample_t orange, sample_t halationSource, float bloomAmount, float halationAmount) {
         float l = luminance(base.rgb);
         float sourceProtection = 1.0 - smoothstep(0.65, 0.995, l);
         float localContrast = smoothstep(0.001, 0.035, max(luminance(red.rgb) - l * 0.18, 0.0));
@@ -409,7 +409,12 @@ float4 logFalseColor(sample_t input, float4 purple, float4 blue, float4 green,
         float redScatter = max(luminance(red.rgb) - localSource, 0.0);
         float orangeScatter = max(luminance(orange.rgb) - localSource, 0.0);
         float3 halo = float3(redScatter, orangeScatter * 0.32, orangeScatter * 0.025);
-        float3 energy = max(bloom.rgb, 0.0) * bloomAmount * 2.8 + halo * halationAmount * 4.0 * sourceProtection * localContrast;
+        // Add arriving highlight spill, not the source's own highlight mask.
+        // Uniform bright walls and the interior of large lights retain their
+        // detail/exposure; isolated lights still diffuse into their surroundings.
+        // Subtract per channel to retain the source-colored nature of glow.
+        float3 glow = max(bloom.rgb - bloomSource.rgb, 0.0);
+        float3 energy = glow * bloomAmount * 2.8 + halo * halationAmount * 4.0 * sourceProtection * localContrast;
         // Channel-relative headroom protection, no whole-frame tone or saturation changes.
         float3 result = base.rgb + max(1.0 - base.rgb, 0.0) * (1.0 - exp(-energy));
         return float4(encode709(result), base.a);

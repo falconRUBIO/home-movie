@@ -144,6 +144,49 @@ final class FilmEffectsTests: XCTestCase {
             }
         }
     }
+    func testGlowPreservesUniformBrightAndSkinColoredFields() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 128, height: 128)
+        let renderer = FilmEffectsRenderer()
+        let colors = [CIColor(red: 0.72, green: 0.72, blue: 0.72),
+                      CIColor(red: 0.92, green: 0.92, blue: 0.92),
+                      CIColor(red: 0.88, green: 0.68, blue: 0.53),
+                      CIColor(red: 0.95, green: 0.32, blue: 0.12)]
+        for color in colors {
+            let source = CIImage(color: color).cropped(to: bounds)
+            let original = pixels(source)
+            for spread in [0.0, 1.0] {
+                var settings = FilmEffectsSettings.off
+                settings.bloomEnabled = true; settings.bloomAmount = 1
+                settings.bloomSensitivity = 1; settings.bloomSpread = spread
+                let result = pixels(try renderer.render(source, settings: settings, time: .zero))
+                for i in result.indices { XCTAssertEqual(result[i], original[i], accuracy: 0.002) }
+            }
+        }
+    }
+    func testGlowPreservesBrightDetailWhileSpillingColoredLightOutsideSource() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)
+        let dark = CIImage(color: CIColor(red: 0.04, green: 0.04, blue: 0.04)).cropped(to: bounds)
+        let light = CIImage(color: CIColor(red: 0.95, green: 0.72, blue: 0.4))
+            .cropped(to: CGRect(x: 64, y: 64, width: 128, height: 128))
+        let detail = CIImage(color: CIColor(red: 0.85, green: 0.64, blue: 0.35))
+            .cropped(to: CGRect(x: 112, y: 64, width: 32, height: 128))
+        let source = detail.composited(over: light.composited(over: dark)).cropped(to: bounds)
+        let original = pixels(source)
+        var settings = FilmEffectsSettings.off
+        settings.bloomEnabled = true; settings.bloomAmount = 1
+        settings.bloomSensitivity = 1; settings.bloomSpread = 0
+        let result = pixels(try FilmEffectsRenderer().render(source, settings: settings, time: .zero))
+        // The source's bright interior and broad internal detail must not wash out.
+        for x in [88, 128, 168] {
+            let i = (128 * 256 + x) * 4
+            for c in 0..<3 { XCTAssertEqual(result[i + c], original[i + c], accuracy: 0.002) }
+        }
+        let edge = (128 * 256 + 62) * 4
+        XCTAssertGreaterThan(result[edge], original[edge] + 0.015)
+        XCTAssertGreaterThan(result[edge], result[edge + 1])
+        XCTAssertGreaterThan(result[edge + 1], result[edge + 2])
+        for i in result.indices { XCTAssertTrue(result[i].isFinite && (0...1).contains(result[i])) }
+    }
     func testTinyLightGlowSurvivesEveryReducedSamplingPhase() throws {
         let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)
         let background = CIImage(color: .black).cropped(to: bounds)

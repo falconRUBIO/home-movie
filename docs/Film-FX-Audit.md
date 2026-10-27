@@ -96,3 +96,26 @@ amount scaling, finite bounded output, fine-detail protection without blurred bl
 stripes, plus existing alpha, animation, endpoints, and combined-effect regressions.
 Physical iPhone texture, export performance, and final encoded-video review remain
 necessary; these automated checks cannot establish aesthetic film-stock fidelity.
+
+## Local glow refinement (engine 10)
+
+Glow now adds the positive difference between diffused highlights and the native
+local highlight mask, independently per color channel. Previously it added the
+entire blurred mask, including each pixel's own highlight energy. That lifted
+uniform bright surfaces and compressed their detail even without nearby lights.
+The refinement preserves flat bright fields and the interior of broad lights,
+while retaining source-colored spill around lamps and windows. It is a localized
+display-referred finishing effect, not an energy-conserving optical simulation.
+
+The existing native-resolution extraction intermediate is reused: no new blur or
+particle passes, settings, presets, motion, or exposure fluctuations are added.
+Grain, halation, softness, and the shared preview/export path remain intact.
+Engine 10 invalidates cached exports so existing enabled Glow settings receive
+the refinement. Saved slider values retain their meaning, but broad highlights
+can look less washed out than in older renders.
+
+New production-kernel tests cover bright neutral, warm skin-colored and saturated
+flat fields at both spread extremes, bright-source interior detail and colored
+spill. Existing tiny-light sampling-phase, amount-response, grain, combined FX,
+and preview/export checks must also pass. Device appearance and long-export heat
+and memory behavior still require iPhone footage testing.

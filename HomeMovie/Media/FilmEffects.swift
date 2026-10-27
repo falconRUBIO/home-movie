@@ -12,7 +12,7 @@ enum FilmGrainTexture: String, Codable, CaseIterable, Identifiable, Sendable {
 
 // Stored separately from capture profile and LUT selection. Optional on Movie for old catalogs.
 struct FilmEffectsSettings: Codable, Equatable, Sendable {
-    static let engineVersion = 9
+    static let engineVersion = 10
     static let off = FilmEffectsSettings()
     var version = 1
     var grainEnabled = false
@@ -126,11 +126,12 @@ final class FilmEffectsRenderer {
         if settings.halationEnabled && settings.halationAmount > 0 || settings.bloomEnabled && settings.bloomAmount > 0 {
             let linear = try apply("filmLinear", extent: bounds, arguments: [source])
             let black = CIImage(color: .black).cropped(to: bounds)
-            var bloom = black, red = black, orange = black, halationSource = black
+            var bloom = black, bloomSource = black, red = black, orange = black, halationSource = black
             if settings.bloomEnabled && settings.bloomAmount > 0 {
                 let threshold = 0.86 - 0.32 * settings.bloomSensitivity
                 let highlight = try apply("filmHighlights", extent: bounds, arguments: [linear, threshold, 0])
                     .insertingIntermediate(cache: false)
+                bloomSource = highlight
                 let radius = (5 + 35 * settings.bloomSpread) * scale
                 bloom = diffuse(highlight, radius: radius, extent: bounds, weights: [0.6, 0.3, 0.1])
             }
@@ -143,7 +144,7 @@ final class FilmEffectsRenderer {
                 red = diffuse(highlight, radius: radius * 1.6, extent: bounds, weights: [0.75, 0.2, 0.05])
                 orange = diffuse(highlight, radius: radius * 0.65, extent: bounds, weights: [0.8, 0.15, 0.05])
             }
-            image = try apply("filmOptics", extent: bounds, arguments: [linear, bloom, red, orange, halationSource,
+            image = try apply("filmOptics", extent: bounds, arguments: [linear, bloom, bloomSource, red, orange, halationSource,
                 settings.bloomEnabled ? settings.bloomAmount : 0,
                 settings.halationEnabled ? settings.halationAmount : 0])
         }
