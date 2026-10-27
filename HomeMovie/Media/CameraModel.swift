@@ -366,12 +366,20 @@ struct RecordingFlipHandoff {
                 message = error.localizedDescription
             }
         case .interrupted(let text):
+            guard active else { return }
             cancelPiPChange()
             ReliabilityDiagnostics.shared.record(.cameraInterrupted)
             switchingCamera = false; switchingFormat = nil
             recordingFlip = nil
             interruption = text; message = text; startCancelled = true
             if busy { state = .finalizing; beginBackgroundTime() } else { state = .interrupted }
+        case .interruptionEnded(let options):
+            // A generic .ready can be a delayed metering/zoom callback. Only a
+            // verified session recovery may dismiss an interruption notice.
+            guard active, interruption != nil, state == .interrupted || state == .finalizing else { return }
+            self.options = options; rememberedFront = options.isFront
+            interruption = nil; message = nil
+            if state == .interrupted { state = .ready }
         case .failed(let text):
             cancelPiPChange()
             ReliabilityDiagnostics.shared.record(.cameraFailed)

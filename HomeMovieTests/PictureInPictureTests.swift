@@ -6,6 +6,62 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    func testInactiveCaptureServiceIgnoresSessionNotifications() async {
+        let service = CaptureService()
+        let event = expectation(description: "Inactive camera must not emit interruption or failure")
+        event.isInverted = true
+        service.onEvent = { _ in event.fulfill() }
+        for name in [AVCaptureSession.wasInterruptedNotification, AVCaptureSession.interruptionEndedNotification,
+                     AVCaptureSession.didStartRunningNotification, AVCaptureSession.runtimeErrorNotification] {
+            NotificationCenter.default.post(name: name, object: service.session)
+        }
+        await fulfillment(of: [event], timeout: 0.25)
+        withExtendedLifetime(service) {}
+    }
+    @MainActor func testVerifiedRecoveryClearsInterruptionButOrdinaryReadyDoesNot() async {
+        for profile in [CaptureProfile.standard, .appleLog] {
+            let camera = CameraModel(app: AppModel())
+            let options = preparedOptions(profile: profile, enabled: true)
+            camera.options = options; camera.state = .ready
+            await camera.receive(.interrupted("Temporarily unavailable"))
+            XCTAssertEqual(camera.state, .interrupted)
+            await camera.receive(.ready(options))
+            XCTAssertEqual(camera.state, .interrupted)
+            XCTAssertNotNil(camera.message)
+            await camera.receive(.interruptionEnded(options))
+            XCTAssertEqual(camera.state, .ready)
+            XCTAssertNil(camera.message)
+            XCTAssertEqual(camera.options?.profile, profile)
+            XCTAssertEqual(camera.options?.isPiPEnabled, true)
+        }
+    }
+    @MainActor func testRecoveryNeverRestartsAnInterruptedTakeOrOverridesFailure() async {
+        let camera = CameraModel(app: AppModel())
+        let options = preparedOptions()
+        camera.options = options; camera.state = .recording
+        await camera.receive(.interrupted("Call"))
+        XCTAssertEqual(camera.state, .finalizing)
+        await camera.receive(.interruptionEnded(options))
+        XCTAssertEqual(camera.state, .finalizing, "Recovery must wait for the interrupted clip to finish saving")
+        XCTAssertNil(camera.message)
+        camera.state = .ready
+        await camera.receive(.interrupted("Paused"))
+        await camera.receive(.failed("Capture failed"))
+        await camera.receive(.interruptionEnded(options))
+        XCTAssertEqual(camera.state, .failed)
+        XCTAssertEqual(camera.message, "Capture failed")
+    }
+    @MainActor func testLateInterruptionEventsDoNotReviveSuspendedCamera() async {
+        let camera = CameraModel(app: AppModel())
+        let options = preparedOptions()
+        camera.options = options; camera.state = .ready
+        camera.suspend()
+        await camera.receive(.interrupted("Stale interruption"))
+        await camera.receive(.interruptionEnded(options))
+        XCTAssertEqual(camera.state, .ready)
+        XCTAssertNil(camera.message)
+    }
+
     private func preparedOptions(profile: CaptureProfile = .standard, enabled: Bool = false) -> CameraOptions {
         var options = CameraOptions(lenses: [], zoom: 1, minimum: 1, maximum: 8, multiplier: 1,
             isFront: false, angle: 90, profile: profile, canMeter: false, canLock: false,
