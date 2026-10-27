@@ -393,24 +393,23 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                  pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) {
         queue.async {
             self.captureActive = true
-            guard !dualCamera || CameraCompatibility.allowsPiP(profile: profile, deviceSupported: self.piPCapable(for: profile)) else {
+            let prepareDualCamera = dualCamera && CameraCompatibility.allowsPiP(profile: profile, deviceSupported: self.piPCapable(for: profile))
+            if dualCamera && !prepareDualCamera {
                 self.onEvent?(.pipSetupFailed(profile == .appleLog ? CameraCompatibility.logPiPExplanation : "This iPhone cannot use Dual Camera."))
-                // Preserve the user's preference and still attempt a usable camera.
-                self.prepare(front: front, profile: profile, dualCamera: false,
-                    pipLayout: pipLayout, canvasFormat: canvasFormat)
-                return
+                // Continue with an ordinary camera in this same queue operation.
+                // Re-enqueueing prepare here could run after a queued suspend.
             }
             let previousFront = self.isFront
             let previousZoom = self.videoInput?.device.videoZoomFactor
             do {
                 if self.ticket != nil { return }
-                if !self.configured || self.configuredProfile != profile || self.dualCameraRequested != dualCamera || dualCamera && self.seamless?.needsPiPReprepare == true {
+                if !self.configured || self.configuredProfile != profile || self.dualCameraRequested != prepareDualCamera || prepareDualCamera && self.seamless?.needsPiPReprepare == true {
                     self.configured = false
                     if self.session.isRunning { self.session.stopRunning() }
                     self.configuredProfile = profile
-                    self.dualCameraRequested = dualCamera
-                    try self.configure(front: dualCamera ? false : self.device(front: front) == nil ? false : front,
-                        preparedForPiP: dualCamera, pipLayout: pipLayout, canvasFormat: canvasFormat)
+                    self.dualCameraRequested = prepareDualCamera
+                    try self.configure(front: prepareDualCamera ? false : self.device(front: front) == nil ? false : front,
+                        preparedForPiP: prepareDualCamera, pipLayout: pipLayout, canvasFormat: canvasFormat)
                 }
                 self.seamless?.configurePiP(layout: pipLayout, canvasFormat: canvasFormat)
                 try self.ensureLogCaptureReady(requireOutputs: false)
@@ -419,13 +418,13 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                 if !self.session.isRunning { self.session.startRunning() }
                 try CameraCompatibility.requireRunningSession(running: self.session.isRunning, interrupted: self.session.isInterrupted)
                 try self.ensureLogCaptureReady()
-                if profile == .appleLog, dualCamera, self.seamless?.readyToFlip != true { return }
+                if profile == .appleLog, prepareDualCamera, self.seamless?.readyToFlip != true { return }
                 self.audioInterrupted = false
                 self.onEvent?(.ready(try self.options()))
                 self.recoverInterruptedSessionIfReady()
             } catch {
                 self.configured = false
-                if dualCamera {
+                if prepareDualCamera {
                     self.dualCameraRequested = false
                     do {
                         try self.configure(front: previousFront)
