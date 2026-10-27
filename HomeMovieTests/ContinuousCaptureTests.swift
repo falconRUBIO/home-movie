@@ -4,6 +4,34 @@ import CoreImage
 @testable import HomeMovie
 
 final class ContinuousCaptureTests: XCTestCase {
+    func testReadinessRejectsStoppedAndInterruptedFallbackSessions() {
+        for running in [false, true] { for interrupted in [false, true] {
+            if running && !interrupted {
+                XCTAssertNoThrow(try CameraCompatibility.requireRunningSession(running: running, interrupted: interrupted))
+            } else {
+                XCTAssertThrowsError(try CameraCompatibility.requireRunningSession(running: running, interrupted: interrupted))
+            }
+        }}
+    }
+    func testPiPSettingsPreparationKeepsBothFeedsWithoutEnablingPiP() {
+        for profile in [CaptureProfile.standard, .appleLog] {
+            for stored in [false, true] {
+                let preview = CameraCompatibility.preparationPlan(profile: profile, storedPreference: stored,
+                    requested: false, currentlyEnabled: false, settingsPreview: true, previewSupported: true)
+                XCTAssertTrue(preview.dualCamera); XCTAssertFalse(preview.enablePiP)
+                let dismissed = CameraCompatibility.preparationPlan(profile: profile, storedPreference: stored,
+                    requested: false, currentlyEnabled: false, settingsPreview: false, previewSupported: true)
+                XCTAssertFalse(dismissed.dualCamera); XCTAssertFalse(dismissed.enablePiP)
+            }
+            let active = CameraCompatibility.preparationPlan(profile: profile, storedPreference: true,
+                requested: false, currentlyEnabled: true, settingsPreview: true, previewSupported: true)
+            XCTAssertTrue(active.dualCamera); XCTAssertTrue(active.enablePiP)
+            let unavailable = CameraCompatibility.preparationPlan(profile: profile, storedPreference: false,
+                requested: false, currentlyEnabled: false, settingsPreview: true, previewSupported: false)
+            XCTAssertFalse(unavailable.dualCamera); XCTAssertFalse(unavailable.enablePiP)
+        }
+    }
+
     func testFlipReadinessExpiresAndRejectsInvalidCameraTimes() {
         let now = CMTime(seconds: 10, preferredTimescale: 600)
         XCTAssertTrue(CameraFrameFreshness.isFresh(CMTime(seconds: 9.97, preferredTimescale: 600), at: now))

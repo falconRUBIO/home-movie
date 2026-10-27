@@ -1178,12 +1178,14 @@ struct CameraView: View {
         Task { await camera.pauseForPlayback(); initialReviewID = sceneID; watching = true }
     }
     private func prepareCamera() async {
-        let usePiP = CameraCompatibility.shouldPreparePiP(profile: movie?.captureProfile ?? .standard,
+        let plan = CameraCompatibility.preparationPlan(profile: movie?.captureProfile ?? .standard,
             storedPreference: movie?.dualCameraCapture == true, requested: enablePiPAfterPreparation,
-            currentlyEnabled: camera.options?.isPiPEnabled == true)
+            currentlyEnabled: camera.options?.isPiPEnabled == true,
+            settingsPreview: showingPiPLayout, previewSupported: camera.options?.canPreparePiP == true)
+        if showingPiPLayout, plan.dualCamera, !plan.enablePiP { preparedPiPForSettings = true }
         await camera.prepare(profile: movie?.captureProfile ?? .standard, movieID: movieID,
-            dualCamera: usePiP, layout: movie?.preferredPiPLayout ?? PiPLayout(),
-            canvasFormat: pipCanvasFormat, enablePiP: usePiP)
+            dualCamera: plan.dualCamera, layout: movie?.preferredPiPLayout ?? PiPLayout(),
+            canvasFormat: pipCanvasFormat, enablePiP: plan.enablePiP)
     }
     private func resumeCameraIfRequested() {
         guard foregroundResume.consumeIfReady(state: camera.state, busy: camera.busy,

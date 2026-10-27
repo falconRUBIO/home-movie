@@ -85,6 +85,20 @@ enum LogRecordingCodec {
     }
 }
 enum CameraCompatibility {
+    struct PreparationPlan {
+        let dualCamera: Bool
+        let enablePiP: Bool
+    }
+    static func preparationPlan(profile: CaptureProfile, storedPreference: Bool, requested: Bool,
+                                currentlyEnabled: Bool, settingsPreview: Bool, previewSupported: Bool) -> PreparationPlan {
+        let enabled = shouldPreparePiP(profile: profile, storedPreference: storedPreference,
+            requested: requested, currentlyEnabled: currentlyEnabled)
+        return PreparationPlan(dualCamera: enabled || settingsPreview && previewSupported, enablePiP: enabled)
+    }
+    static func requireRunningSession(running: Bool, interrupted: Bool) throws {
+        guard running else { throw HomeMovieError.message("The camera could not start. Tap Try Again to reconnect.") }
+        guard !interrupted else { throw HomeMovieError.message("The camera is still interrupted. Tap Try Again when it is available.") }
+    }
     static let logPiPExplanation = "Log PiP requires compatible front and rear 10-bit Log capture formats. Your movie’s recording profile is preserved."
     static let logRecordingFlipExplanation = "The camera is not ready for a continuous Log flip. Your current recording continues."
     static let logCameraExplanation = "The other camera cannot record this Log format. Switch to Standard to use it."
@@ -379,50 +393,55 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                  pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) {
         queue.async {
             self.captureActive = true
-            guard !dualCamera || CameraCompatibility.allowsPiP(profile: profile, deviceSupported: self.piPCapable(for: profile)) else {
+            let prepareDualCamera = dualCamera && CameraCompatibility.allowsPiP(profile: profile, deviceSupported: self.piPCapable(for: profile))
+            if dualCamera && !prepareDualCamera {
                 self.onEvent?(.pipSetupFailed(profile == .appleLog ? CameraCompatibility.logPiPExplanation : "This iPhone cannot use Dual Camera."))
-                return
+                // Continue with an ordinary camera in this same queue operation.
+                // Re-enqueueing prepare here could run after a queued suspend.
             }
             let previousFront = self.isFront
             let previousZoom = self.videoInput?.device.videoZoomFactor
             do {
                 if self.ticket != nil { return }
-                if !self.configured || self.configuredProfile != profile || self.dualCameraRequested != dualCamera || dualCamera && self.seamless?.needsPiPReprepare == true {
+                if !self.configured || self.configuredProfile != profile || self.dualCameraRequested != prepareDualCamera || prepareDualCamera && self.seamless?.needsPiPReprepare == true {
                     self.configured = false
                     if self.session.isRunning { self.session.stopRunning() }
                     self.configuredProfile = profile
-                    self.dualCameraRequested = dualCamera
-                    try self.configure(front: dualCamera ? false : self.device(front: front) == nil ? false : front,
-                        preparedForPiP: dualCamera, pipLayout: pipLayout, canvasFormat: canvasFormat)
+                    self.dualCameraRequested = prepareDualCamera
+                    try self.configure(front: prepareDualCamera ? false : self.device(front: front) == nil ? false : front,
+                        preparedForPiP: prepareDualCamera, pipLayout: pipLayout, canvasFormat: canvasFormat)
                 }
                 self.seamless?.configurePiP(layout: pipLayout, canvasFormat: canvasFormat)
                 try self.ensureLogCaptureReady(requireOutputs: false)
                 try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .videoRecording, options: [.defaultToSpeaker])
                 try AVAudioSession.sharedInstance().setActive(true)
                 if !self.session.isRunning { self.session.startRunning() }
-                guard self.session.isRunning else { throw HomeMovieError.message("The camera could not start.") }
-                guard !self.session.isInterrupted else { throw HomeMovieError.message("The camera is still interrupted. Try Resume Camera again when it is available.") }
+                try CameraCompatibility.requireRunningSession(running: self.session.isRunning, interrupted: self.session.isInterrupted)
                 try self.ensureLogCaptureReady()
-                if profile == .appleLog, dualCamera, self.seamless?.readyToFlip != true { return }
+                if profile == .appleLog, prepareDualCamera, self.seamless?.readyToFlip != true { return }
                 self.audioInterrupted = false
                 self.onEvent?(.ready(try self.options()))
                 self.recoverInterruptedSessionIfReady()
             } catch {
                 self.configured = false
-                if dualCamera {
+                if prepareDualCamera {
                     self.dualCameraRequested = false
                     do {
                         try self.configure(front: previousFront)
+                        try self.ensureLogCaptureReady(requireOutputs: false)
                         try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .videoRecording, options: [.defaultToSpeaker])
                         try AVAudioSession.sharedInstance().setActive(true); self.session.startRunning()
+                        try CameraCompatibility.requireRunningSession(running: self.session.isRunning, interrupted: self.session.isInterrupted)
+                        try self.ensureLogCaptureReady()
                         if let previousZoom, let camera = self.videoInput?.device {
                             try camera.lockForConfiguration()
                             camera.videoZoomFactor = min(camera.maxAvailableVideoZoomFactor, max(camera.minAvailableVideoZoomFactor, previousZoom))
                             camera.unlockForConfiguration()
                         }
+                        self.audioInterrupted = false
                         self.onEvent?(.ready(try self.options()))
                         self.onEvent?(.pipSetupFailed("Dual-camera recording could not be prepared. Your ordinary camera remains available. " + error.localizedDescription))
-                    } catch { self.onEvent?(.failed(error.localizedDescription)) }
+                    } catch { self.configured = false; self.onEvent?(.failed(error.localizedDescription)) }
                 } else { self.onEvent?(.failed(error.localizedDescription)) }
             }
         }

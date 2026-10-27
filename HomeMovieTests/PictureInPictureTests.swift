@@ -6,6 +6,44 @@ import MetalKit
 @testable import HomeMovie
 
 final class PictureInPictureTests: XCTestCase {
+    @MainActor func testTemporaryPiPFailurePreservesSavedPreferenceAndLayout() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root); _ = try await store.load()
+        let app = AppModel(store: store)
+        for profile in [CaptureProfile.standard, .appleLog] {
+            let movie = try await store.create(name: "PiP recovery", format: .portrait, profile: profile)
+            let layout = PiPLayout(corner: .topLeft, size: .large, composition: .sideBySide)
+            try await store.setPiPLayout(movieID: movie.id, layout: layout)
+            try await store.setDualCameraCapture(movieID: movie.id, enabled: true)
+            await app.refresh()
+            // Avoid device permission prompts while assigning the actual movie context.
+            let camera = CameraModel(app: app, requestPermissions: { false })
+            await camera.prepare(profile: profile, movieID: movie.id, dualCamera: true, layout: layout, enablePiP: true)
+            camera.state = .preparing; camera.beginPiPChange(to: true)
+            await camera.receive(.pipSetupFailed("Temporarily unavailable"))
+            XCTAssertTrue(camera.pipSetupFailed); XCTAssertNil(camera.pendingPiPEnabled)
+            let saved = await store.snapshot()
+            let restored = try XCTUnwrap(saved.first { $0.id == movie.id })
+            XCTAssertEqual(restored.dualCameraCapture, true)
+            XCTAssertEqual(restored.preferredPiPLayout, layout)
+            XCTAssertEqual(restored.captureProfile, profile)
+            var fallback = preparedOptions(profile: profile)
+            fallback.dualCameraPrepared = false; fallback.piPAvailable = false
+            await camera.receive(.ready(fallback))
+            XCTAssertEqual(camera.state, .ready)
+            XCTAssertEqual(camera.options?.isPiPEnabled, false)
+            XCTAssertTrue(camera.pipSetupFailed, "Fallback remains usable while the notice offers a retry")
+        }
+    }
+    @MainActor func testLatePiPFailureDoesNotChangeSuspendedCamera() async {
+        let app = AppModel()
+        let camera = CameraModel(app: app)
+        camera.suspend()
+        await camera.receive(.pipSetupFailed("Old failure"))
+        XCTAssertFalse(camera.pipSetupFailed); XCTAssertNil(camera.message)
+    }
+
     func testInactiveCaptureServiceIgnoresSessionNotifications() async {
         let service = CaptureService()
         let event = expectation(description: "Inactive camera must not emit interruption or failure")
