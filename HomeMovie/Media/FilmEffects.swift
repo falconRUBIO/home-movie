@@ -19,10 +19,12 @@ struct FilmEffectsSettings: Codable, Equatable, Sendable {
     var grainAmount = 0.25
     var grainSize = 1.0
     var grainTexture: FilmGrainTexture = .fine35
+    var grainColor = 1.0 // 1 retains the restrained engine-9 color response; 0 is monochrome texture.
     var halationEnabled = false
     var halationAmount = 0.2
     var halationSpread = 0.35
     var halationSensitivity = 0.25
+    var halationSaturation = 1.0
     var bloomEnabled = false
     var bloomAmount = 0.15
     var bloomSpread = 0.35
@@ -36,7 +38,7 @@ struct FilmEffectsSettings: Codable, Equatable, Sendable {
     var seed: UInt32 = 104729
     init() {}
     private enum CodingKeys: String, CodingKey {
-        case version, grainEnabled, grainAmount, grainSize, grainTexture, halationEnabled, halationAmount, halationSpread, halationSensitivity, bloomEnabled, bloomAmount, bloomSpread, bloomSensitivity, softnessEnabled, softnessAmount, rolloffEnabled, rolloffAmount, sharpnessAmount, vignetteAmount, seed
+        case version, grainEnabled, grainAmount, grainSize, grainTexture, grainColor, halationEnabled, halationAmount, halationSpread, halationSensitivity, halationSaturation, bloomEnabled, bloomAmount, bloomSpread, bloomSensitivity, softnessEnabled, softnessAmount, rolloffEnabled, rolloffAmount, sharpnessAmount, vignetteAmount, seed
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -45,10 +47,12 @@ struct FilmEffectsSettings: Codable, Equatable, Sendable {
         grainAmount = try values.decodeIfPresent(Double.self, forKey: .grainAmount) ?? 0.25
         grainSize = try values.decodeIfPresent(Double.self, forKey: .grainSize) ?? 1.0
         grainTexture = try values.decodeIfPresent(FilmGrainTexture.self, forKey: .grainTexture) ?? .fine35
+        grainColor = try values.decodeIfPresent(Double.self, forKey: .grainColor) ?? 1
         halationEnabled = try values.decodeIfPresent(Bool.self, forKey: .halationEnabled) ?? false
         halationAmount = try values.decodeIfPresent(Double.self, forKey: .halationAmount) ?? 0.2
         halationSpread = try values.decodeIfPresent(Double.self, forKey: .halationSpread) ?? 0.35
         halationSensitivity = try values.decodeIfPresent(Double.self, forKey: .halationSensitivity) ?? 0.25
+        halationSaturation = try values.decodeIfPresent(Double.self, forKey: .halationSaturation) ?? 1
         bloomEnabled = try values.decodeIfPresent(Bool.self, forKey: .bloomEnabled) ?? false
         bloomAmount = try values.decodeIfPresent(Double.self, forKey: .bloomAmount) ?? 0.15
         bloomSpread = try values.decodeIfPresent(Double.self, forKey: .bloomSpread) ?? 0.35
@@ -76,7 +80,7 @@ struct FilmEffectsSettings: Codable, Equatable, Sendable {
         return values.isEmpty ? "Off" : values.joined(separator: " · ")
     }
     func validate() throws {
-        let unit = [sharpnessAmount, vignetteAmount, softnessAmount, rolloffAmount, grainAmount, halationAmount, halationSpread, halationSensitivity, bloomAmount, bloomSpread, bloomSensitivity]
+        let unit = [sharpnessAmount, vignetteAmount, softnessAmount, rolloffAmount, grainAmount, grainColor, halationAmount, halationSpread, halationSensitivity, halationSaturation, bloomAmount, bloomSpread, bloomSensitivity]
         guard version == 1, unit.allSatisfy({ $0.isFinite && (0...1).contains($0) }),
               grainSize.isFinite, (0.5...2).contains(grainSize) else {
             throw HomeMovieError.message("The movie’s Film Effects settings are invalid.")
@@ -146,7 +150,7 @@ final class FilmEffectsRenderer {
             }
             image = try apply("filmOptics", extent: bounds, arguments: [linear, bloom, bloomSource, red, orange, halationSource,
                 settings.bloomEnabled ? settings.bloomAmount : 0,
-                settings.halationEnabled ? settings.halationAmount : 0])
+                settings.halationEnabled ? settings.halationAmount : 0, settings.halationSaturation])
         }
         // Diffusion reduces fine-detail contrast rather than laying a blur over everything.
         // Work in linear light, after optical scattering, and before final grain.
@@ -175,7 +179,7 @@ final class FilmEffectsRenderer {
             let local = image.clampedToExtent().applyingFilter("CIGaussianBlur", parameters: [
                 "inputRadius": max(0.5, size * 0.8)]).cropped(to: bounds)
             image = try apply(settings.grainTexture == .coarse16 ? "filmGrain16" : "filmGrain", extent: bounds, arguments: [image, local,
-                settings.grainAmount, size,
+                settings.grainAmount, size, settings.grainColor,
                 Float(seed & 65535), Float(seed >> 16), CIVector(cgRect: content)])
         }
         return image.cropped(to: bounds)

@@ -354,6 +354,71 @@ final class FilmEffectsTests: XCTestCase {
 }
 
 extension FilmEffectsTests {
+    func testFXColorControlsDecodeLegacyPersistValidateAndChangeCache() throws {
+        let legacy = try JSONDecoder().decode(FilmEffectsSettings.self, from: Data(#"{"version":1}"#.utf8))
+        XCTAssertEqual(legacy.grainColor, 1); XCTAssertEqual(legacy.halationSaturation, 1)
+        for key in [\FilmEffectsSettings.grainColor, \FilmEffectsSettings.halationSaturation] {
+            var settings = legacy; settings[keyPath: key] = 0.4
+            XCTAssertNotEqual(settings.cacheIdentity, legacy.cacheIdentity)
+            XCTAssertEqual(try JSONDecoder().decode(FilmEffectsSettings.self, from: JSONEncoder().encode(settings)), settings)
+            for invalid in [-0.1, 1.1, Double.nan] {
+                settings[keyPath: key] = invalid
+                XCTAssertThrowsError(try settings.validate())
+            }
+        }
+    }
+    func testGrainColorControlLeavesLuminanceTextureIntact() throws {
+        let source = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+            .cropped(to: CGRect(x: 0, y: 0, width: 128, height: 128))
+        let renderer = FilmEffectsRenderer()
+        for texture in FilmGrainTexture.allCases {
+            var settings = FilmEffectsSettings.off
+            settings.grainEnabled = true; settings.grainAmount = 1; settings.grainTexture = texture
+            let colored = pixels(try renderer.render(source, settings: settings, time: .zero))
+            settings.grainColor = 0
+            let mono = pixels(try renderer.render(source, settings: settings, time: .zero))
+            settings.grainColor = 0.5
+            let half = pixels(try renderer.render(source, settings: settings, time: .zero))
+            var chroma = 0.0
+            for i in stride(from: 0, to: mono.count, by: 4) {
+                let luma = colored[i] * 0.2126 + colored[i + 1] * 0.7152 + colored[i + 2] * 0.0722
+                XCTAssertEqual(mono[i], luma, accuracy: 0.00002)
+                XCTAssertEqual(mono[i], mono[i + 1], accuracy: 0.00001)
+                XCTAssertEqual(mono[i], mono[i + 2], accuracy: 0.00001)
+                for c in 0..<3 {
+                    chroma += abs(Double(colored[i + c] - mono[i + c]))
+                    XCTAssertEqual(half[i + c], (colored[i + c] + mono[i + c]) * 0.5, accuracy: 0.00002)
+                }
+            }
+            XCTAssertGreaterThan(chroma, 0.01)
+        }
+    }
+    func testHalationColorControlOnlyChangesHaloAndLeavesGlowAlone() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 256, height: 256)
+        let dark = CIImage(color: CIColor(red: 0.04, green: 0.04, blue: 0.04)).cropped(to: bounds)
+        let source = CIImage(color: .white).cropped(to: CGRect(x: 110, y: 110, width: 36, height: 36))
+            .composited(over: dark).cropped(to: bounds)
+        let renderer = FilmEffectsRenderer()
+        var settings = FilmEffectsSettings.off
+        settings.halationEnabled = true; settings.halationAmount = 1; settings.halationSpread = 0.7
+        let warm = pixels(try renderer.render(source, settings: settings, time: .zero))
+        settings.halationSaturation = 0
+        let neutral = pixels(try renderer.render(source, settings: settings, time: .zero))
+        let edge = (128 * 256 + 108) * 4
+        XCTAssertGreaterThan(warm[edge], warm[edge + 1])
+        XCTAssertGreaterThan(neutral[edge], 0.04)
+        XCTAssertEqual(neutral[edge], neutral[edge + 1], accuracy: 0.001)
+        XCTAssertEqual(neutral[edge], neutral[edge + 2], accuracy: 0.001)
+        for x in [10, 128] {
+            let i = (128 * 256 + x) * 4
+            for c in 0..<3 { XCTAssertEqual(warm[i + c], neutral[i + c], accuracy: 0.00001) }
+        }
+        settings.halationEnabled = false; settings.bloomEnabled = true
+        let a = pixels(try renderer.render(source, settings: settings, time: .zero))
+        settings.halationSaturation = 1
+        XCTAssertEqual(a, pixels(try renderer.render(source, settings: settings, time: .zero)))
+    }
+
     func testLegacyEffectsDoNotSilentlyEnableNewEffects() throws {
         let old = try JSONDecoder().decode(FilmEffectsSettings.self, from: Data("{}".utf8))
         XCTAssertEqual(old.sharpnessAmount, 0); XCTAssertEqual(old.vignetteAmount, 0)
