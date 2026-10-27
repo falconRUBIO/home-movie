@@ -2,6 +2,20 @@ import XCTest
 @testable import HomeMovie
 
 final class FilmEffectsTweaksTests: XCTestCase {
+    func testColorControlsFollowMovieAndPreserveRelativeClipEdits() throws {
+        var movie = FilmEffectsSettings.off
+        var edited = movie; edited.grainColor = 0.5; edited.halationSaturation = 0.75
+        let tweaks = FilmEffectsTweaks().updating(from: movie, to: edited, relativeTo: movie)
+        XCTAssertEqual(tweaks.offsets[.grainColor], -0.5)
+        XCTAssertEqual(tweaks.offsets[.halationSaturation], -0.25)
+        try tweaks.validate()
+        let restored = try JSONDecoder().decode(FilmEffectsTweaks.self, from: JSONEncoder().encode(tweaks))
+        movie.grainColor = 0.8; movie.halationSaturation = 0.5
+        let resolved = restored.applying(to: movie)
+        XCTAssertEqual(resolved.grainColor, 0.3, accuracy: 0.000001)
+        XCTAssertEqual(resolved.halationSaturation, 0.25, accuracy: 0.000001)
+        XCTAssertFalse(resolved.grainEnabled); XCTAssertFalse(resolved.halationEnabled)
+    }
     private var movieLook: FilmEffectsSettings {
         var settings = FilmEffectsSettings.off
         settings.grainEnabled = true; settings.grainAmount = 0.5

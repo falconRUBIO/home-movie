@@ -3,16 +3,18 @@ import Foundation
 /// Sparse, relative clip edits. Absent controls continue following the movie recipe.
 struct FilmEffectsTweaks: Codable, Equatable, Sendable {
     enum Control: String, Codable, CaseIterable, Sendable {
-        case grain, grainSize, halation, halationSpread, halationSensitivity
+        case grain, grainSize, grainColor, halation, halationSpread, halationSensitivity, halationSaturation
         case glow, glowSpread, glowSensitivity, softness, rolloff, sharpness, vignette
         var range: ClosedRange<Double> { self == .grainSize ? 0.5...2 : 0...1 }
         var keyPath: WritableKeyPath<FilmEffectsSettings, Double> {
             switch self {
             case .grain: \.grainAmount
             case .grainSize: \.grainSize
+            case .grainColor: \.grainColor
             case .halation: \.halationAmount
             case .halationSpread: \.halationSpread
             case .halationSensitivity: \.halationSensitivity
+            case .halationSaturation: \.halationSaturation
             case .glow: \.bloomAmount
             case .glowSpread: \.bloomSpread
             case .glowSensitivity: \.bloomSensitivity

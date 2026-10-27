@@ -96,3 +96,51 @@ amount scaling, finite bounded output, fine-detail protection without blurred bl
 stripes, plus existing alpha, animation, endpoints, and combined-effect regressions.
 Physical iPhone texture, export performance, and final encoded-video review remain
 necessary; these automated checks cannot establish aesthetic film-stock fidelity.
+
+## Local glow refinement (engine 10)
+
+Glow now adds the positive difference between diffused highlights and the native
+local highlight mask, independently per color channel. Previously it added the
+entire blurred mask, including each pixel's own highlight energy. That lifted
+uniform bright surfaces and compressed their detail even without nearby lights.
+The refinement preserves flat bright fields and the interior of broad lights,
+while retaining source-colored spill around lamps and windows. It is a localized
+display-referred finishing effect, not an energy-conserving optical simulation.
+
+The existing native-resolution extraction intermediate is reused: no new blur or
+particle passes, presets, motion, or exposure fluctuations are added.
+The shared preview/export path remains intact.
+Engine 10 invalidates cached exports so existing enabled Glow settings receive
+the refinement. Saved slider values retain their meaning, but broad highlights
+can look less washed out than in older renders.
+
+New production-kernel tests cover bright neutral, warm skin-colored and saturated
+flat fields at both spread extremes, bright-source interior detail and colored
+spill. Existing tiny-light sampling-phase, amount-response, grain, combined FX,
+and preview/export checks must also pass. Device appearance and long-export heat
+and memory behavior still require iPhone footage testing.
+
+## Resolve-informed controls
+
+Blackmagic's Resolve 19 Film Look Creator guide (page 67) distinguishes grain
+amount, size and saturation. The 19.1 guide (page 35) documents halation saturation
+separately from amount and radius. These are workflow references, not claims to
+match Resolve's proprietary rendering or a numerical industry standard:
+
+- https://documents.blackmagicdesign.com/jp/SupportNotes/DaVinci_Resolve_19_New_Features_Guide.pdf
+- https://documents.blackmagicdesign.com/SupportNotes/DaVinci_Resolve_19_1_New_Features_Guide.pdf
+
+Grain Color now scales only the restrained chroma component, leaving particle
+motion, size and luminance texture intact. Halation Color Intensity interpolates
+the scattered halo between neutral and the existing warm response at constant
+linear energy luminance. It does not desaturate the underlying scene or Glow.
+Both controls live in existing disclosure drawers and default to 1, preserving
+the engine-9 behavior when older settings decode. Relative per-clip tweaks and
+movie settings support both values; validation, persistence and cache identities
+include them. Double-tap and accessibility resets for spread/sensitivity now
+agree with the effect reset defaults. Engine 10 covers this entire refinement.
+
+New tests check legacy decoding, validation, persistence, cache identity, relative
+clip edits, neutral grain with unchanged luminance noise, graduated grain color,
+neutral/warm halation and independence from Glow. There is no added film damage,
+gate weave, flicker, stock preset, or Resolve algorithm copied into the app.

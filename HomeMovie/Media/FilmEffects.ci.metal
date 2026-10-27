@@ -398,7 +398,7 @@ float4 logFalseColor(sample_t input, float4 purple, float4 blue, float4 green,
         float spectral = mix(1.0, clamp(input.r / max(l, 0.001), 0.15, 1.0), warm);
         return float4(input.rgb * gate * spectral, 1.0);
     }
-    float4 filmOptics(sample_t base, sample_t bloom, sample_t red, sample_t orange, sample_t halationSource, float bloomAmount, float halationAmount) {
+    float4 filmOptics(sample_t base, sample_t bloom, sample_t bloomSource, sample_t red, sample_t orange, sample_t halationSource, float bloomAmount, float halationAmount, float halationSaturation) {
         float l = luminance(base.rgb);
         float sourceProtection = 1.0 - smoothstep(0.65, 0.995, l);
         float localContrast = smoothstep(0.001, 0.035, max(luminance(red.rgb) - l * 0.18, 0.0));
@@ -409,7 +409,15 @@ float4 logFalseColor(sample_t input, float4 purple, float4 blue, float4 green,
         float redScatter = max(luminance(red.rgb) - localSource, 0.0);
         float orangeScatter = max(luminance(orange.rgb) - localSource, 0.0);
         float3 halo = float3(redScatter, orangeScatter * 0.32, orangeScatter * 0.025);
-        float3 energy = max(bloom.rgb, 0.0) * bloomAmount * 2.8 + halo * halationAmount * 4.0 * sourceProtection * localContrast;
+        // Adjust only the scattered light's color, keeping its linear luminance
+        // and geometry. Never desaturate the underlying scene or alter Glow.
+        halo = mix(float3(luminance(halo)), halo, halationSaturation);
+        // Add arriving highlight spill, not the source's own highlight mask.
+        // Uniform bright walls and the interior of large lights retain their
+        // detail/exposure; isolated lights still diffuse into their surroundings.
+        // Subtract per channel to retain the source-colored nature of glow.
+        float3 glow = max(bloom.rgb - bloomSource.rgb, 0.0);
+        float3 energy = glow * bloomAmount * 2.8 + halo * halationAmount * 4.0 * sourceProtection * localContrast;
         // Channel-relative headroom protection, no whole-frame tone or saturation changes.
         float3 result = base.rgb + max(1.0 - base.rgb, 0.0) * (1.0 - exp(-energy));
         return float4(encode709(result), base.a);
@@ -453,7 +461,7 @@ float4 logFalseColor(sample_t input, float4 purple, float4 blue, float4 green,
     }
     // 16mm-inspired texture, not a calibrated emulsion simulation. Overlapping
     // particle fields break the sparse grid without large low-frequency blobs.
-    float4 filmGrain16(sample_t input, sample_t local, float amount, float size, float seedLow, float seedHigh, float4 bounds, destination dest) {
+    float4 filmGrain16(sample_t input, sample_t local, float amount, float size, float colorAmount, float seedLow, float seedHigh, float4 bounds, destination dest) {
         float2 p = dest.coord();
         if (p.x < bounds.x || p.y < bounds.y || p.x >= bounds.x + bounds.z || p.y >= bounds.y + bounds.w || input.a <= 0.000001) return input;
         uint seed = uint(seedLow) | (uint(seedHigh) << 16);
@@ -466,9 +474,9 @@ float4 logFalseColor(sample_t input, float4 purple, float4 blue, float4 green,
         float l = luminance(rgb);
         float response = 1.0 - 0.35 * smoothstep(0.45, 0.95, l);
         return grainResponse(input, local, noise, float2(fine - body, body - clump),
-                             amount, response, 0.55, 0.14);
+                             amount, response, 0.55, 0.14 * colorAmount);
     }
-    float4 filmGrain(sample_t input, sample_t local, float amount, float size, float seedLow, float seedHigh, float4 bounds, destination dest) {
+    float4 filmGrain(sample_t input, sample_t local, float amount, float size, float colorAmount, float seedLow, float seedHigh, float4 bounds, destination dest) {
         float2 p = dest.coord();
         if (p.x < bounds.x || p.y < bounds.y || p.x >= bounds.x + bounds.z || p.y >= bounds.y + bounds.w || input.a <= 0.000001) return input;
         uint seed = uint(seedLow) | (uint(seedHigh) << 16);
@@ -480,6 +488,6 @@ float4 logFalseColor(sample_t input, float4 purple, float4 blue, float4 green,
         float response = 0.25 + 0.75 * pow(max(4.0 * l * (1.0 - l), 0.0), 0.65);
         float noise = fine * 0.65 + cluster * 0.25 + coarse * 0.10;
         return grainResponse(input, local, noise, float2(fine - cluster, cluster - coarse),
-                             amount, response, 0.76, 0.09);
+                             amount, response, 0.76, 0.09 * colorAmount);
     }
 }}
