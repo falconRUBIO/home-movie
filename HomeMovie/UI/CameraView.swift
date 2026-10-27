@@ -95,6 +95,7 @@ struct CameraView: View {
     @State private var showingPiPLayout = false
     @State private var preparedPiPForSettings = false
     @State private var viewfinderSize = CGSize.zero
+    @State private var foregroundResume = CameraForegroundResume()
     @State private var interfaceFormat = MovieFormat.portrait
     @State private var interfaceOrientation = UIInterfaceOrientation.portrait
     private var landscapeControlsOnLeading: Bool { interfaceOrientation == .landscapeLeft }
@@ -226,6 +227,7 @@ struct CameraView: View {
                 if preparedDollyStart == nil { preparedDollyStart = camera.options?.zoom }
                 camera.beginSmoothZoom()
             }
+            resumeCameraIfRequested()
         }
         .onChange(of: camera.options?.isFront) { _, _ in
             cancelCountdown(); preparedDollyStart = nil; preparedDollyTarget = nil
@@ -251,10 +253,13 @@ struct CameraView: View {
         .onChange(of: camera.pipSetupFailed) { _, failed in if failed { enablePiPAfterPreparation = false } }
         .onChange(of: movie?.recordingFormat) { _, _ in syncPiPCanvas() }
         .onChange(of: camera.options?.dualCameraPrepared) { _, _ in syncPiPCanvas() }
-        .onDisappear { finishDollyEndpointInteraction(); app.cancelCameraWarmup(); cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
+        .onDisappear { foregroundResume.cancel(); finishDollyEndpointInteraction(); app.cancelCameraWarmup(); cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { finishDollyEndpointInteraction(); cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
-            else if !watching && !showingRecovery && !camera.busy { Task { await prepareCamera() } }
+            if phase != .active { foregroundResume.cancel(); finishDollyEndpointInteraction(); cancelCountdown(); activeDolly = nil; zoomDragging = false; camera.suspend() }
+            else if !watching && !showingRecovery {
+                foregroundResume.request()
+                resumeCameraIfRequested()
+            }
         }
     }
     var body: some View {
@@ -1179,6 +1184,18 @@ struct CameraView: View {
         await camera.prepare(profile: movie?.captureProfile ?? .standard, movieID: movieID,
             dualCamera: usePiP, layout: movie?.preferredPiPLayout ?? PiPLayout(),
             canvasFormat: pipCanvasFormat, enablePiP: usePiP)
+    }
+    private func resumeCameraIfRequested() {
+        guard foregroundResume.consumeIfReady(state: camera.state, busy: camera.busy,
+            foreground: scenePhase == .active, cameraVisible: !watching && !showingRecovery,
+            recoverableTake: camera.hasRecoverableTake) else { return }
+        let lifecycle = camera.lifecycleID
+        Task { @MainActor in
+            guard scenePhase == .active, !watching, !showingRecovery,
+                  camera.lifecycleID == lifecycle, !camera.busy,
+                  camera.state != .failed, !camera.hasRecoverableTake else { return }
+            await prepareCamera()
+        }
     }
     private func syncPiPCanvas() {
         guard !camera.busy, camera.options?.dualCameraPrepared == true else { return }

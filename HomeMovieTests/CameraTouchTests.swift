@@ -4,6 +4,40 @@ import AVFoundation
 @testable import HomeMovie
 
 final class CameraTouchTests: XCTestCase {
+    func testForegroundResumeWaitsForSavingThenRunsOnlyOnce() {
+        var resume = CameraForegroundResume()
+        resume.request()
+        for _ in 0..<3 {
+            XCTAssertFalse(resume.consumeIfReady(state: .finalizing, busy: true, foreground: true,
+                cameraVisible: true, recoverableTake: false))
+            XCTAssertTrue(resume.pending)
+        }
+        XCTAssertTrue(resume.consumeIfReady(state: .interrupted, busy: false, foreground: true,
+            cameraVisible: true, recoverableTake: false))
+        XCTAssertFalse(resume.consumeIfReady(state: .ready, busy: false, foreground: true,
+            cameraVisible: true, recoverableTake: false))
+    }
+    func testForegroundResumeCancelsOnDepartureFailureAndRecoverableClip() {
+        for scenario in 0..<4 {
+            var resume = CameraForegroundResume(); resume.request()
+            XCTAssertFalse(resume.consumeIfReady(state: scenario == 2 ? .failed : .interrupted,
+                busy: false, foreground: scenario != 0, cameraVisible: scenario != 1,
+                recoverableTake: scenario == 3))
+            XCTAssertFalse(resume.pending)
+            XCTAssertFalse(resume.consumeIfReady(state: .ready, busy: false, foreground: true,
+                cameraVisible: true, recoverableTake: false))
+        }
+        var resume = CameraForegroundResume(); resume.request(); resume.cancel()
+        XCTAssertFalse(resume.consumeIfReady(state: .interrupted, busy: false, foreground: true,
+            cameraVisible: true, recoverableTake: false))
+    }
+    func testForegroundResumeCanRecheckPermissionsAndCancelledPreparation() {
+        for state in [CameraState.denied, .preparing, .ready] {
+            var resume = CameraForegroundResume(); resume.request()
+            XCTAssertTrue(resume.consumeIfReady(state: state, busy: false, foreground: true,
+                cameraVisible: true, recoverableTake: false))
+        }
+    }
     func testCameraHandoffWaitsForFreshOrderedFramesAndResetsAfterStall() {
         func time(_ value: Double) -> CMTime { CMTime(seconds: value, preferredTimescale: 600) }
         var gate = CameraPreviewHandoff(after: time(10))
