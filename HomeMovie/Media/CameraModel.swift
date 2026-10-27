@@ -9,6 +9,25 @@ enum CameraState: Equatable {
     var showsLiveLook: Bool { [.ready, .starting, .recording, .finalizing].contains(self) }
 }
 
+// One foreground request can wait for a saving clip. A later departure or a
+// real failure cancels it; state updates alone never create a resume request.
+struct CameraForegroundResume {
+    private(set) var pending = false
+    mutating func request() { pending = true }
+    mutating func cancel() { pending = false }
+    mutating func consumeIfReady(state: CameraState, busy: Bool, foreground: Bool,
+                                cameraVisible: Bool, recoverableTake: Bool) -> Bool {
+        guard pending else { return false }
+        guard foreground, cameraVisible, state != .failed, !recoverableTake else {
+            pending = false
+            return false
+        }
+        guard !busy else { return false }
+        pending = false
+        return true
+    }
+}
+
 enum DollyStartDelay {
     static let choices = [0, 3, 5, 7]
     static func validated(_ seconds: Int) -> Int { choices.contains(seconds) ? seconds : 3 }
