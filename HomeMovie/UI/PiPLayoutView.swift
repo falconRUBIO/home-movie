@@ -6,6 +6,8 @@ import UIKit
 struct PiPControl: View {
     let enabled: Bool
     let composition: PiPComposition
+    @Binding var size: PiPSize
+    @Binding var orientation: PiPOrientation
     let canEnable: Bool
     let disabled: Bool
     let recording: Bool
@@ -20,6 +22,17 @@ struct PiPControl: View {
                     Label(mode.title, systemImage: mode.symbol).tag(mode)
                 }
             }.pickerStyle(.inline).disabled(!canEnable)
+            if enabled, composition == .inset {
+                Divider()
+                Picker("Size", selection: $size) {
+                    ForEach(PiPSize.allCases) { size in Text(size.title).tag(size) }
+                }.pickerStyle(.menu)
+                Picker("Orientation", selection: $orientation) {
+                    ForEach(PiPOrientation.allCases) { orientation in
+                        Text(orientation.title).tag(orientation)
+                    }
+                }.pickerStyle(.menu)
+            }
             if enabled, composition != .inset {
                 Button("Swap Cameras", systemImage: composition == .topAndBottom
                     ? "arrow.up.arrow.down" : "arrow.left.arrow.right", action: onSwap)
@@ -36,7 +49,7 @@ struct PiPControl: View {
         .disabled(disabled)
         .accessibilityLabel("Picture in Picture")
         .accessibilityValue(selection.title)
-        .accessibilityHint("Show layout choices. Choose Off to use one camera.")
+        .accessibilityHint("Show layout choices and inset size and orientation. Choose Off to use one camera.")
     }
 }
 

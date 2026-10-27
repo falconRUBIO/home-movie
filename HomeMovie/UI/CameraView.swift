@@ -456,11 +456,27 @@ struct CameraView: View {
                 .disabled(countdown != nil || !smoothZoomOpen && camera.state != .ready && camera.state != .recording)
         }
         PiPControl(enabled: options.isPiPEnabled, composition: camera.pipLayout.composition,
+            size: Binding(get: { camera.pipLayout.size }, set: { size in
+                updatePiPInset { $0.size = size }
+            }),
+            orientation: Binding(get: { camera.pipLayout.orientation }, set: { orientation in
+                updatePiPInset { $0.orientation = orientation }
+            }),
             canEnable: options.piPAvailable || options.canPreparePiP,
             disabled: countdown != nil || pipConfiguring || camera.pendingPiPEnabled != nil || camera.state != .ready && camera.state != .recording || camera.state == .recording && !options.piPAvailable,
             recording: camera.state == .recording,
             onSelect: { selectPiPMode($0) }, onSwap: { swapPiPCameras() },
             onSettings: { showingPiPLayout = true })
+    }
+    private func updatePiPInset(_ edit: (inout PiPLayout) -> Void) {
+        guard countdown == nil, !pipConfiguring, camera.pendingPiPEnabled == nil,
+              !camera.switchingCamera, camera.state == .ready || camera.state == .recording,
+              camera.options?.isPiPEnabled == true, camera.pipLayout.composition == .inset else { return }
+        var layout = camera.pipLayout
+        edit(&layout)
+        guard layout != camera.pipLayout else { return }
+        camera.updatePiPLayout(layout, movieID: movieID, canvasFormat: pipCanvasFormat)
+        UISelectionFeedbackGenerator().selectionChanged()
     }
     private func selectPiPMode(_ mode: PiPQuickMode) {
         guard countdown == nil, !pipConfiguring, camera.pendingPiPEnabled == nil,
