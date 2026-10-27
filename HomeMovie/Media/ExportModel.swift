@@ -29,7 +29,7 @@ import UIKit
         backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.running else { return }
-                self.notice = "Export paused by leaving the app. Keep MOVIE MODE open and export again."
+                self.notice = "Export canceled because the app moved to the background. Keep MOVIE MODE open and restart the export."
                 self.cancel()
             }
         }
@@ -37,7 +37,7 @@ import UIKit
             Task { @MainActor in
                 guard let self, self.running, ProcessInfo.processInfo.thermalState == .critical else { return }
                 ReliabilityDiagnostics.shared.record(.resourcePressure)
-                self.notice = "Export paused because your iPhone is too warm. Let it cool, then export again."
+                self.notice = "Export canceled because your iPhone is too warm. Let it cool, then restart the export."
                 self.cancel()
             }
         }

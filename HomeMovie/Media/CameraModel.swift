@@ -125,10 +125,13 @@ struct RecordingFlipHandoff {
             otherCameraSupported: options.canFlip, continuousFlipSupported: options.canFlipWhileRecording)
     }
 
-    init(app: AppModel, service: CaptureService = CaptureService(), applyPiPEnabled: ((Bool) -> Void)? = nil) {
+    private let requestPermissions: () async -> Bool
+    init(app: AppModel, service: CaptureService = CaptureService(), applyPiPEnabled: ((Bool) -> Void)? = nil,
+         requestPermissions: @escaping () async -> Bool = { await CaptureService.permissions() }) {
         self.service = service
         self.applyPiPEnabled = applyPiPEnabled ?? service.setPiPEnabled
         self.app = app
+        self.requestPermissions = requestPermissions
         service.onEvent = { [weak self] event in Task { @MainActor in await self?.receive(event) } }
     }
     private struct PreparationConfiguration: Equatable {
@@ -164,7 +167,7 @@ struct RecordingFlipHandoff {
         if preferencesMovieID != movieID || !dualCamera { pipPresentation = PiPPresentation() }
         preferencesMovieID = movieID; pipLayout = layout; pipSetupFailed = false; enablePiPWhenReady = enablePiP
         active = true; state = .preparing; message = nil; interruption = nil; hasRecoverableTake = false
-        let granted = await CaptureService.permissions()
+        let granted = await requestPermissions()
         guard active, preparationID == requestID else { return }
         guard granted else { state = .denied; cancelPiPChange(); return }
         if profile == .appleLog {
@@ -418,10 +421,9 @@ struct RecordingFlipHandoff {
                 catch { message = "The inset moved for this clip, but its default position could not be saved." }
             }
         case .pipSetupFailed(let text):
+            guard active else { return }
             pipSetupFailed = true; cancelPiPChange(); message = text
-            if let app, let movieID = preferencesMovieID {
-                try? await app.store.setDualCameraCapture(movieID: movieID, enabled: false); await app.refresh()
-            }
+            // A temporary hardware failure must not change the saved movie choice.
         }
     }
     private func beginBackgroundTime() {
