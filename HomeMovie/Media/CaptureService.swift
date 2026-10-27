@@ -304,10 +304,10 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                 guard let self, self.captureActive else { return }
                 if value == AVAudioSession.InterruptionType.ended.rawValue {
                     guard self.audioInterrupted else { return }
-                    self.audioInterrupted = false
                     // Restore the preview only. Interrupted takes are finalized,
                     // and recording always requires another press of Record.
                     guard (try? AVAudioSession.sharedInstance().setActive(true)) != nil else { return }
+                    self.audioInterrupted = false
                     self.recoverInterruptedSessionIfReady()
                     return
                 }
