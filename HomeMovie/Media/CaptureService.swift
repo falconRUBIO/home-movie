@@ -169,6 +169,7 @@ enum CaptureEvent {
     case started(UUID)
     case finished(CaptureTicket, Error?)
     case interrupted(String)
+    case interruptionEnded(CameraOptions)
     case failed(String)
     case notice(String)
     case pipPresentation(PiPPresentation)
@@ -220,6 +221,9 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var recordingURL: URL?
     private var stopRequested = false
     private var observers: [NSObjectProtocol] = []
+    private var captureActive = false // Capture queue only.
+    private var interruptedSession: AVCaptureSession?
+    private var audioInterrupted = false
     private var pressureObservation: NSKeyValueObservation?
     private var pressureStopReported = false
     private var rotationObservation: NSKeyValueObservation?
@@ -258,19 +262,35 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             }
         })
         observers.append(center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: nil, queue: nil) { [weak self] notification in
-            guard let self, notification.object as? AVCaptureSession === self.session else { return }
+            guard let self, let session = notification.object as? AVCaptureSession else { return }
             self.queue.async {
+                guard self.captureActive, session === self.session else { return }
+                // A transient startup interruption may have ended before this queue
+                // can process it. Still finish an active take if it lost capture.
+                guard session.isInterrupted || self.ticket != nil else { return }
+                self.interruptedSession = session
                 self.stopSmoothZoomOnQueue()
                 self.requestStop()
                 self.turnOffTorch()
-                self.onEvent?(.interrupted("Camera interrupted. Your saved scenes are safe. Tap Resume Camera when ready."))
+                self.onEvent?(.interrupted("Camera temporarily unavailable. Your saved scenes are safe. Tap Try Again if it does not resume."))
+                self.recoverInterruptedSessionIfReady()
             }
         })
+        for name in [AVCaptureSession.interruptionEndedNotification, AVCaptureSession.didStartRunningNotification] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: nil) { [weak self] notification in
+                guard let self, let session = notification.object as? AVCaptureSession else { return }
+                self.queue.async {
+                    guard session === self.session else { return }
+                    self.recoverInterruptedSessionIfReady()
+                }
+            })
+        }
         observers.append(center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: nil, queue: nil) { [weak self] notification in
-            guard let self, notification.object as? AVCaptureSession === self.session else { return }
-            ReliabilityDiagnostics.shared.record(.cameraFailed, error: notification.userInfo?[AVCaptureSessionErrorKey] as? Error)
+            guard let self, let session = notification.object as? AVCaptureSession else { return }
             let text = (notification.userInfo?[AVCaptureSessionErrorKey] as? Error)?.localizedDescription ?? "Camera unavailable. Try resuming the camera."
             self.queue.async {
+                guard self.captureActive, session === self.session else { return }
+                self.interruptedSession = nil
                 self.stopSmoothZoomOnQueue(); self.requestStop(); self.turnOffTorch(); self.configured = false
                 self.knownDevices.removeAll(); self.knownVideoInputs.removeAll(); self.validatedLogFormats.removeAll()
                 self.previewHandoff = nil; self.previewHandoffFormat = nil; self.previewHandoffAnnounced = true
@@ -279,10 +299,20 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             }
         })
         observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: nil) { [weak self] notification in
-            guard let value = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                  value == AVAudioSession.InterruptionType.began.rawValue else { return }
+            guard let value = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt else { return }
             self?.queue.async {
-                guard let self else { return }
+                guard let self, self.captureActive else { return }
+                if value == AVAudioSession.InterruptionType.ended.rawValue {
+                    guard self.audioInterrupted else { return }
+                    self.audioInterrupted = false
+                    // Restore the preview only. Interrupted takes are finalized,
+                    // and recording always requires another press of Record.
+                    guard (try? AVAudioSession.sharedInstance().setActive(true)) != nil else { return }
+                    self.recoverInterruptedSessionIfReady()
+                    return
+                }
+                guard value == AVAudioSession.InterruptionType.began.rawValue else { return }
+                self.audioInterrupted = true; self.interruptedSession = self.session
                 self.stopSmoothZoomOnQueue()
                 self.requestStop()
                 self.turnOffTorch()
@@ -291,6 +321,15 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         })
     }
     deinit { smoothTimer?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
+
+    private func recoverInterruptedSessionIfReady() {
+        guard captureActive, !audioInterrupted, configured,
+              interruptedSession === session, session.isRunning, !session.isInterrupted,
+              configuredProfile != .appleLog || !dualCameraRequested || seamless?.readyToFlip == true,
+              (try? ensureLogCaptureReady()) != nil, let options = try? options() else { return }
+        interruptedSession = nil
+        onEvent?(.interruptionEnded(options))
+    }
 
     static func permissions() async -> Bool {
         let camera = AVCaptureDevice.authorizationStatus(for: .video) == .authorized ? true : await AVCaptureDevice.requestAccess(for: .video)
@@ -339,6 +378,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     func prepare(front: Bool, profile: CaptureProfile = .standard, dualCamera: Bool = false,
                  pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) {
         queue.async {
+            self.captureActive = true
             guard !dualCamera || CameraCompatibility.allowsPiP(profile: profile, deviceSupported: self.piPCapable(for: profile)) else {
                 self.onEvent?(.pipSetupFailed(profile == .appleLog ? CameraCompatibility.logPiPExplanation : "This iPhone cannot use Dual Camera."))
                 return
@@ -364,7 +404,9 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                 guard !self.session.isInterrupted else { throw HomeMovieError.message("The camera is still interrupted. Try Resume Camera again when it is available.") }
                 try self.ensureLogCaptureReady()
                 if profile == .appleLog, dualCamera, self.seamless?.readyToFlip != true { return }
+                self.audioInterrupted = false
                 self.onEvent?(.ready(try self.options()))
+                self.recoverInterruptedSessionIfReady()
             } catch {
                 self.configured = false
                 if dualCamera {
@@ -403,6 +445,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         return input
     }
     private func configure(front: Bool, preparedForPiP: Bool = false, pipLayout: PiPLayout = PiPLayout(), canvasFormat: MovieFormat? = nil) throws {
+        interruptedSession = nil
         stopSmoothZoomOnQueue()
         previewHandoff = nil; previewHandoffFormat = nil; previewHandoffAnnounced = true
         liveFrames.clear()
@@ -434,6 +477,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             dual.onReady = { [weak self] in
                 guard let self, let options = try? self.options() else { return }
                 self.onEvent?(.ready(options))
+                self.recoverInterruptedSessionIfReady()
             }
             dual.onSelectionChanged = { [weak self, weak dual] in
                 guard let self, let dual else { return }
@@ -1137,6 +1181,7 @@ final class CaptureService: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     func stop() { queue.async { self.requestStop() } }
     func suspend(completion: (@Sendable () -> Void)? = nil) {
         queue.async {
+            self.captureActive = false; self.interruptedSession = nil; self.audioInterrupted = false
             self.stopSmoothZoomOnQueue()
             self.requestStop()
             self.previewHandoff = nil; self.previewHandoffFormat = nil; self.previewHandoffAnnounced = true
