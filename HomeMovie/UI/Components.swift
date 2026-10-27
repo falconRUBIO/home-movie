@@ -98,6 +98,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     var meteringConversion: ((CGPoint, CGSize) -> CGPoint?)?
     var insetDragHitTest: ((CGPoint) -> Bool)?
+    private weak var exposurePan: UIPanGestureRecognizer?
     func isExposureHandle(at point: CGPoint) -> Bool {
         sun.alpha > 0.1 && sun.frame.insetBy(dx: -12, dy: -12).contains(point)
     }
@@ -219,6 +220,7 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         tap.cancelsTouchesInView = false
         addGestureRecognizer(tap)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(exposureDragged(_:)))
+        exposurePan = pan
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
         addGestureRecognizer(pan)
@@ -315,7 +317,9 @@ final class PreviewUIView: UIView, UIGestureRecognizerDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
     }
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+        // UIView also receives this check for the coordinator's inset pan.
+        // Only our exposure recognizer requires a visible focus square and vertical motion.
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer, pan === exposurePan else { return true }
         let location = pan.location(in: self)
         guard permitsPreviewInteraction(at: location) else { return false }
         let velocity = pan.velocity(in: self)

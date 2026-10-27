@@ -5,6 +5,34 @@ import MetalKit
 @testable import HomeMovie
 
 final class PiPMeteringTests: XCTestCase {
+    @MainActor func testAttachedInsetPanPassesBothUIKitBeginChecksWithoutFocus() throws {
+        let canvas = CGSize(width: 390, height: 844)
+        let view = PreviewUIView(frame: CGRect(origin: .zero, size: canvas))
+        let surface = PiPMeteringView(frames: LiveFrames(),
+            presentation: PiPPresentation(rect: CGRect(x: 0.6, y: 0.6, width: 0.3, height: 0.2), opacity: 1, enabled: true),
+            useLivePresentation: false, front: nil, rear: nil, protectedRegions: [],
+            onFocus: { _, _, _ in true }, onExposure: { _, _ in }, onMove: { _, _ in })
+        let coordinator = surface.makeCoordinator()
+        coordinator.attach(to: view)
+        let pans = (view.gestureRecognizers ?? []).compactMap { $0 as? UIPanGestureRecognizer }
+        let move = try XCTUnwrap(pans.first { $0.delegate === coordinator })
+        let exposure = try XCTUnwrap(pans.first { $0.delegate === view })
+        XCTAssertTrue(coordinator.canBeginMove(at: CGPoint(x: 290, y: 590), canvas: canvas))
+        XCTAssertTrue(coordinator.gestureRecognizerShouldBegin(move))
+        // UIKit asks the owning UIView as well as the recognizer's delegate.
+        // Previously this second gate rejected every drag without a focus square.
+        XCTAssertTrue(view.gestureRecognizerShouldBegin(move))
+        XCTAssertFalse(view.gestureRecognizerShouldBegin(exposure))
+        var splitState = surface.presentation; splitState.composition = .sideBySide
+        let split = PiPMeteringView(frames: surface.frames,
+            presentation: splitState,
+            useLivePresentation: false, front: nil, rear: nil, protectedRegions: [],
+            onFocus: { _, _, _ in true }, onExposure: { _, _ in }, onMove: { _, _ in })
+        coordinator.updateParent(split)
+        XCTAssertFalse(coordinator.gestureRecognizerShouldBegin(move))
+        view.detachPreview()
+    }
+
     @MainActor func testInsetDragStartsWithoutHoldingAndKeepsItsOriginalAnchor() throws {
         let canvas = CGSize(width: 390, height: 844)
         let view = PreviewUIView(frame: CGRect(origin: .zero, size: canvas))

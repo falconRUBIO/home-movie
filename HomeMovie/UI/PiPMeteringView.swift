@@ -45,11 +45,7 @@ struct PiPMeteringView: UIViewRepresentable {
         let view = PreviewUIView(frame: .zero)
         view.isOpaque = false; view.backgroundColor = .clear
         view.layer.backgroundColor = UIColor.clear.cgColor
-        context.coordinator.view = view
-        let move = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.move(_:)))
-        move.maximumNumberOfTouches = 1; move.delegate = context.coordinator
-        for gesture in view.gestureRecognizers ?? [] where gesture is UITapGestureRecognizer { gesture.require(toFail: move) }
-        view.addGestureRecognizer(move)
+        context.coordinator.attach(to: view)
         return view
     }
     func updateUIView(_ view: PreviewUIView, context: Context) {
@@ -78,6 +74,13 @@ struct PiPMeteringView: UIViewRepresentable {
         private var initialCenter: CGPoint?
         private let moveFeedback = UISelectionFeedbackGenerator()
         init(_ parent: PiPMeteringView) { self.parent = parent }
+        func attach(to view: PreviewUIView) {
+            self.view = view
+            let move = UIPanGestureRecognizer(target: self, action: #selector(move(_:)))
+            move.maximumNumberOfTouches = 1; move.delegate = self
+            for gesture in view.gestureRecognizers ?? [] where gesture is UITapGestureRecognizer { gesture.require(toFail: move) }
+            view.addGestureRecognizer(move)
+        }
         func updateParent(_ next: PiPMeteringView) {
             let old = parent.presentation, new = next.presentation
             if old.enabled != new.enabled || old.composition != new.composition || old.splitSwapped != new.splitSwapped {
